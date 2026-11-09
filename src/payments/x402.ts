@@ -299,13 +299,42 @@ export async function authorizePayment(opts: {
   audit?: Record<string, unknown>;
   /** Unix seconds; injectable for deterministic expiry tests. */
   nowSeconds?: number;
+  /** Permission gate. Runs before preflight and before any facilitator call. */
+  permissionCheck?: (params: { recipient: string; amountMicroCcd: string; network: string; nowSeconds: number }) =>
+    | { ok: true; reservationId?: string }
+    | { ok: false; reason: string };
+  /** Reservation id returned by permissionCheck, when present. */
+  reservationId?: string;
+  /** Called when settlement succeeds (capacity becomes recorded spending). */
+  onSettleSuccess?: (reservationId: string) => void;
+  /** Called when settlement fails definitively (capacity released). */
+  onSettleFail?: (reservationId: string) => void;
+  /** Called when settlement outcome is ambiguous (capacity retained). */
+  onAmbiguous?: (reservationId: string) => void;
 }): Promise<AccessDecision> {
   const { facilitator, paymentPayload, requirements } = opts;
+
+  // Permission gate runs before preflight and before any facilitator call.
+  const now = opts.nowSeconds ?? Math.floor(Date.now() / 1000);
+  let reservationId = opts.reservationId;
+  if (opts.permissionCheck) {
+    const pc = opts.permissionCheck({
+      recipient: requirements.payTo,
+      amountMicroCcd: requirements.amount,
+      network: requirements.network,
+      nowSeconds: now,
+    });
+    if (!pc.ok) {
+      return { granted: false, receipt: null, reason: `permission: ${pc.reason}` };
+    }
+    if (pc.reservationId) reservationId = pc.reservationId;
+  }
 
   const pre = opts.nowSeconds === undefined
     ? preflightPaymentPayload(paymentPayload, requirements)
     : preflightPaymentPayload(paymentPayload, requirements, opts.nowSeconds);
   if (!pre.ok) {
+    if (reservationId && opts.onSettleFail) opts.onSettleFail(reservationId);
     return { granted: false, receipt: null, reason: `preflight: ${pre.reason}` };
   }
   const payload = paymentPayload as PaymentPayload;
@@ -314,9 +343,11 @@ export async function authorizePayment(opts: {
   try {
     verify = await facilitator.verify(payload, requirements);
   } catch (e) {
+    if (reservationId && opts.onSettleFail) opts.onSettleFail(reservationId);
     return { granted: false, receipt: null, reason: `verify threw: ${(e as Error).message}` };
   }
   if (!verify?.isValid) {
+    if (reservationId && opts.onSettleFail) opts.onSettleFail(reservationId);
     return {
       granted: false,
       receipt: null,
@@ -326,7 +357,8 @@ export async function authorizePayment(opts: {
   }
 
   if (!opts.settle) {
-    // Verified but not settled: no access is granted, because the transfer has not happened.
+    // Verified but not settled: release the reservation (nothing spent yet).
+    if (reservationId && opts.onSettleFail) opts.onSettleFail(reservationId);
     return {
       granted: false,
       receipt: null,
@@ -339,10 +371,19 @@ export async function authorizePayment(opts: {
   try {
     settle = await facilitator.settle(payload, requirements);
   } catch (e) {
+    // Ambiguous: a thrown settle may have submitted. Retain capacity.
+    if (reservationId && opts.onAmbiguous) opts.onAmbiguous(reservationId);
     return { granted: false, receipt: null, reason: `settle threw: ${(e as Error).message}`, verify };
   }
 
   if (!settle?.success) {
+    // Determine ambiguity: timeout/unknown error reason → retain; else release.
+    const reason = String(settle?.errorReason ?? '');
+    const ambiguous = /timeout|ambiguous|unknown/i.test(reason);
+    if (reservationId) {
+      if (ambiguous && opts.onAmbiguous) opts.onAmbiguous(reservationId);
+      else if (opts.onSettleFail) opts.onSettleFail(reservationId);
+    }
     return {
       granted: false,
       receipt: null,
@@ -352,7 +393,8 @@ export async function authorizePayment(opts: {
     };
   }
   if (!settle.transaction) {
-    // A "successful" settlement with no transaction cannot be audited; refuse access.
+    // Ambiguous: reported success but no hash to audit. Retain.
+    if (reservationId && opts.onAmbiguous) opts.onAmbiguous(reservationId);
     return {
       granted: false,
       receipt: null,
@@ -362,6 +404,8 @@ export async function authorizePayment(opts: {
     };
   }
 
+  // Success: capacity becomes recorded spending.
+  if (reservationId && opts.onSettleSuccess) opts.onSettleSuccess(reservationId);
   return {
     granted: true,
     receipt: buildReceipt(settle, requirements, opts.audit),
