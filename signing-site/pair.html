@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgentTrust — Connect Wallet &amp; Pair Agent</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:#0a0b0d; color:#e6e8eb; }
+  .wrap { max-width:760px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:20px; margin:0 0 4px; letter-spacing:-.01em; }
+  .sub { color:#8b929c; font-size:13px; margin-bottom:24px; }
+  .card { background:#12141a; border:1px solid #1e2229; border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; justify-content:space-between; gap:14px; padding:6px 0; border-bottom:1px dashed #1e2229; font-size:13px; }
+  .row:last-child { border-bottom:0; }
+  .k { color:#8b929c; flex:0 0 auto; }
+  .v { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; text-align:right; word-break:break-all; color:#cfd4dc; }
+  button { font:inherit; font-weight:600; border:0; border-radius:8px; padding:10px 16px; cursor:pointer; background:#3b82f6; color:#fff; margin-right:6px; margin-top:4px; }
+  button:disabled { background:#2a2f38; color:#6b7280; cursor:not-allowed; }
+  button.danger { background:#7f1d1d; }
+  button.ghost { background:#1e2229; }
+  .ok { border-color:#1d4a2e; color:#7ee2a8; }
+  .err { border-color:#54232a; color:#ff9aa8; }
+  .warn { color:#fbbf24; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .pill.connected { background:#1e3a8a; color:#93c5fd; }
+  .pill.verified { background:#14532d; color:#86efac; }
+  .pill.paired { background:#581c87; color:#d8b4fe; }
+  .pill.failed { background:#7f1d1d; color:#fca5a5; }
+  .pill.disconnected { background:#1e2229; color:#8b929c; }
+  #log { white-space:pre-wrap; font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#8b929c; margin-top:10px; }
+  input { background:#0f1115; border:1px solid #1e2229; color:#e6e8eb; border-radius:6px; padding:6px 8px; font:inherit; width:100%; box-sizing:border-box; margin-top:4px; }
+  label { font-size:12px; color:#8b929c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Connect Wallet &amp; Pair Agent</h1>
+  <div class="sub">AgentTrust · Concordium · non-custodial · no transaction is ever signed or broadcast</div>
+
+  <div class="card">
+    <div class="row"><span class="k">Wallet</span><span class="v" id="v-wallet">checking…</span></div>
+    <div class="row"><span class="k">Connected account</span><span class="v" id="v-acct">—</span></div>
+    <div class="row"><span class="k">Selected chain</span><span class="v" id="v-chain">—</span></div>
+    <div class="row"><span class="k">State</span><span class="v" id="v-state"><span class="pill disconnected">disconnected</span></span></div>
+    <div class="row"><span class="k">Ownership</span><span class="v" id="v-owner">not verified</span></div>
+    <div class="row"><span class="k">Paired agent</span><span class="v" id="v-agent">—</span></div>
+    <div class="row"><span class="k">Permission</span><span class="v" id="v-perm">none</span></div>
+  </div>
+
+  <div class="card">
+    <label for="in-agent">Agent token id (CIS-8004)</label>
+    <input id="in-agent" placeholder="1004" value="1004" />
+    <div style="margin-top:8px">
+      <button id="btn-connect" disabled>1 · Connect wallet</button>
+      <button id="btn-verify" disabled>2 · Verify ownership</button>
+      <button id="btn-pair" disabled>3 · Pair with agent</button>
+    </div>
+    <div style="margin-top:8px">
+      <button id="btn-unlink" class="danger" disabled>Unlink pairing</button>
+      <button id="btn-disconnect" class="ghost" disabled>Disconnect</button>
+    </div>
+  </div>
+
+  <div class="card" id="perm-card">
+    <h3 style="margin:0 0 8px">Agent permissions</h3>
+    <div class="row"><span class="k">Permission</span><span class="v" id="v-permstatus">none</span></div>
+    <div class="row"><span class="k">Policy</span><span class="v" id="v-permpolicy">—</span></div>
+    <div class="row"><span class="k">Limits (per tx / day / period)</span><span class="v" id="v-permlimits">—</span></div>
+    <div class="row"><span class="k">Allowlist</span><span class="v" id="v-permallow">any</span></div>
+    <label for="in-limits">Limits (perTx, daily, period, periodSeconds)</label>
+    <input id="in-limits" placeholder="1000,10000,50000,86400 (use 'null' to disable a cap)" value="1000,10000,50000,86400" />
+    <label for="in-allowlist">Recipient allowlist (comma-separated, empty = any)</label>
+    <input id="in-allowlist" placeholder="" value="" />
+    <label for="in-policy">Approval policy</label>
+    <select id="in-policy" style="background:#0f1115;border:1px solid #1e2229;color:#e6e8eb;border-radius:6px;padding:6px 8px;width:100%;margin-top:4px">
+      <option value="manual">manual (owner approves each payment)</option>
+      <option value="bounded_auto">bounded_auto (within limits)</option>
+    </select>
+    <div style="margin-top:8px">
+      <button id="btn-permchallenge" disabled>Request permission challenge</button>
+      <button id="btn-permgrant" disabled>Grant permission</button>
+      <button id="btn-permpause" class="ghost" disabled>Pause</button>
+      <button id="btn-permresume" class="ghost" disabled>Resume</button>
+      <button id="btn-permrevoke" class="danger" disabled>Revoke</button>
+    </div>
+    <div style="margin-top:8px">
+      <label for="in-approval-recipient">Approval recipient</label>
+      <input id="in-approval-recipient" value="" placeholder="defaults to connected recipient" />
+      <label for="in-approval-amount">Approval amount (microCCD)</label>
+      <input id="in-approval-amount" value="100" />
+      <div style="margin-top:6px">
+        <button id="btn-approval-request" disabled>Request approval</button>
+        <button id="btn-approval-approve" disabled>Approve</button>
+        <button id="btn-approval-reject" class="danger" disabled>Reject</button>
+      </div>
+    </div>
+    <div id="v-approvals" style="margin-top:8px;font-size:12px;color:#8b929c"></div>
+    <div id="v-activity" style="margin-top:8px;font-size:12px;color:#8b929c;max-height:160px;overflow:auto"></div>
+  </div>
+
+  <div class="card" id="wallet-card">
+    <h3 style="margin:0 0 8px">Agent wallet</h3>
+    <div class="row"><span class="k">Wallet</span><span class="v" id="v-wallet-id">none</span></div>
+    <div class="row"><span class="k">Lifecycle</span><span class="v" id="v-wallet-status">—</span></div>
+    <div class="row"><span class="k">Funding</span><span class="v" id="v-wallet-funding">—</span></div>
+    <div class="row"><span class="k">Account address</span><span class="v" id="v-wallet-address">—</span></div>
+    <div class="row"><span class="k">Network</span><span class="v" id="v-wallet-network">—</span></div>
+    <div class="row"><span class="k">On-chain</span><span class="v" id="v-wallet-onchain">not deployed</span></div>
+    <div style="margin-top:8px">
+      <button id="btn-wallet-provision" disabled>Provision agent wallet</button>
+      <button id="btn-wallet-copy" class="ghost" disabled>Copy address</button>
+      <button id="btn-wallet-pause" class="ghost" disabled>Pause</button>
+      <button id="btn-wallet-resume" class="ghost" disabled>Resume</button>
+      <button id="btn-wallet-revoke" class="danger" disabled>Revoke wallet</button>
+    </div>
+    <div id="v-wallet-events" style="margin-top:8px;font-size:12px;color:#8b929c;max-height:140px;overflow:auto"></div>
+  </div>
+
+  <div id="out" class="card" style="display:none"><div id="log"></div></div>
+
+  <div class="sub" style="margin-top:18px">
+    Notes: connection uses the official Concordium Browser Wallet API. Ownership is proven by
+    signing a short-lived, single-use, network-bound challenge — the wallet prepends bytes so
+    the message can never be a transaction. Pairing requires the agent to pass the independent
+    CIS-8004 + Agent Card verification (TRUSTED). No private key, recovery phrase, or signature
+    is stored. QR-based (mobile/WalletConnect) pairing is not available in this build — see
+    <code>docs/connect-wallet-agent-pairing.md</code>.
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const log = m => { const el = $('log'); el.textContent += m + '\\n'; $('out').style.display='block'; };
+
+let provider = null;
+let connectedAccount = null;
+let selectedChain = null;   // genesis hash
+let challenge = null;       // { challengeId, message, network, expiresAt }
+let pairingId = null;
+
+const GENESIS_TO_CAIP2 = {
+  '4221332d34e1694168c2a0c0b3fd0f273809612cb13d000d5c2e00e85f50f796': 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
+  '9dd9ca4d19e9393877d2c44b70f89acbfc0883c2243e5eeaecc0d1cd0503f478': 'ccd:9dd9ca4d19e9393877d2c44b70f89acb',
+};
+const NETWORK_NAMES = {
+  'ccd:4221332d34e1694168c2a0c0b3fd0f27': 'Testnet',
+  'ccd:9dd9ca4d19e9393877d2c44b70f89acb': 'Mainnet',
+};
+
+function setStatePill(state) {
+  const el = $('v-state');
+  el.innerHTML = '<span class="pill ' + state + '">' + state + '</span>';
+}
+
+function detectProvider() {
+  return new Promise(resolve => {
+    let tries = 0;
+    const tick = () => {
+      const p = window.concordium;
+      if (p && typeof p.signMessage === 'function' && (typeof p.requestAccounts === 'function' || typeof p.connect === 'function')) {
+        resolve(p);
+        return;
+      }
+      if (++tries > 40) { resolve(null); return; }
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const j = await r.json();
+    if (j.ok && j.session) {
+      const s = j.session;
+      $('v-owner').textContent = s.ownershipVerified ? 'verified' : 'not verified';
+      $('v-agent').textContent = s.agentId ? (s.agentId + ' (' + s.pairingId.slice(0,10) + '…)' ) : '—';
+      $('v-perm').textContent = s.permissionGranted ? 'granted' : 'none';
+      setStatePill(s.state);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function connect() {
+  if (!provider) { log('No Concordium wallet detected.'); return; }
+  try {
+    let accounts = [];
+    if (typeof provider.requestAccounts === 'function') {
+      accounts = await provider.requestAccounts();
+    } else {
+      const one = await provider.connect();
+      if (one) accounts = [one];
+    }
+    if (!accounts || accounts.length === 0) { log('Connection cancelled by user.'); setStatePill('disconnected'); return; }
+    connectedAccount = accounts[0];
+    $('v-acct').textContent = connectedAccount;
+    // network identification from the wallet's own chain selection
+    if (typeof provider.getSelectedChain === 'function') {
+      selectedChain = await provider.getSelectedChain();
+      const caip2 = GENESIS_TO_CAIP2[(selectedChain||'').toLowerCase()] || null;
+      $('v-chain').textContent = selectedChain ? (selectedChain + (caip2 ? ' (' + (NETWORK_NAMES[caip2]||caip2) + ')' : ' (unrecognised chain)')) : '—';
+    }
+    $('btn-verify').disabled = false;
+    $('btn-disconnect').disabled = false;
+    setStatePill('connected');
+    log('Connected: ' + connectedAccount);
+    await refreshStatus();
+    await refreshPermission();
+    await refreshApprovals();
+    await refreshActivity();
+  } catch (e) {
+    log('Connect failed / cancelled: ' + (e && e.message ? e.message : e));
+    setStatePill('failed');
+  }
+}
+
+async function verifyOwnership() {
+  if (!connectedAccount) { log('Connect a wallet first.'); return; }
+  const caip2 = GENESIS_TO_CAIP2[(selectedChain||'').toLowerCase()];
+  if (!caip2) { log('Cannot verify: unrecognised or missing chain selection.'); return; }
+  // issue challenge
+  const agentId = ($('in-agent').value || '1004').trim();
+  log('Requesting pairing challenge for agent ' + agentId + '…');
+  const cr = await fetch('/api/challenge', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ agentId }) });
+  const cj = await cr.json();
+  if (!cj.ok) { log('Challenge failed: ' + cj.error); return; }
+  challenge = cj;
+  // sign
+  let signature;
+  try {
+    signature = await provider.signMessage(connectedAccount, cj.message);
+  } catch (e) {
+    log('Signing cancelled or failed: ' + (e && e.message ? e.message : e));
+    return;
+  }
+  // verify via backend (account info from node)
+  const vr = await fetch('/api/verify', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ challengeId: cj.challengeId, walletAddress: connectedAccount, signature }) });
+  const vj = await vr.json();
+  if (!vj.ok) { log('Ownership verification failed: ' + vj.error); setStatePill('failed'); return; }
+  log('Ownership verified cryptographically.');
+  // mark session verified (client-side mirror; backend pairing also verifies)
+  await fetch('/api/status').catch(()=>{});
+  setStatePill('verified');
+  $('btn-pair').disabled = false;
+  await refreshStatus();
+}
+
+async function pair() {
+  if (!connectedAccount || !challenge) { log('Verify ownership first.'); return; }
+  const agentId = ($('in-agent').value || '1004').trim();
+  // re-sign not needed: backend re-verifies using the stored challenge; but the
+  // challenge signature must be supplied again. Re-request a fresh signature.
+  let signature;
+  try {
+    signature = await provider.signMessage(connectedAccount, challenge.message);
+  } catch (e) {
+    log('Signing cancelled: ' + (e && e.message ? e.message : e));
+    return;
+  }
+  const pr = await fetch('/api/pair', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ agentId, challengeId: challenge.challengeId, walletAddress: connectedAccount, signature }) });
+  const pj = await pr.json();
+  if (!pj.ok) { log('Pairing failed: ' + pj.error); return; }
+  pairingId = pj.pairing.id;
+  $('v-agent').textContent = agentId + ' (' + pairingId.slice(0,10) + '…) paired';
+  $('btn-unlink').disabled = false;
+  log('Paired with agent ' + agentId + '. Pairing id: ' + pairingId);
+  await refreshStatus();
+}
+
+async function unlink() {
+  if (!pairingId) { log('No pairing to unlink.'); return; }
+  const ur = await fetch('/api/unlink', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ pairingId }) });
+  const uj = await ur.json();
+  log(uj.ok ? 'Pairing revoked.' : ('Unlink failed: ' + uj.error));
+  pairingId = null;
+  $('btn-unlink').disabled = true;
+  await refreshStatus();
+}
+
+async function disconnect() {
+  await fetch('/api/disconnect', { method:'POST', headers:{'content-type':'application/json'}, body: '{}' });
+  connectedAccount = null; selectedChain = null; challenge = null; pairingId = null;
+  $('v-acct').textContent = '—'; $('v-chain').textContent = '—'; $('v-agent').textContent = '—';
+  $('btn-verify').disabled = true; $('btn-pair').disabled = true; $('btn-unlink').disabled = true; $('btn-disconnect').disabled = true;
+  setStatePill('disconnected');
+  log('Disconnected.');
+  await refreshStatus();
+}
+
+(async () => {
+  provider = await detectProvider();
+  $('v-wallet').textContent = provider ? 'detected' : 'not found';
+  $('btn-connect').disabled = !provider;
+  if (!provider) log('Concordium Wallet for Web not detected. Install the extension and reload.');
+  await refreshStatus();
+})();
+
+$('btn-connect').onclick = connect;
+$('btn-verify').onclick = verifyOwnership;
+$('btn-pair').onclick = pair;
+$('btn-unlink').onclick = unlink;
+$('btn-disconnect').onclick = disconnect;
+
+// ── TASK 72: permission UI ────────────────────────────────────────────────
+let permChallenge = null;
+let lastApprovalId = null;
+
+const parseLimits = () => {
+  const parts = ($('in-limits').value || '').split(',').map(s => s.trim());
+  const val = i => (parts[i] === undefined || parts[i] === '' || parts[i] === 'null') ? null : (/^\d+$/.test(parts[i]) ? parts[i] : null);
+  return { perTxMicroCcd: val(0), dailyMicroCcd: val(1), periodMicroCcd: val(2), periodSeconds: parts[3] ? Number(parts[3]) : null };
+};
+
+const currentAgent = () => ($('in-agent').value || '1004').trim();
+
+async function refreshPermission() {
+  if (!connectedAccount) return;
+  try {
+    const r = await fetch('/api/permission?wallet=' + encodeURIComponent(connectedAccount) + '&agent=' + encodeURIComponent(currentAgent()));
+    const j = await r.json();
+    const p = j.permission;
+    if (!p) {
+      $('v-permstatus').textContent = 'not granted (disabled)';
+      $('v-permpolicy').textContent = '—'; $('v-permlimits').textContent = '—'; $('v-permallow').textContent = 'any';
+    } else {
+      const state = p.revoked ? 'revoked' : p.paused ? 'paused' : p.enabled ? 'granted' : 'disabled';
+      $('v-permstatus').textContent = state;
+      $('v-permpolicy').textContent = p.policy;
+      $('v-permlimits').textContent = [p.limits.perTxMicroCcd ?? 'none', p.limits.dailyMicroCcd ?? 'none', (p.limits.periodMicroCcd ?? 'none') + '/' + (p.limits.periodSeconds ?? '-') + 's'].join(' / ');
+      $('v-permallow').textContent = p.recipientAllowlist ? p.recipientAllowlist.join(', ') : 'any';
+      $('btn-permpause').disabled = p.paused || p.revoked;
+      $('btn-permresume').disabled = !p.paused || p.revoked;
+      $('btn-permrevoke').disabled = p.revoked;
+    }
+    $('btn-permchallenge').disabled = !connectedAccount;
+    $('btn-approval-request').disabled = !connectedAccount;
+  } catch (e) { /* ignore */ }
+}
+
+async function refreshApprovals() {
+  if (!connectedAccount) return;
+  try {
+    const r = await fetch('/api/approvals?wallet=' + encodeURIComponent(connectedAccount) + '&agent=' + encodeURIComponent(currentAgent()));
+    const j = await r.json();
+    const list = j.approvals || [];
+    const pending = list.filter(a => a.status === 'pending' || a.status === 'approved');
+    $('v-approvals').textContent = pending.length
+      ? 'Pending approvals:\n' + pending.map(a => `${a.id.slice(0,8)}… ${a.amountMicroCcd} microCCD → ${a.recipient.slice(0,8)}… [${a.status}] ${a.context}`).join('\n')
+      : 'No pending approvals.';
+    if (pending.length) { lastApprovalId = pending[pending.length - 1].id; $('btn-approval-approve').disabled = false; $('btn-approval-reject').disabled = false; }
+    else { $('btn-approval-approve').disabled = true; $('btn-approval-reject').disabled = true; }
+  } catch (e) { /* ignore */ }
+}
+
+async function refreshActivity() {
+  if (!connectedAccount) return;
+  try {
+    const r = await fetch('/api/activity?wallet=' + encodeURIComponent(connectedAccount) + '&limit=30');
+    const j = await r.json();
+    $('v-activity').textContent = 'Activity:\n' + (j.events || []).map(e => `${new Date(e.at * 1000).toISOString().slice(11,19)} ${e.kind} ${e.detail}`).join('\n');
+  } catch (e) { /* ignore */ }
+}
+
+async function permissionChallenge() {
+  const r = await fetch('/api/permission/challenge', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ walletAddress: connectedAccount, agentId: currentAgent() }) });
+  const j = await r.json();
+  if (!j.ok) { log('Permission challenge failed: ' + j.error); return; }
+  permChallenge = j;
+  log('Permission challenge issued (expires ' + new Date(j.expiresAt * 1000).toISOString() + '). Now sign it.');
+  $('btn-permgrant').disabled = false;
+}
+
+async function grantPermission() {
+  if (!permChallenge) { log('Request a permission challenge first.'); return; }
+  let sig;
+  try { sig = await provider.signMessage(connectedAccount, permChallenge.message); }
+  catch (e) { log('Signing cancelled: ' + (e && e.message ? e.message : e)); return; }
+  const allow = ($('in-allowlist').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const body = {
+    walletAddress: connectedAccount, agentId: currentAgent(), challengeId: permChallenge.challengeId,
+    signature: sig, limits: parseLimits(), policy: $('in-policy').value,
+    recipientAllowlist: allow.length ? allow : null,
+  };
+  const r = await fetch('/api/permission/grant', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!j.ok) { log('Grant failed: ' + j.error); return; }
+  log('Permission granted: ' + j.permission.policy + ' limits=' + JSON.stringify(j.permission.limits));
+  permChallenge = null; $('btn-permgrant').disabled = true;
+  await refreshPermission(); await refreshActivity();
+}
+
+async function permissionControl(action) {
+  // fresh challenge for each control action (pause/resume/revoke)
+  const cr = await fetch('/api/permission/challenge', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ walletAddress: connectedAccount, agentId: currentAgent() }) });
+  const cj = await cr.json();
+  if (!cj.ok) { log('Challenge failed: ' + cj.error); return; }
+  let sig;
+  try { sig = await provider.signMessage(connectedAccount, cj.message); }
+  catch (e) { log('Signing cancelled: ' + (e && e.message ? e.message : e)); return; }
+  const r = await fetch('/api/permission/control', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ walletAddress: connectedAccount, agentId: currentAgent(), action, challengeId: cj.challengeId, signature: sig }) });
+  const j = await r.json();
+  log(j.ok ? ('Permission ' + action + ' ok') : ('Permission ' + action + ' failed: ' + j.error));
+  await refreshPermission(); await refreshActivity();
+}
+
+async function requestApproval() {
+  const recipient = ($('in-approval-recipient').value || '').trim();
+  if (!recipient) { log('Enter an approval recipient address.'); return; }
+  const r = await fetch('/api/approval/request', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ walletAddress: connectedAccount, agentId: currentAgent(), recipient, amountMicroCcd: ($('in-approval-amount').value || '100').trim(), context: 'ui-' + Date.now() }) });
+  const j = await r.json();
+  if (!j.ok) { log('Approval request failed: ' + j.error); return; }
+  lastApprovalId = j.approval.id;
+  log('Approval requested: ' + j.approval.id.slice(0, 10) + '…');
+  await refreshApprovals();
+}
+
+async function decideApproval(kind) {
+  if (!lastApprovalId) { log('No approval selected.'); return; }
+  const cr = await fetch('/api/permission/challenge', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ walletAddress: connectedAccount, agentId: currentAgent() }) });
+  const cj = await cr.json();
+  if (!cj.ok) { log('Challenge failed: ' + cj.error); return; }
+  let sig;
+  try { sig = await provider.signMessage(connectedAccount, cj.message); }
+  catch (e) { log('Signing cancelled: ' + (e && e.message ? e.message : e)); return; }
+  const r = await fetch('/api/approval/' + kind, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ approvalId: lastApprovalId, walletAddress: connectedAccount, agentId: currentAgent(), challengeId: cj.challengeId, signature: sig }) });
+  const j = await r.json();
+  log(j.ok ? ('Approval ' + kind + ' ok' + (j.token ? ' (single-use token issued)' : '')) : ('Approval ' + kind + ' failed: ' + j.error));
+  lastApprovalId = null;
+  await refreshApprovals(); await refreshActivity();
+}
+
+$('btn-permchallenge').onclick = permissionChallenge;
+$('btn-permgrant').onclick = grantPermission;
+$('btn-permpause').onclick = () => permissionControl('pause');
+$('btn-permresume').onclick = () => permissionControl('resume');
+$('btn-permrevoke').onclick = () => permissionControl('revoke');
+$('btn-approval-request').onclick = requestApproval;
+$('btn-approval-approve').onclick = () => decideApproval('approve');
+$('btn-approval-reject').onclick = () => decideApproval('reject');
+
+// ── TASK 73: agent wallet UI ───────────────────────────────────────────────
+let currentWallet = null;
+let walletChallenge = null;
+
+async function refreshWallet() {
+  if (!connectedAccount) return;
+  try {
+    const r = await fetch('/api/wallets?owner=' + encodeURIComponent(connectedAccount));
+    const j = await r.json();
+    const ws = j.wallets || [];
+    currentWallet = ws.find(w => w.agentId === currentAgent()) || ws[0] || null;
+    if (!currentWallet) {
+      $('v-wallet-id').textContent = 'none';
+      $('v-wallet-status').textContent = '—';
+      $('v-wallet-funding').textContent = '—';
+      $('v-wallet-address').textContent = '—';
+      $('v-wallet-network').textContent = '—';
+      $('v-wallet-onchain').textContent = 'not deployed';
+      $('v-wallet-events').textContent = '';
+      $('btn-wallet-provision').disabled = false;
+      $('btn-wallet-pause').disabled = true; $('btn-wallet-resume').disabled = true; $('btn-wallet-revoke').disabled = true;
+      return;
+    }
+    $('v-wallet-id').textContent = currentWallet.walletId.slice(0, 14) + '…';
+    $('v-wallet-status').textContent = currentWallet.status;
+    $('v-wallet-funding').textContent = currentWallet.fundingStatus + (currentWallet.balanceMicroCcd ? ' (' + currentWallet.balanceMicroCcd + ' µCCD)' : '');
+    $('v-wallet-address').textContent = currentWallet.accountAddress ?? 'pending on-chain deployment';
+    $('v-wallet-network').textContent = currentWallet.network;
+    $('v-wallet-onchain').textContent = currentWallet.accountAddress ? 'deployed' : 'not deployed';
+    $('btn-wallet-provision').disabled = true;
+    $('btn-wallet-copy').disabled = !currentWallet.accountAddress;
+    $('btn-wallet-pause').disabled = currentWallet.status === 'paused' || currentWallet.status === 'revoked';
+    $('btn-wallet-resume').disabled = currentWallet.status !== 'paused';
+    $('btn-wallet-revoke').disabled = currentWallet.status === 'revoked';
+    const er = await fetch('/api/wallet?walletId=' + encodeURIComponent(currentWallet.walletId));
+    const ej = await er.json();
+    $('v-wallet-events').textContent = 'Wallet history:\n' + (ej.events || []).map(e => `${new Date(e.at * 1000).toISOString().slice(11,19)} ${e.event} ${e.detail}`).join('\n');
+  } catch (e) { /* ignore */ }
+}
+
+async function provisionWallet() {
+  const cr = await fetch('/api/wallet/challenge', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ ownerWalletAddress: connectedAccount, agentId: currentAgent() }) });
+  const cj = await cr.json();
+  if (!cj.ok) { log('Wallet challenge failed: ' + cj.error); return; }
+  walletChallenge = cj;
+  let sig;
+  try { sig = await provider.signMessage(connectedAccount, cj.message); }
+  catch (e) { log('Signing cancelled: ' + (e && e.message ? e.message : e)); return; }
+  const r = await fetch('/api/wallet/provision', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ ownerWalletAddress: connectedAccount, agentId: currentAgent(), challengeId: cj.challengeId, signature: sig }) });
+  const j = await r.json();
+  log(j.ok ? ('Wallet provisioned: ' + j.wallet.walletId + ' (' + j.wallet.status + ')') : ('Provision failed: ' + j.error));
+  walletChallenge = null;
+  await refreshWallet();
+}
+
+async function walletControl(action) {
+  if (!currentWallet) { log('No wallet selected.'); return; }
+  const cr = await fetch('/api/wallet/challenge', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ ownerWalletAddress: connectedAccount, agentId: currentAgent() }) });
+  const cj = await cr.json();
+  if (!cj.ok) { log('Challenge failed: ' + cj.error); return; }
+  let sig;
+  try { sig = await provider.signMessage(connectedAccount, cj.message); }
+  catch (e) { log('Signing cancelled: ' + (e && e.message ? e.message : e)); return; }
+  const r = await fetch('/api/wallet/control', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ walletId: currentWallet.walletId, ownerWalletAddress: connectedAccount, action, challengeId: cj.challengeId, signature: sig }) });
+  const j = await r.json();
+  log(j.ok ? ('Wallet ' + action + ' ok') : ('Wallet ' + action + ' failed: ' + j.error));
+  await refreshWallet();
+}
+
+$('btn-wallet-provision').onclick = provisionWallet;
+$('btn-wallet-copy').onclick = () => { if (currentWallet?.accountAddress) navigator.clipboard?.writeText(currentWallet.accountAddress); };
+$('btn-wallet-pause').onclick = () => walletControl('pause');
+$('btn-wallet-resume').onclick = () => walletControl('resume');
+$('btn-wallet-revoke').onclick = () => walletControl('revoke');
+</script>
+</body>
+</html>

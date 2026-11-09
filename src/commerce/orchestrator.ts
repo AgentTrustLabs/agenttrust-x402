@@ -83,8 +83,11 @@ export interface CommerceResult {
 }
 
 export interface OrchestratorDeps {
-  /** Injected fetch (card + optional facilitator), so the flow is testable offline. */
-  fetchImpl: Parameters<typeof verifyAgent>[0]['fetchImpl'];
+  /**
+   * Injected card fetch, for offline tests. Omit in production: the pinned transport
+   * (resolve → validate → pin) is then used for the card.
+   */
+  fetchImpl?: Parameters<typeof verifyAgent>[0]['fetchImpl'];
   /** Injected facilitator. Defaults to none — the caller must pass one. */
   facilitator: ConsumerFacilitator;
   /** Builds the client payment payload. In production this wraps the official SDK. */
@@ -97,6 +100,21 @@ export interface OrchestratorDeps {
   audit?: AuditTrail;
   /** Unix seconds, injectable for deterministic expiry. */
   nowSeconds?: number;
+  /** Operator opt-in for private/loopback `agent_uri` targets. See crossAgent.checkAgentUri. */
+  allowPrivateCardHosts?: boolean;
+  /** Bound on a single card fetch, in ms. */
+  cardTimeoutMs?: number;
+  /**
+   * TASK 72: permission gate + reservation hooks. Runs before the facilitator is
+   * called. `permissionCheck` must reserve capacity synchronously.
+   */
+  permissionCheck?: (params: { recipient: string; amountMicroCcd: string; network: string; nowSeconds: number }) =>
+    | { ok: true; reservationId?: string }
+    | { ok: false; reason: string };
+  reservationId?: string;
+  onSettleSuccess?: (reservationId: string) => void;
+  onSettleFail?: (reservationId: string) => void;
+  onAmbiguous?: (reservationId: string) => void;
 }
 
 /** Run the full commerce pipeline for one client → one provider interaction. */
@@ -182,7 +200,9 @@ export async function runCommerce(
   const trust = await verifyAgent({
     expect,
     discoveryPayload,
-    fetchImpl: deps.fetchImpl,
+    ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+    ...(deps.allowPrivateCardHosts ? { allowPrivateCardHosts: true } : {}),
+    ...(deps.cardTimeoutMs !== undefined ? { cardTimeoutMs: deps.cardTimeoutMs } : {}),
   });
 
   const record = trust.evidence?.discovery as { record?: Record<string, unknown> } | undefined;
@@ -361,6 +381,11 @@ export async function runCommerce(
     settle: true,
     audit: { agentId: target.tokenId, tokenAddress: refs.token_address },
     ...(deps.nowSeconds !== undefined ? { nowSeconds: deps.nowSeconds } : {}),
+    ...(deps.permissionCheck ? { permissionCheck: deps.permissionCheck } : {}),
+    ...(deps.reservationId ? { reservationId: deps.reservationId } : {}),
+    ...(deps.onSettleSuccess ? { onSettleSuccess: deps.onSettleSuccess } : {}),
+    ...(deps.onSettleFail ? { onSettleFail: deps.onSettleFail } : {}),
+    ...(deps.onAmbiguous ? { onAmbiguous: deps.onAmbiguous } : {}),
   });
 
   if (access.verify && access.verify.isValid) {
