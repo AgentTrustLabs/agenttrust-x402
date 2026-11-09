@@ -14,6 +14,13 @@ dist/
 *.log
 npm-debug.log*
 
+# ─── local runtime data ───────────────────────────────────────────────
+# Agent wallet metadata store (SQLite) and any other local runtime database.
+# The store holds metadata only — never key material — but is local state.
+*.db
+*.sqlite
+*.sqlite3
+
 # ─── local secrets ──────────────────────────────────────────────────────
 # Never commit real environment files. `.env.example` is intentionally not
 # matched, so a template can be committed.

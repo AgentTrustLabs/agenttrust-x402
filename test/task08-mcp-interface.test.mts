@@ -746,7 +746,7 @@ test('30. malformed MCP requests fail safely and keep the server alive', async (
   eq(parsed[0]!.error.code, -32700, 'parse error');
   eq(parsed[1]!.error.code, -32600, 'invalid request (no method)');
   eq(parsed[2]!.error.code, -32600, 'invalid request (wrong version)');
-  eq(parsed[3]!.result.isError, true, 'tools/call without a name is an error result');
+  eq(parsed[3]!.error.code, -32602, 'tools/call without a name is a protocol error (unknown/invalid params)');
   eq(parsed[4]!.result.protocolVersion, '2024-11-05', 'server still serving afterwards');
 });
 
@@ -897,8 +897,29 @@ test('38. a rejected commerce run records the rejection, not a grant', async () 
   }
 });
 
-// ─── runner ────────────────────────────────────────────────────────────
+test('39. JSON-RPC notifications never receive a response', async () => {
+  // A response to a notification (id-less message) desynchronises the peer's
+  // request/response pairing. Unknown notifications must be silent too.
+  const lines = [
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 1 } },
+    { jsonrpc: '2.0', method: 'notifications/progress', params: { progressToken: 't', progress: 1 } },
+    { jsonrpc: '2.0', method: 'unknown/notification' },
+    { jsonrpc: '2.0', id: 7, method: 'tools/list' },
+  ]
+    .map(l => JSON.stringify(l))
+    .join('\n');
 
+  const { stdout, code } = await runServerFull(lines + '\n', {});
+  eq(code, 0, 'clean exit');
+
+  const parsed = stdout.trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+  eq(parsed.length, 1, `exactly one response (got ${parsed.length})`);
+  eq(parsed[0]!.id, 7, 'the response belongs to the request');
+  ok(Array.isArray(parsed[0]!.result.tools), 'valid tools/list result');
+});
+
+// ─── runner ────────────────────────────────────────────────────────────
 let failed = 0;
 let n = 0;
 for (const [name, fn] of tests) {

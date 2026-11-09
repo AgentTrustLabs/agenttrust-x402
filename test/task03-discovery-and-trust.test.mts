@@ -308,11 +308,19 @@ test('all checks PASS yields TRUSTED', () => {
   eq(decideTrust(allPass), 'TRUSTED', 'verdict');
 });
 
-test('a single FAIL yields REJECTED', () => {
+test('a single FAIL yields REJECTED on a contradiction-capable check', () => {
+  // TASK 23: `card_retrieved` is retrieval status, not an identity check. A FAIL there means
+  // "no card", which cannot contradict anything — it is handled by its own assertion below.
   for (const key of Object.keys(allPass)) {
     if (key === 'badge_valid') continue; // advisory
+    if (key === 'card_retrieved') continue; // retrieval status, never a contradiction
     eq(decideTrust({ ...allPass, [key]: 'FAIL' }), 'REJECTED', `${key}=FAIL`);
   }
+  eq(
+    decideTrust({ ...allPass, card_retrieved: 'FAIL' }),
+    'INCONCLUSIVE',
+    'an unretrieved card cannot produce a rejection',
+  );
 });
 
 test('a single INCONCLUSIVE yields INCONCLUSIVE, never TRUSTED', () => {
@@ -348,27 +356,34 @@ test('happy path: TRUSTED with all PASS', async () => {
   eq(r.evidence.hash.byte_length, 2777, 'evidence records byte length');
 });
 
-test('card unavailable: card_retrieved FAIL → REJECTED', async () => {
+test('card unavailable: retrieval failure → INCONCLUSIVE (not fraud)', async () => {
   const r = await verifyAgent({
     expect: EXPECT,
     discoveryPayload: SEARCH(),
     fetchImpl: fetchFailing(404),
     badge: { consulted: false, raw: null, error: null },
   });
-  eq(r.card_retrieved, 'FAIL', 'retrieval');
+  // TASK 23: 404 means the endpoint does not serve the card. That is availability, not a
+  // contradiction of the agent's identity claims — REJECTED would be an accusation.
+  eq(r.card_retrieved, 'INCONCLUSIVE', 'retrieval status');
   eq(r.hash_matches_on_chain, 'NOT_TESTED', 'hash never evaluated');
-  eq(r.trust_decision, 'REJECTED', 'verdict');
+  eq(r.trust_decision, 'INCONCLUSIVE', 'verdict');
+  eq(r.failure_kind, 'unavailable', 'evidence missing, not contradicted');
 });
 
-test('network error during card fetch → REJECTED', async () => {
+test('network error during card fetch → INCONCLUSIVE (an outage is not fraud)', async () => {
+  // A DNS/TLS failure establishes nothing about the agent. It must not be reported as a
+  // positive contradiction of the card claim — that would make an attacker-triggerable
+  // outage look like proof of misconduct, and would let a transient failure deny access
+  // to an otherwise honest agent. TASK 20 reclassified transport failures.
   const r = await verifyAgent({
     expect: EXPECT,
     discoveryPayload: SEARCH(),
     fetchImpl: fetchThrowing(),
     badge: { consulted: false, raw: null, error: null },
   });
-  eq(r.card_retrieved, 'FAIL', 'retrieval');
-  eq(r.trust_decision, 'REJECTED', 'verdict');
+  eq(r.card_retrieved, 'INCONCLUSIVE', 'evidence unavailable');
+  eq(r.trust_decision, 'INCONCLUSIVE', 'verdict');
 });
 
 test('hash mismatch: TRUSTED is impossible', async () => {
@@ -425,7 +440,7 @@ test('revoked agent → REJECTED even with a matching card', async () => {
   eq(r.trust_decision, 'REJECTED', 'verdict');
 });
 
-test('registry record without agent_uri → REJECTED', async () => {
+test('registry record without agent_uri → INCONCLUSIVE', async () => {
   const payload = JSON.parse(JSON.stringify(SEARCH()));
   payload.agents[0].agent_uri = null;
   const r = await verifyAgent({
@@ -434,8 +449,8 @@ test('registry record without agent_uri → REJECTED', async () => {
     fetchImpl: fetchServing(CARD()),
     badge: { consulted: false, raw: null, error: null },
   });
-  eq(r.card_retrieved, 'FAIL', 'cannot retrieve');
-  eq(r.trust_decision, 'REJECTED', 'verdict');
+  eq(r.card_retrieved, 'INCONCLUSIVE', 'cannot retrieve');
+  eq(r.trust_decision, 'INCONCLUSIVE', 'a record with no pointer is missing evidence, not a lie');
 });
 
 test('non-JSON card body → card_valid FAIL', async () => {

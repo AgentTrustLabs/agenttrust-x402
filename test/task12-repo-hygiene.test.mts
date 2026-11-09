@@ -106,7 +106,7 @@ test('05. source, tests, docs, lockfile and evidence remain addable', () => {
     'src/mcp/server.ts',
     'test/task08-mcp-interface.test.mts',
     'test/fixtures/cis8004-module-schema.bin',
-    'docs/TASK08-result.md',
+    'docs/archive/TASK08-result.md',
     'docs/evidence/task02/agent-card.v2.json',
     'docs/evidence/task05/audit-trail.jsonl',
     'evidence/healthz.json',
@@ -131,7 +131,7 @@ test('06. a real-tree staging dry run stages no generated artifact', () => {
   // Mirrors the tree in a scratch repo (without node_modules) and stages everything.
   const dir = mkdtempSync(join(tmpdir(), 'agenttrust-t12-stage-'));
   try {
-    const tar = spawnSync('bash', ['-c', `tar --exclude=node_modules --exclude=dist -cf - . | (cd ${dir} && tar -xf -)`], {
+    const tar = spawnSync('bash', ['-c', `tar --exclude=node_modules --exclude=dist --exclude=.git -cf - . | (cd ${dir} && tar -xf -)`], {
       cwd: ROOT,
     });
     eq(tar.status, 0, 'tree copied');

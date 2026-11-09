@@ -33,7 +33,7 @@
  * CANNOT detect, by design: an attacker who rewrites the log AND the checkpoint
  * together to a shorter but internally valid state. The checkpoint is stored
  * beside the log, so it is only as trustworthy as the storage. Detecting that
- * requires an external anchor (see docs/TASK06-result.md). This limitation is
+ * requires an external anchor (see docs/archive/TASK06-result.md). This limitation is
  * real and must not be papered over.
  */
 

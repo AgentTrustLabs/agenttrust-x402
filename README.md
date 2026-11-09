@@ -32,6 +32,32 @@ it as a tool.
 
 ---
 
+## Agent wallet capabilities
+
+The gateway also runs a full agent-wallet stack on top of the trust and payment layers:
+
+| Capability | Status |
+|---|---|
+| Connect Wallet page + Concordium Browser Wallet connection | **Real** (non-custodial, no keys in this process) |
+| Wallet ownership verification (signed challenge) | **Real** |
+| Agent pairing + CIS-8004 identity / Agent Card verification | **Real** |
+| Per-agent permissions: spending limits, allowlist, network binding, pause/revoke | **Real logic, in-memory store** |
+| Dedicated agent wallets with independent signing identities | **Real (local key custody)** |
+| Agent Wallet Skills (`wallet_get_status`, `wallet_get_permissions`, `wallet_request_payment`, `wallet_request_approval`, `wallet_get_activity`) | **Real** |
+| HTTP x402: 402 requirement → wallet → payment → independent provider verification | **Real flow, mock facilitator + mock chain read** |
+| On-chain agent account creation / funding | **Not implemented** — requires a credential deployment transaction |
+| Real on-chain settlement | **Not available** — no public CCD facilitator exists |
+
+The signing boundary keeps private keys inside a local key store; agent-facing APIs and
+the browser never see key material. Spending is gated by the permission layer: limits,
+recipient allowlist, network binding, manual approval, and reservations are enforced
+before any facilitator call.
+
+See [`docs/connect-wallet-agent-pairing.md`](docs/connect-wallet-agent-pairing.md) and
+the other capability documents listed below.
+
+---
+
 ## Prerequisites
 
 - **Node.js ≥ 22** — `engines` declares `>=20`; verified on 22.23.3 and 26.7.0. Node 20 itself was not
@@ -49,7 +75,7 @@ it as a tool.
 ```bash
 npm ci                 # reproducible install from package-lock.json
 npm run build          # tsc — emits dist/  (type-check only: npm run typecheck)
-npm test               # compiles via pretest, then runs all 12 suites
+npm test               # compiles via pretest, then runs all suites
 ```
 
 That is the whole setup. `npm test` builds first (`pretest`), so `npm ci && npm test` also works from a
@@ -79,7 +105,7 @@ The four `bin` names (`agenttrust`, `agenttrust-verify`, `agenttrust-commerce`, 
 
 > There is **no signing script**. Registration signing happens in the Concordium Wallet browser
 > extension, never in this process — the gateway has no `AccountSigner` and no key. A `sign` script
-> existed until TASK 15 and pointed at a target that never existed; it was removed rather than faked.
+> existed and pointed at a target that never existed; it was removed rather than faked.
 
 ---
 
@@ -123,14 +149,14 @@ nothing more.
 There is **no publicly reachable CCD x402 facilitator** for `ccd:4221332d34e1694168c2a0c0b3fd0f27`.
 Every plausible Concordium facilitator hostname resolves to NXDOMAIN, and the public
 `x402.org/facilitator` advertises nine networks — none of them `ccd:`. This was verified directly, twice,
-in [TASK 07](docs/TASK07-result.md). Real settlement needs a facilitator that the gateway does not have
-and will not fabricate.
+in the archived facilitator discovery report. Real settlement needs a facilitator that the gateway does
+not have and will not fabricate.
 
 ### Why the gateway cannot sign
 
-The gateway holds no key and never imports `AccountSigner`. TASK 07 designed a four-stage signing
-boundary (authorization → signing request → out-of-process signing → settlement gate) of which only the
-first and last live here. MCP clients **cannot** supply an `OperatorAuthorization`: any request carrying
+The gateway holds no key and never imports `AccountSigner`. The design is a four-stage signing boundary
+(authorization → signing request → out-of-process signing → settlement gate) of which only the first and
+last live here. MCP clients **cannot** supply an `OperatorAuthorization`: any request carrying
 authorization-shaped fields is rejected with `AUTHORIZATION_NOT_ACCEPTED`. A registered, `TRUSTED`,
 badge-carrying agent identity grants no signing authority over this gateway.
 
@@ -141,7 +167,11 @@ badge-carrying agent identity grants no signing authority over this gateway.
 | Decision | Meaning | Commerce |
 |---|---|---|
 | `TRUSTED` | every required check PASS | allowed |
-| `REJECTED` | at least one hard check FAIL | **denied** |
+| `REJECTED` | obtained evidence contradicts a mandatory requirement | **denied** |
+| `INCONCLUSIVE` | required evidence could not be obtained | **denied** |
+
+`REJECTED` is never produced by an HTTP error, a redirect, a DNS/TLS failure or a timeout —
+those are `INCONCLUSIVE` with `failure_kind: "unavailable"`.
 | `INCONCLUSIVE` | information missing, nothing failed outright | **denied** |
 
 Per-check verdicts are `PASS` / `FAIL` / `INCONCLUSIVE` / `NOT_TESTED`. `NOT_TESTED` is **not** consent —
@@ -156,13 +186,15 @@ corroboration rather than proof.
 src/
   core/       network + contract constants
   registry/   Concordium Agent Registry MCP client, transaction builder
-  verify/     TASK 03 independent verification (no imports from the registration path)
-  payments/   TASK 04 x402 exact-CCD, TASK 07 facilitator probe + signing boundary
-  commerce/   TASK 05 trust policy + orchestrator, shared mock simulation
-  audit/      TASK 06 hash-chained JSONL trail, TASK 06.1 lock hardening
-  mcp/        TASK 08 tool surface + stdio server
+  verify/     independent cross-agent verification (no imports from the registration path)
+  payments/   x402 exact-CCD protocol, payment gate, facilitator probe, signing boundary
+  commerce/   trust policy + orchestrator, shared mock simulation
+  audit/      hash-chained JSONL trail, lock hardening
+  mcp/        MCP tool surface + stdio server
+  pairing/    wallet connection, agent pairing, permissions, agentic wallets,
+              wallet skills, x402 client integration
   cli/        verify / commerce / registration entry points
-test/         12 suites, 300+ assertions, offline
+test/         70+ suites, offline
 scripts/      per-task verification + demo scripts
 docs/         per-task reports, evidence, and MCP guide
 ```
@@ -172,12 +204,14 @@ docs/         per-task reports, evidence, and MCP guide
 | Document | Contents |
 |---|---|
 | [`docs/MCP-GUIDE.md`](docs/MCP-GUIDE.md) | Setup, tool schemas, invocation examples, security boundaries, demo script |
-| [`docs/TASK08-result.md`](docs/TASK08-result.md) | MCP interface, security boundaries, end-to-end demonstration |
-| [`docs/TASK09-READINESS-REVIEW.md`](docs/TASK09-READINESS-REVIEW.md) | Independent readiness review, findings, verdict |
-| [`docs/TASK10-result.md`](docs/TASK10-result.md) | Packaging and clean-checkout fixes |
-| [`docs/TASK06-result.md`](docs/TASK06-result.md) | Audit trail guarantees **and** its threat-model limits |
-| [`docs/TASK07-result.md`](docs/TASK07-result.md) | Facilitator discovery, signing boundary |
+| [`docs/connect-wallet-agent-pairing.md`](docs/connect-wallet-agent-pairing.md) | Connect Wallet page, ownership verification, agent pairing |
+| [`docs/agent-wallet-permissions.md`](docs/agent-wallet-permissions.md) | Permission model, spending limits, reservations, approvals |
+| [`docs/agentic-wallet-core.md`](docs/agentic-wallet-core.md) | Dedicated agent wallets, signing boundary, SQLite persistence |
+| [`docs/agent-wallet-skills.md`](docs/agent-wallet-skills.md) | Agent Wallet Skills manifest and schemas |
+| [`docs/agent-wallet-x402-integration.md`](docs/agent-wallet-x402-integration.md) | HTTP 402 → wallet → payment → provider verification flow |
+| [`docs/http-x402-integration.md`](docs/http-x402-integration.md) | Local HTTP x402 provider and end-to-end integration |
 | [`docs/CONCORDIUM-INTEGRATION-LESSONS.md`](docs/CONCORDIUM-INTEGRATION-LESSONS.md) | Verified vs undocumented Concordium behaviour |
+| [`docs/archive/`](docs/archive/) | Per-task engineering reports (historical evidence) |
 
 ## Known limitations
 
@@ -189,7 +223,7 @@ docs/         per-task reports, evidence, and MCP guide
 5. **Audit trail is not immutable.** The hash chain detects modification, insertion, deletion, reordering
    and tail truncation — but a consistent rewrite of **both** the log and its checkpoint is undetectable,
    because the checkpoint lives beside the log with no external anchor. See
-   [`docs/TASK06-result.md`](docs/TASK06-result.md) §6–§7.
+   the archived audit-trail report §6–§7.
 6. **`AGENTTRUST_AUDIT_ROOT` defaults to `/tmp/agenttrust-audit`**, shared by all runs on the host.
 7. **Third-party agent cards vary** — dead URLs, `localhost` URLs, and re-published cards whose hash no
    longer matches are all present in the live registry.
@@ -205,7 +239,7 @@ This project is a **source repository with local CLI and MCP distribution**, not
 
 - `"private": true` — set so an accidental `npm publish` is refused; npm treats it as non-publishable
   (the guard itself was not observable here because this host has no registry credentials — see
-  `docs/TASK15-result.md` §NOT TESTED).
+  the archived packaging report §NOT TESTED).
 - No `license`, `repository`, `author`, `homepage`, or `publishConfig` is declared, so nothing implies a
   registry target that does not exist.
 - No library entry point (`exports`/`main`) — the surfaces are the four `bin` commands and the stdio MCP
@@ -213,9 +247,9 @@ This project is a **source repository with local CLI and MCP distribution**, not
 - Consumers run it from a checkout: `npm ci && npm run build`, then `node dist/…`.
 
 `npm pack --dry-run` describes what a tarball *would* contain if publication were ever authorized:
-99 files, ~173 kB packed / ~707 kB unpacked — `dist/`, `src/`, `scripts/`, `README.md`, `package.json`
-only. Documentation, tests, evidence, signing sites and audit checkpoints are excluded by the `files`
-allowlist in `package.json`.
+194 files, ~1.5 MB unpacked — `dist/`, `src/`, `scripts/`, `README.md`, `package.json`
+only. Documentation, tests, evidence, signing sites, SQLite wallet stores and audit
+checkpoints are excluded by the `files` allowlist in `package.json`.
 
 Making this a public npm package would require explicit maintainer authorization plus, at minimum, a
 chosen license, a `repository` URL, and a decision on whether `src/` and `scripts/` belong in the tarball.

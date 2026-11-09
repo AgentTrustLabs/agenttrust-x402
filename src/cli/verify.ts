@@ -175,13 +175,9 @@ async function main(): Promise<number> {
     expect,
     discoveryPayload: discovery,
     badge,
-    fetchImpl: (u: string) =>
-      fetch(u).then(r => ({
-        ok: r.ok,
-        status: r.status,
-        headers: { get: (n: string) => r.headers.get(n) },
-        arrayBuffer: () => r.arrayBuffer(),
-      })),
+    // No injected card fetch: the pinned transport (resolve → validate → pin) is used.
+    // Passing `fetch` here would let DNS resolve again after validation, which is exactly
+    // the rebinding gap TASK 21 closes.
   });
 
   // ── 5. Report ──────────────────────────────────────────────────────────

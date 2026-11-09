@@ -184,7 +184,7 @@ test('DOC.1 a root README exists and points at the real documentation', () => {
   const p = join(ROOT, 'README.md');
   ok(existsSync(p), 'README.md exists');
   const md = readFileSync(p, 'utf8');
-  for (const target of ['docs/MCP-GUIDE.md', 'docs/TASK08-result.md']) {
+  for (const target of ['docs/MCP-GUIDE.md', 'docs/archive/TASK08-result.md']) {
     ok(md.includes(target), `links ${target}`);
   }
   for (const cmd of ['npm ci', 'npm run build', 'npm test']) {

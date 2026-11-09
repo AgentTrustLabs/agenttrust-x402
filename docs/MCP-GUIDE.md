@@ -1,7 +1,7 @@
 # AgentTrust Gateway — MCP Setup & Hackathon Demonstration Guide
 
 This is the operator/host-facing guide. Implementation detail and the full evidence
-trail live in `docs/TASK08-result.md`.
+trail live in `docs/archive/TASK08-result.md`.
 
 **No key is used and no Concordium transaction is submitted by anything in this guide.**
 Settlement is simulated. The gateway cannot sign. Two things do require network access:
@@ -31,6 +31,9 @@ It is a **local stdio MCP server**. No dashboard, no hosted service, no API key.
   `npm run build` emits `dist/`; `npm run typecheck` is the no-emit check.
 - Outbound HTTPS for the live registry + agent card fetch. The test suite needs no
   network (every fetch is an injected mock); the demo needs it for steps 1–4.
+- The interoperability suite (`test/task19-mcp-interop.test.mjs`) uses the official
+  `@modelcontextprotocol/sdk` client, installed as a devDependency by `npm ci`. The
+  **server does not depend on it** — it is a test-only peer used to prove conformance.
 
 ---
 
@@ -69,9 +72,11 @@ Environment (all optional, all operator-controlled — **never client-supplied**
 **Cursor / Continue / any MCP client** — same shape: `command: node`,
 `args: ["<abs path>/dist/mcp/server.js"]`. stdio transport, newline-delimited JSON-RPC 2.0.
 
-> Verified: the protocol is implemented and driven by a real subprocess client.
+> Verified: the protocol is implemented and driven by a real subprocess client, and
+> interoperates with the **official MCP TypeScript SDK client**
+> (`@modelcontextprotocol/sdk` 1.32.2) — see §9a.
 > **Not verified:** a specific third-party host UI. If a host requires HTTP/SSE instead of
-> stdio, it is unsupported (see §8).
+> stdio, it is unsupported (see §9).
 
 ### Manual smoke test
 
@@ -193,8 +198,22 @@ inside `AGENTTRUST_AUDIT_ROOT`. Returns `ok`, `events`, `problems`, `warnings`,
 | Decision | Meaning | Commerce |
 |---|---|---|
 | `TRUSTED` | Every required check PASS | allowed |
-| `REJECTED` | At least one hard check FAIL | **denied** |
-| `INCONCLUSIVE` | Information missing; nothing failed outright | **denied** |
+| `REJECTED` | **Obtained** evidence positively contradicts a mandatory requirement (hash, owner, contract, revocation, invalid card content) | **denied** |
+| `INCONCLUSIVE` | Required evidence could not be obtained or established | **denied** |
+
+A verdict is a conclusion about the *agent's claims*. It is reported alongside two orthogonal
+fields that must not be confused with it:
+
+| Field | Vocabulary | Meaning |
+|---|---|---|
+| `trust_decision` | `TRUSTED` / `REJECTED` / `INCONCLUSIVE` | the verdict |
+| `failure_kind` | `none` / `contradiction` / `unavailable` | **why** — did evidence contradict, or is evidence missing? |
+| `checks.*` | `PASS` / `FAIL` / `INCONCLUSIVE` / `NOT_TESTED` | per-requirement result |
+| `failed_requirements` | check names | which requirement(s) were contradicted |
+
+**`REJECTED` always implies `failure_kind: "contradiction"`.** An unreachable endpoint, an HTTP
+error, a DNS/TLS failure or a timeout is `INCONCLUSIVE` with `failure_kind: "unavailable"` — the
+agent is not accused of anything. `card_retrieved` is retrieval status and is never `FAIL`.
 
 Per-check vocabulary: `PASS`, `FAIL`, `INCONCLUSIVE`, `NOT_TESTED`.
 
@@ -203,9 +222,51 @@ Per-check vocabulary: `PASS`, `FAIL`, `INCONCLUSIVE`, `NOT_TESTED`.
 - `hash_matches_on_chain: PASS` means the card bytes **you fetched** hash to the value the
   registry recorded. The registry is the authority; the card is the claim.
 - An unknown token id is `INCONCLUSIVE` (`agent_discovered=INCONCLUSIVE`), never `TRUSTED`.
+- **No HTTP status code alone produces `REJECTED`.** 400/401/403/404/410 mean the endpoint does
+  not serve the card; 3xx means it redirects and is not followed; 408/429/5xx, DNS, TLS, refusal
+  and timeout are all availability. Every one of them is `INCONCLUSIVE`.
 - A real third-party agent can legitimately be `REJECTED` — the demo shows this: token 19
   has a byte-exact matching on-chain hash but its card does not carry a Concordium badge
   extension, so `card_valid`, `owner_matches` and `contract_references_match` all FAIL.
+
+### Error reporting: protocol errors vs tool errors
+
+MCP distinguishes the two, and so does this server:
+
+| Situation | Wire shape |
+|---|---|
+| Unknown tool name | JSON-RPC error `-32602` (`unknown tool: …`) |
+| `tools/call` without a string `params.name` | JSON-RPC error `-32602` |
+| Notifications (`notifications/*`, unknown ones too) | **no response at all** |
+| Known method, bad name | JSON-RPC error `-32601` |
+| Invalid input for a *known* tool (missing field, wrong type, forbidden field, oversize) | result with `isError: true` and `{"error":{"code","message"}}` |
+| A `REJECTED` or `INCONCLUSIVE` trust verdict | **normal result** — a verdict is data, not a protocol failure |
+
+A trust rejection is never an error and never an exception: it is a successful call whose
+payload says `trust_decision: "REJECTED"`, which the policy then denies. Clients that treat
+`isError` as "the tool broke" will therefore handle verdicts correctly.
+
+---
+
+## 7a. Protocol version and client compatibility
+
+- Server protocol version: **`2024-11-05`**, pinned in `src/mcp/server.ts`.
+- A client requesting a newer version (`2025-06-18`, `2025-11-25`, …) is answered with
+  `2024-11-05` rather than an error. MCP requires the client to accept the server's
+  version, and the official SDK does.
+- Server capabilities: `{"tools": {}}`. No `resources`, `prompts`, `logging`, or
+  `listChanged` — those are genuinely not implemented, and the capability object says so.
+
+Interoperability was verified against the official **`@modelcontextprotocol/sdk` 1.32.2**
+TypeScript client over stdio: handshake, capability read, `tools/list`, six tool calls,
+protocol-error paths, notification silence, and graceful shutdown. That SDK is a
+**devDependency only** — it is not shipped, and the server does not depend on it.
+Reproduce with `node test/task19-mcp-interop.test.mjs` (12 checks, offline, ~3 s).
+
+**What this does and does not prove.** The SDK is the library MCP hosts are built on, so
+protocol conformance is real evidence. It is not the same as a specific host's UI: Claude
+Desktop, Cursor, and Continue were **not** driven here, and no claim is made about them
+beyond "they speak this protocol over stdio".
 
 ---
 
@@ -284,10 +345,24 @@ payment or obtain signing material.
    consistent rewrite of **both** log and checkpoint is undetectable. `audit.verify`
    proves internal consistency and catches unsophisticated tampering; it is not proof the
    log was never rolled back by someone with write access. Details:
-   `docs/TASK06-result.md` §6–§7.
+   `docs/archive/TASK06-result.md` §6–§7.
 9. **The default audit root is shared** (`/tmp/agenttrust-audit`). On a multi-user host any
    local user who can run the server can verify any other run's trail there. Set
    `AGENTTRUST_AUDIT_ROOT` per user if that matters.
+10. **Protocol version is pinned to `2024-11-05`.** Newer revisions (`2025-03-26`,
+    `2025-06-18`, `2025-11-25`) add features this server does not implement — structured
+    tool output, `outputSchema`, elicitation, tasks. Clients still connect, because MCP
+    downgrades to the server's version; they simply get the older surface. Moving forward
+    needs a deliberate revision, not a string change.
+11. **No `outputSchema` / `structuredContent`.** Tool results are JSON *text* blocks, which
+    every client can read but which machines must parse. Structured output is the natural
+    next upgrade and requires protocol ≥ `2025-06-18`.
+12. **No progress, cancellation, or logging notifications.** The server stays silent on
+    `notifications/cancelled` and `notifications/progress` and emits no
+    `notifications/message`. A long `registry.search` cannot be cancelled mid-flight; it is
+    bounded by a 30 s execution timeout instead.
+13. **`listChanged` is absent**, so a client will not expect tool-list updates — correct,
+    because the six tools are static.
 
 ---
 

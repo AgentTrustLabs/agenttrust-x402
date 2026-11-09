@@ -16,7 +16,7 @@
  */
 
 import { createInterface } from 'node:readline';
-import { TOOLS, callTool, type ServerConfig } from './tools.js';
+import { TOOLS, callTool, findTool, type ServerConfig } from './tools.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'agenttrust-gateway', version: '1.0.0' };
@@ -29,6 +29,9 @@ const SERVER_INFO = { name: 'agenttrust-gateway', version: '1.0.0' };
 const config: ServerConfig = {
   registryBase: process.env['AGENTTRUST_REGISTRY_MCP'] ?? 'https://agent-registry-mcp.concordium.com',
   auditRoot: process.env['AGENTTRUST_AUDIT_ROOT'] ?? '/tmp/agenttrust-audit',
+  // Off unless the operator says otherwise: a permissionless registry can otherwise point
+  // an agent_uri at loopback or cloud metadata. Not reachable from any MCP tool argument.
+  allowPrivateCardHosts: process.env['AGENTTRUST_ALLOW_PRIVATE_CARD_HOSTS'] === '1',
 };
 
 interface RpcRequest {
@@ -76,6 +79,9 @@ async function handle(req: RpcRequest): Promise<RpcResponse | null> {
       });
 
     case 'notifications/initialized':
+    case 'notifications/cancelled':
+    case 'notifications/progress':
+    case 'notifications/roots/list_changed':
     case 'initialized':
       return null;
 
@@ -93,8 +99,15 @@ async function handle(req: RpcRequest): Promise<RpcResponse | null> {
 
     case 'tools/call': {
       const params = (req.params ?? {}) as { name?: unknown; arguments?: unknown };
+      // Invalid *params* (unknown tool, non-string name) are protocol errors, per the
+      // MCP spec's "Protocol Errors: Unknown tools / Invalid arguments". Input that is
+      // invalid for a *known* tool stays a tool result with `isError: true`
+      // ("Tool Execution Errors: Invalid input data").
       if (typeof params.name !== 'string') {
-        return reply(id, toolContent({ code: 'INVALID_INPUT', message: 'params.name must be a string' }, true));
+        return fail(id, -32602, 'params.name must be a string');
+      }
+      if (!findTool(params.name)) {
+        return fail(id, -32602, `unknown tool: ${params.name.slice(0, 64)}`);
       }
       const out = await callTool(config, params.name, params.arguments ?? {});
       if (out.ok) return reply(id, toolContent(out.result));
@@ -106,7 +119,13 @@ async function handle(req: RpcRequest): Promise<RpcResponse | null> {
   }
 }
 
-/** Read newline-delimited JSON, tolerating optional Content-Length framing. */
+/**
+ * Read newline-delimited JSON, tolerating optional Content-Length framing.
+ *
+ * JSON-RPC notifications (no `id` member) never receive a response — including
+ * unknown ones, which the MCP spec requires to be silent. Sending a reply with
+ * `id: null` for a notification corrupts the peer's request/response pairing.
+ */
 function startStdio(): void {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   rl.on('line', line => {
@@ -123,12 +142,16 @@ function startStdio(): void {
       send(fail(req.id ?? null, -32600, 'invalid request'));
       return;
     }
+    // JSON-RPC: a request is a *notification* only when it has no `id` member at all.
+    // An explicit `id: null` is still a request and must be answered.
+    const isNotification = !('id' in req);
     void handle(req)
       .then(res => {
-        if (res) send(res);
+        if (res && !isNotification) send(res);
       })
       .catch(e => {
         // Never leak a stack trace across the boundary.
+        if (isNotification) return;
         send(fail(req.id ?? null, -32603, String((e as Error)?.message ?? e).split('\n')[0]!.slice(0, 200)));
       });
   });

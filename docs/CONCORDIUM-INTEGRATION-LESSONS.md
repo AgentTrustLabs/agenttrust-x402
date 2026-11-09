@@ -368,7 +368,7 @@ Regression: `test/regression-bytes.test.mjs`
 
 | Artefact | Path | Shows |
 |---|---|---|
-| Result report | `docs/TASK02-result.md` | full trail: 3 finalized txs, block hashes, costs |
+| Result report | `docs/archive/TASK02-result.md` | full trail: 3 finalized txs, block hashes, costs |
 | Registration manifest | `docs/evidence/task02/registration-manifest.json` | sanitized register inputs/outputs |
 | Register payload | `docs/evidence/task02/register-payload.json` | MCP `parameter_hex` + `parameter_json` |
 | Dry run | `docs/evidence/task02/dry-run.json` | `invokeContract` accepted the payload |

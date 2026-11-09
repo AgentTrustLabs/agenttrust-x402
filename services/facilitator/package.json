@@ -1,0 +1,17 @@
+{
+  "name": "@agenttrust/facilitator",
+  "version": "0.0.0-prototype",
+  "private": true,
+  "description": "Isolated x402 Concordium Exact facilitator prototype (mock signer, no chain access). Not the AgentTrust Gateway.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "FACILITATOR_MODE=mock node dist/server.js",
+    "test": "node ../../test/task25-facilitator.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

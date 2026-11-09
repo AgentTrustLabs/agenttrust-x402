@@ -263,6 +263,16 @@ export interface ServerConfig {
   fetchImpl?: Parameters<typeof fetchCardBytes>[1];
   /** Fixed clock for deterministic tests. */
   nowSeconds?: number;
+  /**
+   * Permit `agent_uri` values that resolve to private/loopback addresses.
+   *
+   * Off by default: the registry is permissionless, so an attacker-registered agent could
+   * otherwise make the gateway fetch `http://169.254.169.254/...` or `http://127.0.0.1`.
+   * Operators running a local registry stub set this explicitly; no MCP client can.
+   */
+  allowPrivateCardHosts?: boolean;
+  /** Bound on a single card fetch, in ms. */
+  cardTimeoutMs?: number;
 }
 
 function registry(cfg: ServerConfig, network: string): AgentRegistryMcp {
@@ -398,7 +408,10 @@ export async function toolRegistryCard(cfg: ServerConfig, rawArgs: unknown): Pro
   }
 
   const fetched = await withTimeout(
-    fetchCardBytes(String(record['agent_uri']), cfg.fetchImpl ?? (fetch as never)),
+    fetchCardBytes(String(record["agent_uri"]), cfg.fetchImpl as never, {
+      ...(cfg.allowPrivateCardHosts ? { allowPrivateHosts: true } : {}),
+      ...(cfg.cardTimeoutMs !== undefined ? { timeoutMs: cfg.cardTimeoutMs } : {}),
+    }),
   );
   if (!fetched.ok || !fetched.bytes) {
     return { ...empty, error: fetched.error ?? `HTTP ${fetched.status}` };
@@ -433,7 +446,25 @@ export interface VerifyToolResult {
   token_id: number;
   network: string;
   trust_decision: TrustResult['trust_decision'];
-  checks: Omit<TrustResult, 'evidence' | 'trust_decision'>;
+  checks: Pick<
+    TrustResult,
+    | 'agent_discovered'
+    | 'card_retrieved'
+    | 'card_valid'
+    | 'badge_valid'
+    | 'hash_matches_on_chain'
+    | 'owner_matches'
+    | 'status_active'
+    | 'contract_references_match'
+  >;
+  /**
+   * Whether the verdict rests on a contradiction of supplied evidence or on evidence that
+   * could not be obtained. Orthogonal to `trust_decision`: a REJECTED can only come from
+   * `contradiction`.
+   */
+  failure_kind: TrustResult['failure_kind'];
+  /** The failed verification requirement(s), populated for a contradiction. */
+  failed_requirements: string[];
   evidence: TrustResult['evidence'];
   /** Short, actionable reason list for a rejected/inconclusive verdict. */
   reasons: string[];
@@ -452,21 +483,32 @@ export async function toolTrustVerify(cfg: ServerConfig, rawArgs: unknown): Prom
     verifyAgent({
       expect: expectationFor(network, tokenId, expectOwner),
       discoveryPayload: discovery,
-      fetchImpl: (cfg.fetchImpl ?? (fetch as never)) as never,
+      ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl as never } : {}),
+      ...(cfg.cardTimeoutMs !== undefined ? { cardTimeoutMs: cfg.cardTimeoutMs } : {}),
+      ...(cfg.allowPrivateCardHosts ? { allowPrivateCardHosts: true } : {}),
     }),
   );
 
   const reasons: string[] = [];
   for (const [check, verdict] of Object.entries(result)) {
-    if (check === 'evidence' || check === 'trust_decision') continue;
+    if (['evidence', 'trust_decision', 'failure_kind', 'failed_requirements'].includes(check)) continue;
     if (verdict === 'FAIL') reasons.push(`${check}=FAIL`);
     else if (verdict === 'INCONCLUSIVE') reasons.push(`${check}=INCONCLUSIVE`);
+  }
+  // Say plainly which of the two situations this is, so a consumer cannot read
+  // "REJECTED" as "the endpoint was down" or "INCONCLUSIVE" as "the agent lied".
+  if (result.failure_kind === 'unavailable') {
+    reasons.unshift('evidence_unavailable: the required evidence could not be obtained; this is not a finding against the agent');
+  } else if (result.failure_kind === 'contradiction') {
+    reasons.unshift(`contradicted_requirement(s): ${result.failed_requirements.join(', ') || 'unspecified'}`);
   }
 
   return {
     token_id: tokenId,
     network,
     trust_decision: result.trust_decision,
+    failure_kind: result.failure_kind,
+    failed_requirements: result.failed_requirements,
     checks: {
       agent_discovered: result.agent_discovered,
       card_retrieved: result.card_retrieved,
@@ -581,7 +623,7 @@ export async function toolCommerceSimulate(cfg: ServerConfig, rawArgs: unknown):
   const audit = new AuditTrail({ filePath: auditPath });
 
   const deps: OrchestratorDeps = {
-    fetchImpl: (cfg.fetchImpl ?? (fetch as never)) as never,
+    ...(cfg.fetchImpl ? { fetchImpl: cfg.fetchImpl as never } : {}),
     facilitator,
     createPaymentPayload: async req => structuralPayload(req),
     discover: async (_c, target) => discoverOne(cfg, network, target.tokenId),
@@ -591,6 +633,8 @@ export async function toolCommerceSimulate(cfg: ServerConfig, rawArgs: unknown):
     }),
     policy,
     audit,
+    ...(cfg.allowPrivateCardHosts ? { allowPrivateCardHosts: true } : {}),
+    ...(cfg.cardTimeoutMs !== undefined ? { cardTimeoutMs: cfg.cardTimeoutMs } : {}),
   };
 
   const result = await withTimeout(

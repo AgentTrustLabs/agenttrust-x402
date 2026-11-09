@@ -3,7 +3,7 @@
  *
  * All offline. The facilitator is either a mock `fetch` or a mock
  * `ConsumerFacilitator`; the two live probes used as evidence were run once by
- * hand and are recorded in docs/TASK07-result.md, never here.
+ * hand and are recorded in docs/archive/TASK07-result.md, never here.
  */
 
 import {
