@@ -53,8 +53,8 @@ the browser never see key material. Spending is gated by the permission layer: l
 recipient allowlist, network binding, manual approval, and reservations are enforced
 before any facilitator call.
 
-See [`docs/connect-wallet-agent-pairing.md`](docs/connect-wallet-agent-pairing.md) and
-the other capability documents listed below.
+See [`docs/integration.md`](docs/integration.md) for the wallet, pairing, x402, and Concordium
+integration surfaces.
 
 ---
 
@@ -97,7 +97,7 @@ node dist/cli/verify.js --token-id 1004 # read-only, exit 0 = TRUSTED
 | `node dist/cli/verify.js --token-id 1004` | Read-only cross-agent trust verification against the **live** registry | `0` trusted · `1` rejected · `3` usage/transport |
 | `node dist/cli/commerce.js --token-id 1004 --out <dir>` | Full trust-gated commerce run with a **mock** facilitator | `0` granted · `1` trust rejected · `2` payment rejected · `3` usage |
 | `node dist/mcp/server.js` | MCP server over stdio (JSON-RPC 2.0) | `0` on clean shutdown |
-| `node scripts/task08-demo.mjs` | End-to-end hackathon demo (9 steps) | `0` all steps pass · `3` demo/transport failure |
+| `node scripts/mcp-demo.mjs` | End-to-end hackathon demo (9 steps) | `0` all steps pass · `3` demo/transport failure |
 | `node dist/cli/index.js --owner <base58>` | Registration flow (**writes to chain** — operator wallet required) | `1` usage/error |
 
 The four `bin` names (`agenttrust`, `agenttrust-verify`, `agenttrust-commerce`, `agenttrust-mcp`) require
@@ -111,7 +111,7 @@ The four `bin` names (`agenttrust`, `agenttrust-verify`, `agenttrust-commerce`, 
 
 ## MCP
 
-Full setup, tool schemas, and invocation examples: **[`docs/MCP-GUIDE.md`](docs/MCP-GUIDE.md)**.
+Full setup, tool schemas, and invocation examples: **[`docs/integration.md`](docs/integration.md)**.
 
 ```json
 {
@@ -149,8 +149,8 @@ nothing more.
 There is **no publicly reachable CCD x402 facilitator** for `ccd:4221332d34e1694168c2a0c0b3fd0f27`.
 Every plausible Concordium facilitator hostname resolves to NXDOMAIN, and the public
 `x402.org/facilitator` advertises nine networks — none of them `ccd:`. This was verified directly, twice,
-in the archived facilitator discovery report. Real settlement needs a facilitator that the gateway does
-not have and will not fabricate.
+in the archived facilitator discovery report (now consolidated into `docs/integration.md`). Real
+settlement needs a facilitator that the gateway does not have and will not fabricate.
 
 ### Why the gateway cannot sign
 
@@ -196,22 +196,17 @@ src/
   cli/        verify / commerce / registration entry points
 test/         70+ suites, offline
 scripts/      per-task verification + demo scripts
-docs/         per-task reports, evidence, and MCP guide
+docs/         architecture, configuration, integration, testnet demo
 ```
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [`docs/MCP-GUIDE.md`](docs/MCP-GUIDE.md) | Setup, tool schemas, invocation examples, security boundaries, demo script |
-| [`docs/connect-wallet-agent-pairing.md`](docs/connect-wallet-agent-pairing.md) | Connect Wallet page, ownership verification, agent pairing |
-| [`docs/agent-wallet-permissions.md`](docs/agent-wallet-permissions.md) | Permission model, spending limits, reservations, approvals |
-| [`docs/agentic-wallet-core.md`](docs/agentic-wallet-core.md) | Dedicated agent wallets, signing boundary, SQLite persistence |
-| [`docs/agent-wallet-skills.md`](docs/agent-wallet-skills.md) | Agent Wallet Skills manifest and schemas |
-| [`docs/agent-wallet-x402-integration.md`](docs/agent-wallet-x402-integration.md) | HTTP 402 → wallet → payment → provider verification flow |
-| [`docs/http-x402-integration.md`](docs/http-x402-integration.md) | Local HTTP x402 provider and end-to-end integration |
-| [`docs/CONCORDIUM-INTEGRATION-LESSONS.md`](docs/CONCORDIUM-INTEGRATION-LESSONS.md) | Verified vs undocumented Concordium behaviour |
-| [`docs/archive/`](docs/archive/) | Per-task engineering reports (historical evidence) |
+| [`docs/architecture.md`](docs/architecture.md) | Architecture, components, trust/commerce flows, wallet permissions, audit trail |
+| [`docs/configuration.md`](docs/configuration.md) | Environment variables, secret handling, sponsor wallet provisioning, spending controls |
+| [`docs/integration.md`](docs/integration.md) | MCP tools, wallet skills, x402, Concordium integration, BLOCKED status |
+| [`docs/testnet-demo.md`](docs/testnet-demo.md) | Running and verifying the Testnet demo, live evidence, troubleshooting |
 
 ## Known limitations
 
@@ -223,7 +218,7 @@ docs/         per-task reports, evidence, and MCP guide
 5. **Audit trail is not immutable.** The hash chain detects modification, insertion, deletion, reordering
    and tail truncation — but a consistent rewrite of **both** the log and its checkpoint is undetectable,
    because the checkpoint lives beside the log with no external anchor. See
-   the archived audit-trail report §6–§7.
+   [`docs/architecture.md`](docs/architecture.md).
 6. **`AGENTTRUST_AUDIT_ROOT` defaults to `/tmp/agenttrust-audit`**, shared by all runs on the host.
 7. **Third-party agent cards vary** — dead URLs, `localhost` URLs, and re-published cards whose hash no
    longer matches are all present in the live registry.
@@ -238,8 +233,7 @@ reserved by default — add a license before any external redistribution.
 This project is a **source repository with local CLI and MCP distribution**, not a public npm package:
 
 - `"private": true` — set so an accidental `npm publish` is refused; npm treats it as non-publishable
-  (the guard itself was not observable here because this host has no registry credentials — see
-  the archived packaging report §NOT TESTED).
+  (the guard itself was not observable here because this host has no registry credentials).
 - No `license`, `repository`, `author`, `homepage`, or `publishConfig` is declared, so nothing implies a
   registry target that does not exist.
 - No library entry point (`exports`/`main`) — the surfaces are the four `bin` commands and the stdio MCP

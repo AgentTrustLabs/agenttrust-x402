@@ -36,6 +36,8 @@ import { createWalletPaymentExecutor } from '../src/pairing/walletPaymentPipelin
 import { mockFacilitator, structuralPayload } from '../src/commerce/simulation.js';
 import { buildPaymentRequirements, buildPaymentRequired, preflightPaymentPayload } from '../src/payments/x402.js';
 import { createX402Provider } from '../src/x402/provider.js';
+import type { ChainVerifier } from '../src/x402/provider.js';
+import { ConcordiumChainVerifier } from '../src/x402/concordiumChainVerifier.js';
 import { AgentWalletX402Client } from '../src/pairing/walletX402Client.js';
 import { createProviderPaymentExecutor } from '../src/pairing/walletX402Client.js';
 import { createPairingHandler } from '../src/pairing/server.js';
@@ -94,9 +96,17 @@ async function main(): Promise<void> {
     }),
   });
 
-  // TASK 75: x402 provider bound to a demo resource. The chain verifier fails closed
-  // (`unavailable`) because this process performs no real on-chain read and no
-  // settlement is enabled — the provider therefore never releases the resource here.
+  // TASK 80: real Testnet chain verifier. The provider never releases content unless
+  // the on-chain read confirms a finalized, matching transaction. The previous
+  // `unavailable` mock is retained only behind an explicit env flag for tests.
+  const useMockChain = process.env.AGENTTRUST_X402_MOCK_CHAIN === '1';
+  const x402Chain: ChainVerifier = useMockChain
+    ? { async readTransfer() { return { status: 'unavailable' as const }; } }
+    : new ConcordiumChainVerifier({ host: NODE_HOST, port: NODE_PORT, network: NETWORK, useTls: NODE_HOST_RAW.startsWith('https') });
+  if (!useMockChain) {
+    await (x402Chain as ConcordiumChainVerifier).verifyNode();
+  }
+
   const x402Requirements = buildPaymentRequirements({
     payTo: process.env.AGENTTRUST_X402_PAY_TO ?? '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8',
     amountMicroCcd: process.env.AGENTTRUST_X402_AMOUNT ?? '500',
@@ -112,7 +122,7 @@ async function main(): Promise<void> {
     },
     {
       facilitator: mockFacilitator('ok'),
-      chain: { async readTransfer() { return { status: 'unavailable' as const }; } },
+      chain: x402Chain,
     },
     { preflight: preflightPaymentPayload, buildRequired: buildPaymentRequired },
   );

@@ -128,7 +128,7 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
       timeoutMs !== undefined ? { timeoutMs } : {},
     );
     // TASK49 outcome → SponsorSigner status. Lossy by necessity: the shared signer
-    // contract has four values. Mapping is documented in docs/archive/TASK51-v1-sponsored-submission.md.
+    // contract has four values. Mapping is documented in docs/architecture.md.
     switch (observed.status) {
       case 'finalized':
         return { txHash, status: 'finalized', sender: opts.sponsorAddress, simulated: true };

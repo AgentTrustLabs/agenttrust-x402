@@ -311,7 +311,7 @@ export async function httpGetPinned(
   const remaining = () => Math.max(1, deadlineAt - Date.now());
 
   // DNS is raced against the deadline. The OS resolver cannot be aborted (see
-  // docs/archive/TASK22-result.md §Limitations), so the late answer is *discarded*: the flag below
+  // docs/architecture.md §Limitations), so the late answer is *discarded*: the flag below
   // makes the abandoned promise's continuation a no-op, and the pinned transport is never
   // handed a resolver that can still fire.
   let cancelled = false;

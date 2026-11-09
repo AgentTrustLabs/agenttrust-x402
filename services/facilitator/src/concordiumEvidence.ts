@@ -6,7 +6,7 @@
  * facilitator's `EvidenceVerifier` contract. Never signs, submits, or constructs
  * transactions.
  *
- * Verified SDK behaviour (see docs/archive/TASK30-concordium-evidence-verifier.md):
+ * Verified SDK behaviour (see docs/integration.md):
  *  - `getBlockItemStatus(hash)` returns `{status: 'received'|'committed'|'finalized', ...}`.
  *  - `finalized` carries `outcome.blockHash` and `outcome.summary.hash` (the tx hash).
  *  - `committed` carries `outcomes[]` (array of `{blockHash, summary}`).

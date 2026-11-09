@@ -153,7 +153,7 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
     const handle = (conn as any)._handle;
     const fd = handle?.fd;
     if (typeof fd !== 'number') return null;
-    const bin = opts.peerCredBin ?? `${process.cwd()}/scripts/task348-peercred`;
+    const bin = opts.peerCredBin ?? `${process.cwd()}/scripts/authz-peercred`;
     try {
       const out = execFileSync(bin, ['0'], { stdio: [fd, 'pipe', 'pipe'], encoding: 'utf8', timeout: 5000 });
       const parsed = JSON.parse(out.trim());

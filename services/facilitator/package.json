@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "FACILITATOR_MODE=mock node dist/server.js",
-    "test": "node ../../test/task25-facilitator.test.mjs"
+    "test": "npx tsx ../../test/facilitator.test.mts"
   },
   "engines": {
     "node": ">=20"

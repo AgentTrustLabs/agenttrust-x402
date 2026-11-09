@@ -8,7 +8,7 @@
  *
  * SIMULATED: settlement is mocked. No transaction is signed, submitted or on-chain.
  *
- *   agenttrust commerce --token-id 1004 --out docs/evidence/task05
+ *   agenttrust commerce --token-id 1004 --out docs/evidence/commerce-audit
  *   agenttrust commerce --token-id 1004 --facilitator reject --out /tmp/x
  *   agenttrust commerce --token-id 1004 --expect-owner <other> --out /tmp/x
  *
@@ -63,7 +63,7 @@ Exit: 0 access granted · 1 trust rejected · 2 payment rejected · 3 usage/tran
 function parseArgs(argv: string[]): Args {
   const a: Args = {
     tokenId: -1,
-    out: 'docs/evidence/task05',
+    out: 'docs/evidence/commerce-audit',
     amount: '0.25',
     network: 'testnet',
     resourceUrl: 'https://api.sabokun.my.id/agenttrust/paid/resource',
