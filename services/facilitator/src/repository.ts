@@ -20,6 +20,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { chmodSync, existsSync } from 'node:fs';
 import {
   canTransition,
   isTerminal,
@@ -344,7 +345,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   private readonly now: () => number;
   private closed = false;
 
-  constructor(path: string, opts: { now?: () => number; busyTimeoutMs?: number } = {}) {
+  constructor(path: string, opts: { now?: () => number; busyTimeoutMs?: number; fileMode?: number } = {}) {
     this.now = opts.now ?? (() => Date.now());
     this.db = new DatabaseSync(path);
     // Multi-process contention: without a busy timeout, a second writer's BEGIN IMMEDIATE
@@ -353,6 +354,20 @@ export class SqliteSettlementRepository implements SettlementRepository {
     this.db.exec(`PRAGMA busy_timeout = ${Number(opts.busyTimeoutMs ?? 5000)}`);
     this.db.exec(SCHEMA);
     this.migrate();
+    // F7: the settlement database holds payment digests, sign events and settlement
+    // state. SQLite creates the files world-readable (0644) by default, so tighten
+    // them on every open: the -shm file is recreated on each open, so a one-time
+    // chmod is not enough. Default 0600 (single-UID deployment). A deployment that
+    // shares this file across two UIDs must pass 0660 with a shared group instead.
+    // Best-effort: a chmod failure must not break startup; the containing
+    // directory (0700) is the access boundary.
+    const mode = opts.fileMode ?? 0o600;
+    for (const suffix of ['', '-wal', '-shm']) {
+      const p = `${path}${suffix}`;
+      try {
+        if (existsSync(p)) chmodSync(p, mode);
+      } catch { /* best-effort */ }
+    }
   }
 
   /**

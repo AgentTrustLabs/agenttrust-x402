@@ -35,9 +35,14 @@ export interface FacilitatorConfig {
   /** Per-process label recorded in the ledger. */
   processLabel: string | null;
   /**
-   * TASK 34.11: optional Unix socket path to the Authorization Owner. When set, the
-   * facilitator uses the IPC client and never opens the authorization database directly.
-   * When unset, the local mock-only client is used (test/prototype only).
+   * Unix socket path to the Authorization Owner. The facilitator speaks the
+   * agenttrust-authz v1 IPC protocol over it and never opens the authorization
+   * database directly.
+   *
+   * REQUIRED in real mode: without it the core would fall back to the local
+   * mock-only client, which must never authorize a real settlement. In mock
+   * mode it may be set (the IPC client is then constructed but never used to
+   * sign anything, since the mock signer cannot sign).
    */
   authorizationSocket: string | null;
   /** Busy timeout for SQLite writers under multi-process contention. */
@@ -153,8 +158,9 @@ export class ConfigurationError extends Error {
  * Fail-closed rules:
  *  - `FACILITATOR_MODE` must be explicit. There is no implicit `real`.
  *  - `mock` never needs a sponsor and never signs anything.
- *  - `real` requires a sponsor address AND a signer that is not the stub; this prototype
- *    ships no real signer, so `real` cannot start at all (see signer.ts).
+ *  - `real` requires a sponsor address, the IPC signing service (socket + UID),
+ *    the Authorization Owner socket, and `sdk` sender verification. Any of them
+ *    missing is an initialization error; there is no silent fallback.
  *  - mainnet is refused outright: this prototype is testnet-scoped.
  */
 export function loadConfig(env: Record<string, string | undefined>): FacilitatorConfig {
@@ -272,7 +278,11 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     throw new ConfigurationError('FACILITATOR_BUSY_TIMEOUT_MS must be a non-negative number');
   }
 
-  const authorizationSocket = env['FACILITATOR_AUTHZ_SOCKET'] ?? null;
+  const authorizationSocketRaw = env['FACILITATOR_AUTHZ_SOCKET'];
+  const authorizationSocket =
+    authorizationSocketRaw === undefined || authorizationSocketRaw.trim() === ''
+      ? null
+      : authorizationSocketRaw.trim();
 
   // ── TASK 41: sender signature verification ────────────────────────────────
   // Selection rule (fail-closed):
@@ -369,6 +379,22 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
   const signingServiceTimeoutMs = Number(env['FACILITATOR_SIGNING_TIMEOUT_MS'] ?? 10_000);
   if (!Number.isFinite(signingServiceTimeoutMs) || signingServiceTimeoutMs <= 0) {
     throw new ConfigurationError('FACILITATOR_SIGNING_TIMEOUT_MS must be a positive number');
+  }
+
+  // ── Authorization Owner IPC ────────────────────────────────────────────────
+  // Selection rule (fail-closed):
+  //   - `real` mode: FACILITATOR_AUTHZ_SOCKET is REQUIRED. Without it the core
+  //     would silently fall back to the local mock-only client, which must never
+  //     authorize a real settlement. The socket must be an absolute path.
+  //   - `mock` mode: optional. The IPC client is constructed when set, but the
+  //     mock signer can never sign, so no real authorization can result.
+  if (authorizationSocket !== null && !authorizationSocket.startsWith('/')) {
+    throw new ConfigurationError('FACILITATOR_AUTHZ_SOCKET must be an absolute Unix socket path');
+  }
+  if (mode === 'real' && authorizationSocket === null) {
+    throw new ConfigurationError(
+      'real mode requires FACILITATOR_AUTHZ_SOCKET — the local authorization client is test-only and must not authorize real settlements',
+    );
   }
 
   // ── TASK 48: fee and energy caps ────────────────────────────────────────

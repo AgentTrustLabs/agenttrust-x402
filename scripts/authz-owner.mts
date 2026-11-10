@@ -1,7 +1,7 @@
 /**
- * TASK 34.8 — isolated "agenttrust-authz v1" protocol harness (test-only).
+ * Authorization Owner service — the "agenttrust-authz v1" protocol endpoint.
  *
- * Implements the TASK34.7 IPC contract in a self-contained harness:
+ * Implements the IPC contract in a self-contained service:
  *   - Unix domain socket, UTF-8 JSONL framing, 64 KiB max message.
  *   - Strict validation, protocol version, operation allow-list.
  *   - Rejection of caller-supplied authorization-result fields.
@@ -9,30 +9,85 @@
  *   - Durable request idempotency (requestId → canonical request identity).
  *   - Deterministic crash injection via CRASH_AT.
  *
- * It does NOT import production settlement code. It uses its own in-memory-style SQLite DB
- * via the facilitator repository, in a temporary directory, for the authorization state.
+ * It reads and writes the shared settlement database through the same repository
+ * class the facilitator uses (SqliteSettlementRepository); it never signs and it
+ * never submits. It owns the authorization decision: the durable state gate plus
+ * the full policy, using the facilitator repository against a SQLite database.
+ *
+ * Deployment configuration (environment; defaults preserve the original test
+ * harness behaviour so existing protocol tests keep passing):
+ *   AUTHZ_SPONSOR_ADDRESS         sponsor account (default: the harness placeholder)
+ *   AUTHZ_NETWORK                 CAIP-2 network (default: Concordium Testnet)
+ *   AUTHZ_MAX_ENERGY              max execution energy in NRG (default: 10000)
+ *   AUTHZ_MAX_EXPIRY_OFFSET_SECONDS  max expiry offset from now (default: 600)
+ *   AUTHZ_ALLOWED_ASSETS          comma-separated assets (default: CCD)
+ *   AUTHZ_POLICY_VERSION          version recorded in sign events (default: v348)
+ *   AUTHZ_DB_FILE                 authorization database file. Default: <db-dir>/auth.db.
+ *                                 For a live deployment this MUST be the facilitator's
+ *                                 database file: the owner reads the same `payments` rows
+ *                                 the facilitator claims, and writes the same `sign_events`
+ *                                 the facilitator recovers from. There is no "register
+ *                                 payment" operation in the v1 protocol, so a separate
+ *                                 database would see every payment as `unknown_payment`.
+ *   AUTHZ_SEED_FIXTURES           '1' seeds the harness digests a..e into the
+ *                                 database so protocol tests have something to authorize.
+ *                                 Default is '0' (no seeding): a production database must
+ *                                 never receive fake payments. Tests and the harness
+ *                                 opt in explicitly with '1'.
  *
  * Run: npx tsx scripts/authz-owner.mts <db-dir> <socket-path> <facilitator-uid>
  * Env:  CRASH_AT = 1..5 (crash injection point)
  */
 
 import { createServer } from 'node:net';
-import { mkdirSync, chmodSync, rmSync, existsSync, lstatSync, readFileSync, readdirSync, appendFileSync } from 'node:fs';
+import { mkdirSync, chmodSync, rmSync, existsSync, lstatSync, readFileSync, readdirSync, appendFileSync, realpathSync, statSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
+import { AccountAddress } from '@concordium/web-sdk';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { MockNarrowSponsorSigner } from '../services/facilitator/src/narrowSponsorMock.js';
 
-const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const SPONSOR = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
+const CAIP2 = process.env.AUTHZ_NETWORK ?? 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
+const SPONSOR = process.env.AUTHZ_SPONSOR_ADDRESS ?? '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
+// AUTHZ_MAX_ENERGY must parse as a positive integer. BigInt() throws on garbage
+// ('abc', '', '10.5'), so a failed parse leaves 0n and the positive check below
+// produces the same clean "refusing to start" exit instead of an uncaught
+// SyntaxError stack trace.
+let maxEnergy = 0n;
+try {
+  maxEnergy = BigInt(process.env.AUTHZ_MAX_ENERGY ?? '10000');
+} catch {
+  maxEnergy = 0n;
+}
 const POLICY = {
   network: CAIP2,
   sponsor: SPONSOR,
-  maxEnergy: 10_000n,
-  maxExpiryOffsetSeconds: 600,
-  allowedAssets: ['CCD'],
-  policyVersion: 'v348',
+  maxEnergy,
+  maxExpiryOffsetSeconds: Number(process.env.AUTHZ_MAX_EXPIRY_OFFSET_SECONDS ?? '600'),
+  allowedAssets: (process.env.AUTHZ_ALLOWED_ASSETS ?? 'CCD').split(',').map((s) => s.trim()).filter(Boolean),
+  policyVersion: process.env.AUTHZ_POLICY_VERSION ?? 'v348',
 };
+
+// Fail closed on an unusable policy before listening: a bad sponsor address or a
+// non-positive limit must never start a service that authorizes real settlements.
+try {
+  AccountAddress.fromBase58(POLICY.sponsor);
+} catch {
+  console.error(`refusing to start: AUTHZ_SPONSOR_ADDRESS is not a valid Concordium account: ${POLICY.sponsor}`);
+  process.exit(3);
+}
+if (POLICY.maxEnergy <= 0n) {
+  console.error('refusing to start: AUTHZ_MAX_ENERGY must be a positive integer');
+  process.exit(3);
+}
+if (!Number.isSafeInteger(POLICY.maxExpiryOffsetSeconds) || POLICY.maxExpiryOffsetSeconds <= 0) {
+  console.error('refusing to start: AUTHZ_MAX_EXPIRY_OFFSET_SECONDS must be a positive safe integer');
+  process.exit(3);
+}
+if (POLICY.allowedAssets.length === 0) {
+  console.error('refusing to start: AUTHZ_ALLOWED_ASSETS must list at least one asset');
+  process.exit(3);
+}
 
 const MAX_MSG = 64 * 1024;
 const dir = process.argv[2];
@@ -70,15 +125,28 @@ if (st) {
 mkdirSync(dir, { recursive: true, mode: 0o700 });
 chmodSync(dir, 0o700);
 
-const db = `${dir}/auth.db`;
+// Authorization database. Default: <db-dir>/auth.db (the harness layout). A live
+// deployment points this at the facilitator's database file so the owner reads the
+// same payment rows the facilitator claims. The idempotency store below stays
+// owner-private regardless.
+const dbFileEnv = process.env.AUTHZ_DB_FILE;
+if (dbFileEnv !== undefined && !dbFileEnv.startsWith('/')) {
+  console.error('refusing to start: AUTHZ_DB_FILE must be an absolute path');
+  process.exit(3);
+}
+const db = dbFileEnv ?? `${dir}/auth.db`;
 const repo = new SqliteSettlementRepository(db, { now: () => Date.now() });
 const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => Date.now() });
 
-// Seed valid payments so the harness has something to authorize.
-for (const c of ['a', 'b', 'c', 'd', 'e']) {
-  const digest = c.repeat(64);
-  repo.noteVerified(digest, 'k');
-  repo.claim(digest, 'k');
+// Fixture seeding (harness only). Default OFF: a production database must never
+// receive fake payments. Tests and the harness opt in explicitly with
+// AUTHZ_SEED_FIXTURES=1, and only ever against a test database.
+if (process.env.AUTHZ_SEED_FIXTURES === '1') {
+  for (const c of ['a', 'b', 'c', 'd', 'e']) {
+    const digest = c.repeat(64);
+    repo.noteVerified(digest, 'k');
+    repo.claim(digest, 'k');
+  }
 }
 
 // ── durable idempotency store (owner-only) ───────────────────────────────────
@@ -97,6 +165,11 @@ CREATE TABLE IF NOT EXISTS idem (
   policy_version  TEXT NOT NULL
 );
 `);
+// Owner-private idempotency store: keep it owner-only (0600). Best-effort — the
+// directory is 0700, so this is defense-in-depth, not the access boundary.
+for (const suffix of ['', '-wal', '-shm']) {
+  try { chmodSync(`${dir}/idem.db${suffix}`, 0o600); } catch { /* file may not exist yet */ }
+}
 
 const canonicalOf = (req: Record<string, unknown>): string => {
   const c = req.context as Record<string, unknown>;
@@ -135,9 +208,14 @@ const idemGet = (requestId: string): Record<string, unknown> | undefined => {
 };
 
 const idemPut = (requestId: string, canonical: string, r: Record<string, unknown>): void => {
+  // INSERT OR IGNORE: two concurrent authorize calls with the same requestId can
+  // both miss idemGet and both reach here. The second insert must be dropped,
+  // not crash the owner with SQLITE_CONSTRAINT. The durable gate — not this
+  // store — is what prevents a second approval: authorizeSignEvent is one
+  // BEGIN IMMEDIATE transaction guarded by a partial unique index.
   idemDb
     .prepare(
-      'INSERT INTO idem (request_id, canonical, outcome, reason, detail, decided_at, policy_version) VALUES (?,?,?,?,?,?,?)',
+      'INSERT OR IGNORE INTO idem (request_id, canonical, outcome, reason, detail, decided_at, policy_version) VALUES (?,?,?,?,?,?,?)',
     )
     .run(
       requestId,
@@ -194,8 +272,17 @@ const validate = (req: Record<string, unknown>): { ok: true } | { ok: false; rea
   }
   if (typeof req.protocolVersion !== 'number' || req.protocolVersion !== 1) return { ok: false, reason: 'unsupported_protocol' };
   if (typeof req.requestId !== 'string' || req.requestId.length < 1 || req.requestId.length > 128) return { ok: false, reason: 'invalid_field' };
-  const OPS = new Set(['authorize', 'recover']);
+  const OPS = new Set(['authorize', 'recover', 'db_identity']);
   if (typeof req.operation !== 'string' || !OPS.has(req.operation)) return { ok: false, reason: 'unknown_operation' };
+  // db_identity is a read-only readiness probe: it carries no payment digest and no
+  // context, and must carry nothing else. It creates no state (no idempotency
+  // record, no sign event) and never touches the payments tables.
+  if (req.operation === 'db_identity') {
+    for (const k of Object.keys(req)) {
+      if (k !== 'protocolVersion' && k !== 'requestId' && k !== 'operation') return { ok: false, reason: 'malformed_request' };
+    }
+    return { ok: true };
+  }
   if (typeof req.paymentDigest !== 'string' || !/^[0-9a-f]{64}$/.test(req.paymentDigest)) return { ok: false, reason: 'invalid_field' };
   if (typeof req.context !== 'object' || req.context === null) return { ok: false, reason: 'missing_field' };
   const c = req.context as Record<string, unknown>;
@@ -203,10 +290,10 @@ const validate = (req: Record<string, unknown>): { ok: true } | { ok: false; rea
     if (FORBIDDEN.has(k)) return { ok: false, reason: 'forbidden_field' };
     if (!CTX_ALLOWED.has(k)) return { ok: false, reason: 'malformed_request' };
   }
-  if (typeof c.network !== 'string' || c.network !== CAIP2) return { ok: false, reason: 'wrong_network' };
+  if (typeof c.network !== 'string' || c.network !== POLICY.network) return { ok: false, reason: 'wrong_network' };
   if (typeof c.version !== 'number' || c.version !== 1) return { ok: false, reason: 'wrong_version' };
   if (typeof c.sender !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{45,55}$/.test(c.sender)) return { ok: false, reason: 'invalid_sender' };
-  if (typeof c.sponsor !== 'string' || c.sponsor !== SPONSOR) return { ok: false, reason: 'wrong_sponsor' };
+  if (typeof c.sponsor !== 'string' || c.sponsor !== POLICY.sponsor) return { ok: false, reason: 'wrong_sponsor' };
   if (typeof c.recipient !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{45,55}$/.test(c.recipient)) return { ok: false, reason: 'invalid_recipient' };
   if (typeof c.asset !== 'string' || !POLICY.allowedAssets.includes(c.asset)) return { ok: false, reason: 'unsupported_asset' };
   if (typeof c.amount !== 'string' || !/^[0-9]+$/.test(c.amount)) return { ok: false, reason: 'invalid_field' };
@@ -267,6 +354,25 @@ const server = createServer((conn) => {
         conn.write(JSON.stringify({ protocolVersion: 1, requestId: req.requestId ?? null, outcome: 'rejected', reason: v.reason }) + '\n');
         continue;
       }
+      // db_identity: read-only readiness probe (F2/F6). Answers with the identity
+      // of the shared database file this owner is actually using, so the
+      // facilitator can prove it is authorizing against the same file (same
+      // device + inode after symlink resolution). No state is created or read
+      // from the payments tables; the idempotency store is untouched.
+      if (req.operation === 'db_identity') {
+        let resolved: string;
+        let st: ReturnType<typeof statSync>;
+        try {
+          resolved = realpathSync(db);
+          st = statSync(resolved);
+        } catch (e) {
+          conn.write(JSON.stringify({ protocolVersion: 1, requestId, outcome: 'protocol_error', reason: 'db_identity_unavailable', detail: String((e as Error)?.message ?? e) }) + '\n');
+          continue;
+        }
+        conn.write(JSON.stringify({ protocolVersion: 1, requestId, outcome: 'ok', dbPath: resolved, dbDev: st.dev, dbIno: st.ino }) + '\n');
+        continue;
+      }
+
       const canonical = canonicalOf(req);
 
       // TASK 34.13: owner-mediated recovery. Reads durable records only — never creates,

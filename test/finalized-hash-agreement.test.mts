@@ -54,7 +54,7 @@ const sponsoredTx = () => ({
     numSignatures: 1,
     sponsor: { account: SPONSOR, numSignatures: 1 },
   },
-  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '1' },
+  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '250000' },
   signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
 });
 

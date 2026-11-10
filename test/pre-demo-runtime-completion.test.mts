@@ -82,6 +82,7 @@ const realEnv = (over: Record<string, string> = {}) => ({
   FACILITATOR_DB_PATH: '/tmp/t64-real.db',
   FACILITATOR_SIGNING_SERVICE_SOCKET: '/tmp/t64-sign.sock',
   FACILITATOR_SIGNING_SERVICE_UID: String(SVC_UID),
+  FACILITATOR_AUTHZ_SOCKET: '/tmp/t64-authz.sock',
   FACILITATOR_SIGNING_TIMEOUT_MS: '300',
   FACILITATOR_SENDER_VERIFY_TIMEOUT_MS: '300',
   ...over,

@@ -77,7 +77,7 @@ const req = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest => 
 });
 
 try {
-  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, 'AUTHZ_SEED_FIXTURES=1', 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   await new Promise<void>((resolve) => {
     const t = setTimeout(() => resolve(), 40000);

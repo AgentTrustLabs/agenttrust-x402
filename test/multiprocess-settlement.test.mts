@@ -98,9 +98,11 @@ test('03. different payments are processed independently', async () => {
   const cluster = await startCluster(4);
   try {
     // A genuinely different payment differs in what the payer SIGNED (the transaction body),
-    // not merely in the client's restatement of it.
+    // not merely in the client's restatement of it. The accepted amount must match the signed
+    // amount: the facilitator binds the recorded amount to the signed transaction, so a
+    // self-inconsistent fixture (signed 500000, accepted 250000) is refused, not settled.
     const a = payloadFixture();
-    const b = payloadFixture({ signedOver: { amount: '500000', nonce: 8 } });
+    const b = payloadFixture({ signedOver: { amount: '500000', nonce: 8 }, accepted: { amount: '500000' } });
 
     const results = await Promise.all([
       settle(cluster.urls[0], envelope(a, a.accepted)),

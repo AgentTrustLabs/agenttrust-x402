@@ -230,9 +230,9 @@ export class LocalAuthorizationClient implements AuthorizationClient {
 /**
  * Production client. Talks to the Authorization Owner over a Unix domain socket using the
  * agenttrust-authz v1 protocol. The facilitator never opens the authorization database.
- *
- * This implementation is structural only — it is not wired to FacilitatorCore.settle() in
- * this task and is not activated by default.
+ * The owner is consulted by FacilitatorCore.settle() for every authorization decision
+ * in real mode (loadConfig requires the socket there); the local client is only a
+ * mock/test fallback.
  */
 export class IpcAuthorizationClient implements AuthorizationClient {
   constructor(private readonly socketPath: string) {}
@@ -297,6 +297,13 @@ export class IpcAuthorizationClient implements AuthorizationClient {
         clearTimeout(timer);
         resolve({ outcome: 'owner_unavailable', reason: 'owner_unavailable', detail: e.message });
       });
+      // F9: if the owner dies mid-request the socket closes without a response.
+      // Resolve immediately instead of waiting out the 10s timeout. resolve() is
+      // idempotent: a response that already arrived wins, this is a no-op.
+      conn.on('close', () => {
+        clearTimeout(timer);
+        resolve({ outcome: 'owner_unavailable', reason: 'owner_unavailable', detail: 'connection closed before response' });
+      });
     });
   }
 
@@ -353,6 +360,73 @@ export class IpcAuthorizationClient implements AuthorizationClient {
         clearTimeout(timer);
         resolve({ outcome: 'owner_unavailable', reason: 'owner_unavailable', detail: e.message });
       });
+      // F9: same as authorize — a close without a response resolves immediately.
+      conn.on('close', () => {
+        clearTimeout(timer);
+        resolve({ outcome: 'owner_unavailable', reason: 'owner_unavailable', detail: 'connection closed before response' });
+      });
     });
   }
+
+  /**
+   * Read-only readiness probe (F2/F6). Asks the owner for the identity of the
+   * shared database file it is actually using (resolved path + device + inode),
+   * so the facilitator can prove the owner authorizes against the same file.
+   * Creates no state on either side: no idempotency record, no sign event, no
+   * approval. `reachable: false` covers a dead owner, a missing socket, a
+   * timeout, and a malformed response.
+   */
+  async probeDbIdentity(timeoutMs = 10_000): Promise<OwnerDbIdentity> {
+    const net = await import('node:net');
+    return new Promise<OwnerDbIdentity>((resolve) => {
+      const conn = net.createConnection(this.socketPath, () => {
+        conn.write(JSON.stringify({ protocolVersion: 1, requestId: crypto.randomUUID(), operation: 'db_identity' }) + '\n');
+      });
+      let buf = '';
+      const timer = setTimeout(() => {
+        conn.destroy();
+        resolve({ reachable: false, reason: 'IPC timeout' });
+      }, timeoutMs);
+      conn.on('data', (chunk) => {
+        buf += chunk.toString();
+        const idx = buf.indexOf('\n');
+        if (idx < 0) return;
+        clearTimeout(timer);
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(buf.slice(0, idx)) as Record<string, unknown>;
+        } catch {
+          conn.destroy();
+          resolve({ reachable: false, reason: 'malformed response' });
+          return;
+        }
+        conn.end();
+        if (parsed.outcome !== 'ok' || typeof parsed.dbPath !== 'string' || typeof parsed.dbDev !== 'number' || typeof parsed.dbIno !== 'number') {
+          resolve({ reachable: false, reason: 'unexpected db_identity response' });
+          return;
+        }
+        resolve({ reachable: true, dbPath: parsed.dbPath, dbDev: parsed.dbDev, dbIno: parsed.dbIno });
+      });
+      conn.on('error', (e) => {
+        clearTimeout(timer);
+        resolve({ reachable: false, reason: e.message });
+      });
+      conn.on('close', () => {
+        clearTimeout(timer);
+        resolve({ reachable: false, reason: 'connection closed before response' });
+      });
+    });
+  }
+}
+
+/** Identity of the database file the Authorization Owner is using (F2). */
+export interface OwnerDbIdentity {
+  reachable: boolean;
+  /** Resolved absolute path of the database file the owner opened. */
+  dbPath?: string;
+  /** Device + inode of that file (after symlink resolution). */
+  dbDev?: number;
+  dbIno?: number;
+  /** Why the probe failed (unreachable only). Never contains secret material. */
+  reason?: string;
 }

@@ -101,7 +101,7 @@ type Owner = { proc: ReturnType<typeof spawn> };
 let owner: Owner | null = null;
 
 const startOwner = async (crashAt = 0): Promise<Owner> => {
-  const proc = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, 'AUTHZ_SEED_FIXTURES=1', 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   await new Promise<void>((resolve) => {
     const t = setTimeout(() => { resolve(); }, 40000);

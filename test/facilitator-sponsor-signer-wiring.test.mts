@@ -14,7 +14,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Socket } from 'node:net';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, statSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, notOk, ok } from './helpers.mjs';
@@ -24,7 +24,7 @@ import { IpcAccountSigner, probeSigningService } from '../services/facilitator/s
 import { startFacilitator } from '../services/facilitator/src/server.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
-import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
+import { LocalAuthorizationClient, IpcAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { SponsorSigner } from '../services/facilitator/src/signer.js';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
@@ -53,6 +53,7 @@ const realEnv = (over: Record<string, string> = {}) => ({
   FACILITATOR_DB_PATH: '/tmp/t46-real.db',
   FACILITATOR_SIGNING_SERVICE_SOCKET: '/tmp/t46-sign.sock',
   FACILITATOR_SIGNING_SERVICE_UID: String(SVC_UID),
+  FACILITATOR_AUTHZ_SOCKET: '/tmp/t46-authz.sock',
   ...over,
 });
 
@@ -134,7 +135,7 @@ const envelope = () => {
           numSignatures: 1,
           sponsor: { account: SPONSOR, numSignatures: 1 },
         },
-        payload: { type: 'transfer', toAddress: RECIPIENT, amount: '1' },
+        payload: { type: 'transfer', toAddress: RECIPIENT, amount: '250000' },
         signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
       },
     },
@@ -240,6 +241,27 @@ test('A10. real mode accepts a valid socket + UID, substituting no default', () 
   eq(cfg.signingServiceSocket, '/tmp/t46-sign.sock', 'socket');
   eq(cfg.signingServiceUid, SVC_UID, 'uid');
   notOk(cfg.signingServiceSocket === null, 'socket never silently defaulted');
+});
+
+test('A11. real mode without an Authorization Owner socket fails closed', () => {
+  throwsConfig(
+    () => loadConfig(realEnv({ FACILITATOR_AUTHZ_SOCKET: '' })),
+    /requires FACILITATOR_AUTHZ_SOCKET/i,
+    'missing owner socket',
+  );
+});
+
+test('A12. real mode rejects a relative Authorization Owner socket path', () => {
+  throwsConfig(
+    () => loadConfig(realEnv({ FACILITATOR_AUTHZ_SOCKET: 'relative/authz.sock' })),
+    /FACILITATOR_AUTHZ_SOCKET must be an absolute Unix socket path/i,
+    'relative owner socket',
+  );
+});
+
+test('A13. real mode accepts a valid Authorization Owner socket', () => {
+  const cfg = loadConfig(realEnv());
+  eq(cfg.authorizationSocket, '/tmp/t46-authz.sock', 'owner socket');
 });
 
 // ═══ B. signer construction ═════════════════════════════════════════════════
@@ -654,6 +676,216 @@ if (!hasIpc) {
 
   process.on('exit', () => rmSync(base, { recursive: true, force: true }));
 }
+
+// ═══ F. Authorization Owner readiness + shared-database identity (F2/F6/F9) ═══
+// Runs as root: the owner here is a stub socket (no SO_PEERCRED), and the signing
+// service is a dummy listener that only needs to accept the probe connection.
+
+const TESTNET_GENESIS = '4221332d34e1694168c2a0c0b3fd0f273809612cb13d000d5c2e00e85f50f796';
+const SENDER = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
+
+const fakeNode = () => ({
+  getConsensusStatus: async () => ({ genesisBlock: TESTNET_GENESIS }),
+  getAccountInfo: async () => ({
+    accountAddress: SENDER,
+    accountThreshold: 1,
+    accountNonce: 1n,
+    accountIndex: 1n,
+    accountCredentials: {
+      '0': { v: 0, value: { type: 'initial', contents: { credentialPublicKeys: { threshold: 1, keys: { '0': { schemeId: 'Ed25519', verifyKey: 'a'.repeat(64) } } } } } },
+    },
+  }),
+  sendTransaction: async () => 'a'.repeat(64),
+  getBlockItemStatus: async () => ({ status: 'received' }),
+});
+
+/** A stub Authorization Owner that answers db_identity with a fixed identity. */
+const stubOwner = async (sock: string, identity: { dev: number; ino: number; path: string }) =>
+  rawServer(sock, (conn) => {
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk.toString();
+      const idx = buf.indexOf('\n');
+      if (idx < 0) return;
+      let req: Record<string, unknown>;
+      try {
+        req = JSON.parse(buf.slice(0, idx));
+      } catch {
+        conn.destroy();
+        return;
+      }
+      if (req.operation === 'db_identity') {
+        conn.write(JSON.stringify({ protocolVersion: 1, requestId: req.requestId, outcome: 'ok', dbPath: identity.path, dbDev: identity.dev, dbIno: identity.ino }) + '\n');
+      } else {
+        conn.write(JSON.stringify({ protocolVersion: 1, requestId: req.requestId, outcome: 'protocol_error', reason: 'unknown_operation' }) + '\n');
+      }
+    });
+  });
+
+/** A dummy signing service: accepts connections (probe passes) and destroys them. */
+const dummySigningService = async (sock: string) => rawServer(sock, (conn) => conn.destroy());
+
+const fws = (tag: string) => {
+  const dir = mkdtempSync(join(tmpdir(), `t46-f-${tag}-`));
+  return { dir, db: join(dir, 'f.db'), signSock: join(dir, 'sign.sock'), authzSock: join(dir, 'authz.sock'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+};
+
+/** Pre-create the facilitator DB so its device+inode are stable before startup. */
+const dbIdentityOf = (dbPath: string) => {
+  const repo = new SqliteSettlementRepository(dbPath, { now: () => NOW * 1000 });
+  repo.close();
+  const resolved = realpathSync(dbPath);
+  const st = statSync(resolved);
+  return { dev: st.dev, ino: st.ino, path: resolved };
+};
+
+const realEnvF = (w: ReturnType<typeof fws>) =>
+  realEnv({
+    FACILITATOR_SIGNING_SERVICE_SOCKET: w.signSock,
+    FACILITATOR_SIGNING_SERVICE_UID: String(SVC_UID),
+    FACILITATOR_AUTHZ_SOCKET: w.authzSock,
+    FACILITATOR_DB_PATH: w.db,
+    FACILITATOR_NODE_HOST: '127.0.0.1',
+    FACILITATOR_NODE_PORT: '1',
+  });
+
+test('F01. owner on the same database → startup succeeds, /healthz reports ownerReachable', async () => {
+  const w = fws('same');
+  const identity = dbIdentityOf(w.db);
+  const sign = await dummySigningService(w.signSock);
+  const owner = await stubOwner(w.authzSock, identity);
+  let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
+  try {
+    f = await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
+    const res = await fetch(`${f.url}/healthz`);
+    eq(res.status, 200, 'healthy');
+    const h = await res.json();
+    eq(h.mode, 'real', 'mode');
+    eq(h.ok, true, 'ok');
+    eq(h.ownerReachable, true, 'owner reachable');
+  } finally {
+    if (f) await f.close();
+    await owner.close();
+    await sign.close();
+    w.cleanup();
+  }
+});
+
+test('F02. owner on a different database → startup fails closed', async () => {
+  const w = fws('different');
+  const other = fws('other');
+  const identity = dbIdentityOf(other.db); // a different file
+  const sign = await dummySigningService(w.signSock);
+  const owner = await stubOwner(w.authzSock, identity);
+  try {
+    let message = '';
+    try {
+      await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    ok(/database mismatch/i.test(message), `startup refused: "${message}"`);
+  } finally {
+    await owner.close();
+    await sign.close();
+    w.cleanup();
+    other.cleanup();
+  }
+});
+
+test('F03. owner unreachable at startup → facilitator starts, /healthz reports unhealthy', async () => {
+  const w = fws('down');
+  const sign = await dummySigningService(w.signSock);
+  let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
+  try {
+    f = await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
+    const res = await fetch(`${f.url}/healthz`);
+    eq(res.status, 503, 'unhealthy status');
+    const h = await res.json();
+    eq(h.ok, false, 'not ok');
+    eq(h.ownerReachable, false, 'owner unreachable');
+    ok(typeof h.ownerReason === 'string' && h.ownerReason.length > 0, 'a reason is given');
+  } finally {
+    if (f) await f.close();
+    await sign.close();
+    w.cleanup();
+  }
+});
+
+test('F04. owner dies after startup → /healthz becomes unhealthy', async () => {
+  const w = fws('dies');
+  const identity = dbIdentityOf(w.db);
+  const sign = await dummySigningService(w.signSock);
+  const owner = await stubOwner(w.authzSock, identity);
+  let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
+  try {
+    f = await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
+    const h1 = await (await fetch(`${f.url}/healthz`)).json();
+    eq(h1.ownerReachable, true, 'healthy while owner is up');
+    await owner.close();
+    const res = await fetch(`${f.url}/healthz`);
+    eq(res.status, 503, 'unhealthy after owner death');
+    const h2 = await res.json();
+    eq(h2.ownerReachable, false, 'owner unreachable');
+  } finally {
+    if (f) await f.close();
+    await sign.close();
+    w.cleanup();
+  }
+});
+
+test('F05. owner closing mid-request resolves owner_unavailable without the full timeout', async () => {
+  const { sock, rm } = tmpsock('f05');
+  // A server that accepts and immediately destroys the connection: no response.
+  const srv = await rawServer(sock, (conn) => conn.destroy());
+  try {
+    const client = new IpcAuthorizationClient(sock);
+    const started = Date.now();
+    const r = await client.authorize({
+      paymentDigest: 'a'.repeat(64),
+      network: NETWORK,
+      version: 1,
+      sender: SENDER,
+      sponsor: SPONSOR,
+      recipient: RECIPIENT,
+      asset: 'CCD',
+      amount: '250000',
+      expiry: NOW + 200,
+      energy: 300n,
+    });
+    const elapsed = Date.now() - started;
+    eq(r.outcome, 'owner_unavailable', 'owner unavailable');
+    ok(elapsed < 5_000, `resolved in ${elapsed}ms, not the 10s timeout`);
+  } finally {
+    await srv.close();
+    rm();
+  }
+});
+
+test('F06. facilitator database files are 0600 after startup', async () => {
+  const w = fws('perm');
+  const identity = dbIdentityOf(w.db);
+  const sign = await dummySigningService(w.signSock);
+  const owner = await stubOwner(w.authzSock, identity);
+  let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
+  try {
+    f = await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
+    const mode = statSync(w.db).mode & 0o777;
+    eq(mode, 0o600, `db is 0600 (got 0o${mode.toString(8)})`);
+    for (const suffix of ['-wal', '-shm']) {
+      const p = `${w.db}${suffix}`;
+      if (existsSync(p)) {
+        const m = statSync(p).mode & 0o777;
+        eq(m, 0o600, `${suffix} is 0600 (got 0o${m.toString(8)})`);
+      }
+    }
+  } finally {
+    if (f) await f.close();
+    await owner.close();
+    await sign.close();
+    w.cleanup();
+  }
+});
 
 // ═══ runner ═════════════════════════════════════════════════════════════════
 

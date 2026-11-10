@@ -67,7 +67,7 @@ const peercredBin = join(process.cwd(), 'scripts/authz-peercred');
 
 // ── 1. Start owner with CRASH_AT=4 (crash after commit + idempotency, before response) ──
 const startOwner = (crashAt: number) => {
-  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, 'AUTHZ_SEED_FIXTURES=1', 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   let ownerErr = '';
   owner.stderr.on('data', (c) => (ownerErr += c));

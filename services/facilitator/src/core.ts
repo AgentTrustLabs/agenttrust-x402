@@ -779,6 +779,37 @@ export class FacilitatorCore {
         return { ok: false, reason: `${field} mismatch: accepted=${String(accepted[field])} required=${String(requirements[field])}` };
       }
     }
+    // F5 — amount binding. `accepted` and `requirements` are both client-supplied,
+    // so their agreement proves nothing about what the sender actually signed. The
+    // signed transaction is the only source of truth for the transfer value: bind
+    // the amount recorded in the sign event (and later in the authorization
+    // request) to the amount in the signed transaction. Only transfer-family
+    // payloads carry a transfer amount; other transaction kinds have no amount
+    // to bind, so the check is skipped for them (documented limit: the recorded
+    // amount for a non-transfer payment is the asserted amount). Comparison is
+    // numeric (BigInt), so leading zeros do not matter.
+    const signedTx = payload?.['payload']?.signedTransaction;
+    const signedPayload = signedTx?.['payload'];
+    const kind = signedPayload?.['type'];
+    if (signedTx && typeof signedTx === 'object' && signedPayload && typeof signedPayload === 'object'
+        && (kind === 'transfer' || kind === 'transferWithMemo' || kind === 3)) {
+      const asDigits = (v: unknown): string | null => {
+        if (typeof v === 'string' && /^[0-9]+$/.test(v)) return v;
+        if (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0) return String(v);
+        return null;
+      };
+      const signedAmount = asDigits(signedPayload['amount']);
+      const acceptedAmount = asDigits(accepted['amount']);
+      if (signedAmount === null) {
+        return { ok: false, reason: 'signed transaction has no usable transfer amount' };
+      }
+      if (acceptedAmount === null) {
+        return { ok: false, reason: 'accepted amount is not a non-negative integer' };
+      }
+      if (BigInt(signedAmount) !== BigInt(acceptedAmount)) {
+        return { ok: false, reason: `amount mismatch: signed=${signedAmount} accepted=${acceptedAmount}` };
+      }
+    }
     return { ok: true };
   }
 
