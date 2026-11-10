@@ -1,0 +1,105 @@
+# CI — AgentTrust Gateway
+#
+# Minimal quality gate: install, typecheck, build, test — in order, no
+# failure is hidden (no continue-on-error anywhere). Runs on every push and
+# on pull requests toward main. No secrets, no wallets, no signing, no
+# settlement, no broadcast, no Testnet access.
+#
+# Known status (2026-11-10, local run on the authorization-owner branch):
+# typecheck + build pass (root and services/facilitator). The full suite had
+# 5 failures, all addressed in the working copy (see the "Set up test users"
+# step below, src/audit/lock.ts, and test/packaging-metadata.test.mts):
+#  - test/ipc-protocol.test.mts, test/process-boundary.test.mts,
+#    test/transaction-crash.test.mts: need OS users authowner, ubuntu and
+#    authzintruder (group authclients), run via sudo. The setup step creates
+#    them; UID 1001 is taken by the `runner` user on GitHub-hosted runners,
+#    so `ubuntu` gets a free UID and the tests read it via
+#    TEST_FACILITATOR_UID (default 1001).
+#  - test/lock-hardening.test.mts E1: torn-write race in the audit lock —
+#    a contender could read the lock file while its creator was still
+#    writing it and fail as unrecoverable. Fixed: pre-stringify before
+#    create, retry briefly on malformed content, still fail closed.
+#  - test/packaging-metadata.test.mts F4.3: the assertion expected pretest
+#    to be exactly 'tsc'; the script is 'npm run build:peercred && tsc'.
+#    The assertion now checks the intended contract (pretest runs tsc).
+# See the run log before claiming green.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # The IPC suites (ipc-protocol, process-boundary, transaction-crash)
+      # spawn real processes as OS users via `sudo -u`. A stock runner has
+      # none of them, so create them here. This touches only the ephemeral
+      # runner: no passwords, no home directories, no login shells, and the
+      # users are test-only (they never own production data). UID 1001 is
+      # taken by the `runner` user on GitHub-hosted runners, so `ubuntu`
+      # gets the first free UID and the tests read it via
+      # TEST_FACILITATOR_UID (their default is 1001). `authowner`'s UID
+      # does not matter to the tests (only the name is used), so it takes
+      # 997 when free, otherwise any free UID. `authzintruder` must be a
+      # different UID from the facilitator and a member of authclients.
+      # `sudo -u <user> npx` uses sudo's secure_path, which does not
+      # include the setup-node tool cache, so node/npx are exposed under
+      # /usr/local/bin.
+      - name: Set up test users (IPC suites)
+        run: |
+          set -euo pipefail
+          sudo groupadd -f authclients
+          if ! id -u authowner >/dev/null 2>&1; then
+            if ! getent passwd 997 >/dev/null 2>&1; then sudo useradd -M -s /usr/sbin/nologin -u 997 authowner;
+            else sudo useradd -M -s /usr/sbin/nologin authowner; fi
+          fi
+          if ! id -u ubuntu >/dev/null 2>&1; then
+            if ! getent passwd 1001 >/dev/null 2>&1; then sudo useradd -M -s /usr/sbin/nologin -u 1001 ubuntu;
+            else sudo useradd -M -s /usr/sbin/nologin ubuntu; fi
+          fi
+          if ! id -u authzintruder >/dev/null 2>&1; then
+            sudo useradd -M -s /usr/sbin/nologin authzintruder
+          fi
+          sudo usermod -aG authclients ubuntu
+          sudo usermod -aG authclients authzintruder
+          sudo ln -sf "$(command -v node)" /usr/local/bin/node
+          sudo ln -sf "$(command -v npx)" /usr/local/bin/npx
+          echo "TEST_FACILITATOR_UID=$(id -u ubuntu)" >> "$GITHUB_ENV"
+          id ubuntu; id authowner; id authzintruder; getent group authclients
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (root)
+        run: npm run typecheck
+
+      - name: Build (root)
+        run: npm run build
+
+      - name: Typecheck (facilitator)
+        run: npm --prefix services/facilitator run typecheck
+
+      - name: Build (facilitator)
+        run: npm --prefix services/facilitator run build
+
+      - name: Test
+        run: npm test
