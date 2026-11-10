@@ -400,6 +400,8 @@ test('15. a client cannot point any tool at a different registry', async () => {
       { token_id: 1004, endpoint: 'https://evil.test/mcp' },
       { token_id: 1004, url: 'https://evil.test/card.json' },
       { token_id: 1004, registry: 'https://evil.test' },
+      { token_id: 1004, registry_base: 'https://evil.test/mcp' },
+      { token_id: 1004, extra: { registry: 'https://evil.test' } },
     ]) {
       const r = await callTool(h.cfg, 'trust.verify', payload);
       notOk(r.ok, `must reject ${JSON.stringify(payload)}`);
@@ -917,6 +919,29 @@ test('39. JSON-RPC notifications never receive a response', async () => {
   eq(parsed.length, 1, `exactly one response (got ${parsed.length})`);
   eq(parsed[0]!.id, 7, 'the response belongs to the request');
   ok(Array.isArray(parsed[0]!.result.tools), 'valid tools/list result');
+});
+
+test('40. a stalled registry discovery fails with TIMEOUT instead of hanging', async () => {
+  // discoverOne was the only registry path without a bound: the registry
+  // client uses a bare fetch with no AbortSignal, so a blackholed upstream
+  // hung the tool forever. withTimeout bounds the wait, and the TIMEOUT
+  // code must survive discoverOne instead of being relabelled UPSTREAM_ERROR.
+  // The production bound is 30s; shorten it for this test only.
+  const h = harness();
+  const prev = LIMITS.executionTimeoutMs;
+  (LIMITS as { executionTimeoutMs: number }).executionTimeoutMs = 100;
+  globalThis.fetch = (() => new Promise(() => {})) as unknown as typeof fetch;
+  const started = Date.now();
+  try {
+    const r = await callTool(h.cfg, 'registry.card', { token_id: 1004 });
+    notOk(r.ok, 'stalled discovery must not succeed');
+    if (!r.ok) eq(r.error.code, 'TIMEOUT', 'timeout code preserved');
+    ok(Date.now() - started < 10_000, `bounded quickly (took ${Date.now() - started}ms)`);
+  } finally {
+    (LIMITS as { executionTimeoutMs: number }).executionTimeoutMs = prev;
+    restoreFetch();
+    h.cleanup();
+  }
 });
 
 // ─── runner ────────────────────────────────────────────────────────────

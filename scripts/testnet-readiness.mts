@@ -27,7 +27,7 @@ console.log('');
 
 // 2. accounts
 const accounts: Array<[string, string]> = [
-  ['candidate sponsor (TASK51 fixture)', '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5'],
+  ['sponsor (verified live Testnet)', '3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK'],
   ['operator / sender (token 1004)',     '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d'],
 ];
 for (const [label, addr] of accounts) {

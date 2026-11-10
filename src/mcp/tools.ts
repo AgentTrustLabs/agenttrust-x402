@@ -111,6 +111,8 @@ export const REJECTED_FIELDS = [
   'url',
   'mcpbase',
   'mcp_base',
+  'registry',
+  'registry_base',
   'endpoint',
   'command',
   'shell',
@@ -318,9 +320,12 @@ function expectationFor(network: string, tokenId: number, expectOwner?: string):
 /** Discovery payload for a single token: `agent_of` reshaped to `{agents:[…]}`. */
 async function discoverOne(cfg: ServerConfig, network: string, tokenId: number): Promise<unknown> {
   try {
-    const record = await registry(cfg, network).callToolRaw('agent_of', { token_id: tokenId });
+    const record = await withTimeout(
+      registry(cfg, network).callToolRaw('agent_of', { token_id: tokenId }),
+    );
     return { agents: [record] };
   } catch (e) {
+    if (e instanceof McpToolError) throw e;
     wrapUpstream(e, 'registry agent_of');
   }
 }
