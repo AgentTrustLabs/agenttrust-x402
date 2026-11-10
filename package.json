@@ -18,14 +18,17 @@
   },
   "scripts": {
     "build": "tsc",
-    "pretest": "tsc",
+    "pretest": "npm run build:peercred && tsc",
     "test": "node test/run.mjs",
     "verify": "tsc && node dist/cli/verify.js",
     "commerce": "tsc && node dist/cli/commerce.js",
     "mcp": "tsc && node dist/mcp/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "cli": "node --import tsx --experimental-vm-modules dist/cli/index.js"
+    "cli": "node --import tsx --experimental-vm-modules dist/cli/index.js",
+    "build:peercred": "sh scripts/build-peercred.sh",
+    "prebuild": "npm run build:peercred",
+    "postinstall": "npm run build:peercred"
   },
   "dependencies": {
     "@concordium/web-sdk": "^12.0.2",

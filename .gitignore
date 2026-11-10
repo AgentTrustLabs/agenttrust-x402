@@ -39,3 +39,8 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# ─── generated native helper (build per host) ─────────────────────────────
+# Compiled from scripts/authz-peercred.c by scripts/build-peercred.sh.
+# Architecture-specific; must never be committed.
+scripts/authz-peercred
