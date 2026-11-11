@@ -375,7 +375,7 @@ const server = createServer((conn) => {
 
       const canonical = canonicalOf(req);
 
-      // TASK 34.13: owner-mediated recovery. Reads durable records only — never creates,
+      // Owner-mediated recovery. Reads durable records only — never creates,
       // modifies, or deletes an authorization record.
       if (req.operation === 'recover') {
         const ctx = req.context as Record<string, unknown>;
@@ -432,7 +432,7 @@ const server = createServer((conn) => {
         if (ev.recipient !== String(ctx.recipient)) mismatches.push('recipient');
         if (ev.energy !== String(ctx.energy)) mismatches.push('energy');
         if (ev.policy_version !== POLICY.policyVersion) mismatches.push('policy_version');
-        // TASK 34.14/34.16: full payment context binding. NULL means the record predates the
+        // Full payment context binding. NULL means the record predates the
         // binding — we cannot prove the context matches, so recovery fails closed. Legacy
         // rows get a distinct reason so operators can tell "unrecoverable legacy record"
         // apart from a genuine context mismatch.

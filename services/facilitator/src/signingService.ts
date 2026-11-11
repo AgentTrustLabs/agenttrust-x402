@@ -1,5 +1,5 @@
 /**
- * TASK 43 — Sponsor signing service (mock-only foundation).
+ * Sponsor signing service (mock-only foundation).
  *
  * A separate service that holds an injected `AccountSigner` and exposes signing over a
  * narrow IPC contract. The facilitator never sees the signer or its key material; it

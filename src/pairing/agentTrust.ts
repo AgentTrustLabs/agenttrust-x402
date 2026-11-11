@@ -1,7 +1,7 @@
 /**
  * CIS-8004 identity + Agent Card verifier for agent pairing.
  *
- * Thin adapter over the EXISTING `verifyAgent()` pipeline (TASK 03), which is the
+ * Thin adapter over the EXISTING `verifyAgent()` pipeline, which is the
  * independent-consumer verifier already used by the `trust.verify` MCP tool. The
  * pairing store stays free of network I/O; this module is the injected
  * `verifyAgentIdentity` implementation that a real deployment wires in.

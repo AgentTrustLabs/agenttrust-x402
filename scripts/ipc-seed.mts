@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — test helper: seed a payment row directly in the owner's DB.
+ * Test helper: seed a payment row directly in the owner's DB.
  * Runs as the owner user only (it needs write access).
  *
  * Run: npx tsx scripts/ipc-seed.mts <db-path> <digest>

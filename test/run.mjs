@@ -4,7 +4,7 @@
  * .test.mjs  → run with plain node (no TypeScript)
  * .test.mts  → run with tsx (these import TypeScript modules from src/)
  *
- * Requirements: the MCP transport tests (task08) spawn `node dist/mcp/server.js`,
+ * Requirements: the MCP transport tests spawn `node dist/mcp/server.js`,
  * so the project must be compiled first. `npm test` does this via the `pretest`
  * script (`tsc`); running this file directly requires `npm run build` beforehand.
  *

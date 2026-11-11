@@ -101,7 +101,7 @@ export interface StartedFacilitator {
 }
 
 /**
- * TASK 64 (C) — result of inspecting the sponsor wallet export file.
+ * Result of inspecting the sponsor wallet export file.
  *
  * Only metadata is inspected. The file contents are never read here and never logged.
  */
@@ -218,14 +218,14 @@ export async function startFacilitator(
     verifier?: EvidenceVerifier;
     now?: () => number;
     /**
-     * TEST ONLY (TASK 55): override the gRPC node client used for the sender-verification
+     * TEST ONLY: override the gRPC node client used for the sender-verification
      * account provider and for the V1 submitter. Never used in production; lets wiring
      * tests exercise real-mode startup without contacting a node or broadcasting.
      */
     nodeClient?: ConcordiumGrpcClientLike &
       Pick<ConcordiumGRPCNodeClient, 'getAccountInfo' | 'getConsensusStatus'>;
     /**
-     * TEST ONLY (TASK 64): override the wallet-export file inspector so startup tests can
+     * TEST ONLY: override the wallet-export file inspector so startup tests can
      * exercise ownership/permission checks without real secret material on disk.
      */
     walletFileInspector?: (path: string) => WalletFileInspection;
@@ -237,11 +237,11 @@ export async function startFacilitator(
   const behaviourFromEnv = process.env['FACILITATOR_BEHAVIOUR'] as MockSubmissionBehaviour | undefined;
   const behaviour = opts.behaviour ?? behaviourFromEnv;
 
-  // TASK 46: fail closed at startup when the signing service is not reachable. Real mode has
+  // Fail closed at startup when the signing service is not reachable. Real mode has
   // no local signing fallback, so booting without the service would only move the failure to
   // the first settlement request.
   if (config.mode === 'real') {
-    // TASK 64 (C): if a sponsor wallet export path is configured, verify its deployment
+    // If a sponsor wallet export path is configured, verify its deployment
     // properties before anything else. Contents are never read.
     if (config.sponsorWalletFile !== null) {
       const insp = (opts.walletFileInspector ?? inspectWalletFile)(config.sponsorWalletFile);
@@ -261,9 +261,9 @@ export async function startFacilitator(
     }
   }
 
-  // TASK 46: real mode signs through the dedicated signing service over IPC. The
+  // Real mode signs through the dedicated signing service over IPC. The
   // facilitator holds no key material in either mode.
-  // TASK 55 (B3): the V1 submitter is injected here. The signer never builds a transport
+  // The V1 submitter is injected here. The signer never builds a transport
   // itself (see ipcSponsorSigner.ts); with no submitter it stays fail-closed, which is
   // exactly the behaviour we want when the node endpoint is absent.
   const submitter =
@@ -315,7 +315,7 @@ export async function startFacilitator(
     ? new IpcAuthorizationClient(config.authorizationSocket)
     : undefined;
 
-  // ── TASK 41: production sender verification wiring ────────────────────────
+  // ── Production sender verification wiring ────────────────────────
   // Selection rule (fail-closed):
   //   - `real` mode: config.senderVerification MUST be 'sdk' (loadConfig enforced).
   //   - `mock` mode: 'passthrough' is the default; 'sdk' is allowed but never implied.
@@ -340,7 +340,7 @@ export async function startFacilitator(
     } catch (e) {
       throw new ConfigurationError(`failed to construct AccountInfoProvider: ${(e as Error).message}`);
     }
-    // TASK 48: verify the node's genesis hash at startup in real mode. No opt-out.
+    // Verify the node's genesis hash at startup in real mode. No opt-out.
     // Mock mode never reaches here (senderVerification defaults to passthrough).
     if (config.mode === 'real') {
       try {
@@ -503,11 +503,11 @@ export async function startFacilitator(
     });
   });
 
-  // TASK 64 (B): bounded startup recovery, before the socket is opened.
+  // Bounded startup recovery, before the socket is opened.
   //
   // Runs `recoverPending()` once so persisted hashes are reconciled before the facilitator
   // advertises readiness. Recovery only ever polls by hash — it can never submit or broadcast
-  // (TASK 53 test 13). A failure aborts startup (fail-closed); an incomplete-but-non-terminal
+  // A failure aborts startup (fail-closed); an incomplete-but-non-terminal
   // result is reported and startup continues, because those rows are already safe.
   if (config.recoverOnStartup && config.mode === 'real') {
     try {
@@ -538,7 +538,7 @@ export async function startFacilitator(
 
 // ─── verifier construction ─────────────────────────────────────────────
 /**
- * TASK 30: build the evidence verifier from configuration.
+ * Build the evidence verifier from configuration.
  *
  * Default (`none`) is an EMPTY fixture table: reconciliation answers "unavailable" for every
  * hash, so nothing can ever finalize. That is the default-deny behaviour the whole design
@@ -551,7 +551,7 @@ async function buildVerifier(config: FacilitatorConfig): Promise<EvidenceVerifie
     case 'fixture':
       return new FixtureEvidenceVerifier({});
     case 'grpc': {
-      // TASK 55 (B4): SDK 12.0.2 exports `ConcordiumGRPCNodeClient` from
+      // SDK 12.0.2 exports `ConcordiumGRPCNodeClient` from
       // `@concordium/web-sdk/nodejs`; there is no `GRPCClient` export. Verified declaration:
       //   lib/esm/nodejs/grpc.d.ts:17
       //     export declare class ConcordiumGRPCNodeClient extends ConcordiumGRPCClient {
@@ -580,7 +580,7 @@ if (invokedDirectly) {
     const started = await startFacilitator(process.env);
     console.log(`facilitator listening on ${started.url} (mode=${process.env['FACILITATOR_MODE']})`);
     if (process.env['FACILITATOR_MODE'] === 'real') {
-      // TASK 64 (A): accurate real-mode logging. The facilitator signs through the dedicated
+      // Accurate real-mode logging. The facilitator signs through the dedicated
       // signing service over IPC and submits through the V1 gRPC transport; no local key
       // material is held. Only non-secret operational facts are logged.
       console.log(

@@ -2,7 +2,7 @@
  * Cross-cutting regressions — the byte-level guarantees the whole flow rests on.
  *
  * These are the checks that would have caught the two extra on-chain transactions
- * we burned in TASK 02:
+ * we burned during the first registration:
  *   - parameter bytes handed to the wallet must equal the MCP parameter_hex
  *   - the card hash anchored on chain must equal the local SHA-256 of the served bytes
  */
@@ -14,7 +14,7 @@ import {
   EntrypointName,
 } from '@concordium/web-sdk';
 import { readFileSync } from 'node:fs';
-import { eq, ok, readJson, readText, sha256Hex, TASK02, EVIDENCE, FIXTURES } from './helpers.mjs';
+import { eq, ok, readJson, readText, sha256Hex, TOKEN1004, EVIDENCE, FIXTURES } from './helpers.mjs';
 
 const moduleSchema = readFileSync(`${FIXTURES}cis8004-module-schema.bin`);
 
@@ -52,16 +52,16 @@ test('setAgentURI v2 params serialize byte-identically (same-hash re-pin)', () =
 
 test('anchored card hash equals local sha256 of the served bytes', () => {
   const served = readText(`${EVIDENCE}agent-card.v2.json`);
-  eq(sha256Hex(Buffer.from(served, 'utf8')), TASK02.cardSha256, 'local hash');
+  eq(sha256Hex(Buffer.from(served, 'utf8')), TOKEN1004.cardSha256, 'local hash');
   const repin = readJson(`${EVIDENCE}repin-manifest.v2.json`);
-  eq(repin.cardSha256, TASK02.cardSha256, 'manifest hash');
+  eq(repin.cardSha256, TOKEN1004.cardSha256, 'manifest hash');
 });
 
 test('card hashing is over exact bytes — reformatting invalidates the anchor', () => {
   const served = readText(`${EVIDENCE}agent-card.v2.json`);
   const reformatted = JSON.stringify(JSON.parse(served));
   ok(reformatted !== served, 'compact re-serialization yields different bytes');
-  ok(sha256Hex(Buffer.from(reformatted, 'utf8')) !== TASK02.cardSha256, 'and therefore a different hash');
+  ok(sha256Hex(Buffer.from(reformatted, 'utf8')) !== TOKEN1004.cardSha256, 'and therefore a different hash');
 });
 
 test('dry-run was accepted before signing (recorded evidence)', () => {
@@ -71,7 +71,7 @@ test('dry-run was accepted before signing (recorded evidence)', () => {
 });
 
 test('transaction hashes in the report are well-formed', () => {
-  for (const [label, hash] of Object.entries(TASK02.txHashes)) {
+  for (const [label, hash] of Object.entries(TOKEN1004.txHashes)) {
     ok(/^[0-9a-f]{64}$/.test(hash), `${label} is a 32-byte hex hash`);
   }
 });
@@ -98,8 +98,8 @@ test('no credential material in any task artefact', () => {
     const hexValues = text.match(keyLikeValue) ?? [];
     for (const v of hexValues) {
       const h = v.replace(/"/g, '');
-      const known = h === TASK02.cardSha256 || h === TASK02.preMintSha256 ||
-                    Object.values(TASK02.txHashes).includes(h) ||
+      const known = h === TOKEN1004.cardSha256 || h === TOKEN1004.preMintSha256 ||
+                    Object.values(TOKEN1004.txHashes).includes(h) ||
                     text.includes('parameterHex') || text.includes('metadata_hash');
       ok(known, `${f}: unexpected 32-byte hex value ${h.slice(0, 16)}…`);
     }

@@ -1,5 +1,5 @@
 /**
- * TASK 39 — gRPC account info provider tests.
+ * gRPC account info provider tests.
  *
  * The provider is tested with a deterministic fake client. No network access,
  * no real account, no private keys.
@@ -17,7 +17,7 @@ import { Transaction } from '@concordium/web-sdk';
 const SENDER = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const RECIPIENT = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-// Full Testnet genesis hash, observed live in TASK40.
+// Full Testnet genesis hash, observed live on the node.
 const TESTNET_GENESIS = '4221332d34e1694168c2a0c0b3fd0f273809612cb13d000d5c2e00e85f50f796';
 
 const results: Array<[string, boolean, string]> = [];
@@ -231,6 +231,6 @@ test('13. provider feeds the SDK verifier (valid signature)', async () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask39: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\ngrpc-account-info-provider: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

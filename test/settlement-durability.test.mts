@@ -1,5 +1,5 @@
 /**
- * TASK 26 — durable settlement state, replay, and reconciliation security.
+ * Durable settlement state, replay, and reconciliation security.
  *
  * Real SQLite files in a temp dir (so restart is a real process-level restart of the
  * repository), real child processes for the concurrency test, and a fixture evidence verifier
@@ -48,7 +48,7 @@ const test = (name, fn) => tests.push([name, fn]);
 // ═══ 1. state machine ═══════════════════════════════════════════════════
 
 test('01. the transition table admits only the intended edges', () => {
-  // TASK 29 replaced the coarse `settlement_pending` with explicit pre-broadcast states.
+  // The coarse `settlement_pending` was replaced with explicit pre-broadcast states.
   eq(canTransition('created', 'prepared'), true, 'created → prepared');
   eq(canTransition('prepared', 'submitting'), true, 'prepared → submitting');
   eq(canTransition('submitting', 'outcome_unknown'), true, 'submitting → outcome_unknown');
@@ -535,7 +535,7 @@ test('24. rejected evidence is terminal failure, and cannot be reopened', async 
       repository: repo,
       verifier: new FixtureEvidenceVerifier({ [TX_A]: 'rejected' }),
     });
-    // TASK 59: a single rejection observation no longer terminalizes; a confirming
+    // A single rejection observation no longer terminalizes; a confirming
     // second observation is required.
     const first = await svc.reconcile({ paymentDigest: DIGEST_A });
     ok(first.ok, 'first rejection observed (not terminal)');
@@ -713,5 +713,5 @@ for (const [name, fn] of tests) {
   }
 }
 for (const d of dirs) rmSync(d, { recursive: true, force: true });
-console.log(`\ntask26-settlement-durability: ${n - failed}/${n} passed`);
+console.log(`\nsettlement-durability: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

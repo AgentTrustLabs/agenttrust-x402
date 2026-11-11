@@ -1,5 +1,5 @@
 /**
- * TASK 11 — secret-exposure hardening regressions.
+ * Secret-exposure hardening regressions.
  *
  * Synthetic secrets only. Nothing here generates, requests, or uses a real key,
  * and no test touches the network (the probe is run with --no-faucet).
@@ -187,7 +187,7 @@ test('11. audit assertNoSecrets still rejects secret-bearing events', () => {
     throws(() => trail.record('payment.payload.received', { outcome: 'PASS', payment: { payer: FAKE_PRIVKEY } } as never),
       'raw key material', 'a raw 64-hex value is refused');
     // record() copies a fixed field set, so an unknown top-level key never reaches
-    // assertNoSecrets(); strict validation (TASK 14) now rejects it earlier. The
+    // assertNoSecrets(); strict validation now rejects it earlier. The
     // reachable secret path in either design is a secret-named key inside agent/payment.
     throws(() => trail.record('payment.payload.received', {
       outcome: 'PASS',
@@ -290,5 +290,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String((e as Error).message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask11-secret-hardening: ${n - failed}/${n} passed`);
+console.log(`\nsecret-hardening: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

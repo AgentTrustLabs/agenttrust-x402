@@ -1,5 +1,5 @@
 /**
- * TASK 34.13 — durable authorization recovery semantics.
+ * Durable authorization recovery semantics.
  *
  * Proves the owner-mediated recovery operation:
  *   - verifies a matching durable approval against the canonical context,
@@ -263,6 +263,6 @@ test('08. a caller claiming approval does not drive recovery', async () => {
     }
   }
   const failed = results.filter((r) => !r[1]).length;
-  console.log(`\ntask34.13: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+  console.log(`\nrecovery: ${results.length - failed}/${results.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

@@ -1,5 +1,5 @@
 /**
- * TASK 27 — multi-process settlement concurrency and exactly-once submission.
+ * Multi-process settlement concurrency and exactly-once submission.
  *
  * Four real facilitator OS processes, one SQLite database, one shared submission ledger.
  * Submission attempts are counted at the signer boundary inside each process, so the numbers
@@ -156,7 +156,7 @@ test('05. altered amount, asset, network or recipient do not pay the same paymen
 
       // CRITICAL CASE: the same *signed transaction*, with only the client-restated
       // `accepted` object altered. If identity were keyed on `accepted`, this would produce a
-      // new digest and a second submission — the defect reproduced and fixed in TASK 27.
+      // new digest and a second submission — the defect reproduced and fixed here.
       const forged = { ...p, accepted: { ...p.accepted, ...override } };
       const res = await settle(cluster.urls[1], envelope(forged, forged.accepted));
       await new Promise(r => setTimeout(r, 100));
@@ -507,7 +507,7 @@ test('13b. crash between submit and record: stays pending, no re-submit', async 
       ['settle_in_progress', 'settlement_pending'].includes(String(res.body?.errorReason)),
       `non-terminal: ${res.body?.errorReason}`,
     );
-    // TASK 29 CLOSES this window: the hash is now persisted BEFORE the broadcast, so after
+    // Pre-broadcast persistence CLOSES this window: the hash is now persisted BEFORE the broadcast, so after
     // the crash the payment still carries a durable identifier and can be reconciled.
     ok(/^[0-9a-f]{64}$/.test(res.body?.transaction ?? ''), `durable hash survived the crash: ${res.body?.transaction}`);
     eq(submitAttempts(readLedger(ws.ledger)), 1, 'no second submission after the crash');
@@ -573,5 +573,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask27-multiprocess-settlement: ${n - failed}/${n} passed`);
+console.log(`\nmultiprocess-settlement: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

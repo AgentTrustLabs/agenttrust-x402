@@ -177,7 +177,7 @@ async function main(): Promise<number> {
     badge,
     // No injected card fetch: the pinned transport (resolve → validate → pin) is used.
     // Passing `fetch` here would let DNS resolve again after validation, which is exactly
-    // the rebinding gap TASK 21 closes.
+    // the rebinding gap this closes.
   });
 
   // ── 5. Report ──────────────────────────────────────────────────────────

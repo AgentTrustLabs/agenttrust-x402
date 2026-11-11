@@ -1,5 +1,5 @@
 /**
- * TASK 23 — trust verdict semantics.
+ * Trust verdict semantics.
  *
  * The contract under test:
  *
@@ -369,5 +369,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask23-verdict-semantics: ${n - failed}/${n} passed`);
+console.log(`\nverdict-semantics: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 /**
- * TASK 34 — Mock-only NarrowSponsorSigner.
+ * Mock-only NarrowSponsorSigner.
  *
  * Enforces the authorization boundary and persists a durable audit event for every decision.
  * It does NOT sign. There is no `AccountSigner` implementation here, and no code path in this
@@ -35,7 +35,7 @@ export class MockNarrowSponsorSigner implements NarrowSponsorSigner {
     // Run the deterministic policy decision first (pure, no I/O). This never touches the DB.
     const decision = decideAuthorization(request, this.policy, Math.floor(this.now() / 1000));
 
-    // TASK 34.2: atomically verify durable state + persist the audit event. The DB is the
+    // Atomically verify durable state + persist the audit event. The DB is the
     // authoritative source — caller-supplied paymentState / tx_hash are never trusted.
     let result: ReturnType<typeof this.repo.authorizeSignEvent>;
     try {
@@ -49,7 +49,7 @@ export class MockNarrowSponsorSigner implements NarrowSponsorSigner {
         recipient: request.recipient,
         energy: String(request.energy),
         policyVersion: this.policyVersion,
-        // TASK 34.14: bind the full payment context into the durable record so recovery can
+        // Bind the full payment context into the durable record so recovery can
         // prove the context matches. A caller cannot omit these without the record being
         // unusable for recovery.
         asset: request.asset,

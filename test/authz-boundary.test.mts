@@ -1,5 +1,5 @@
 /**
- * TASK 34.11 — authorization boundary integration tests (focused).
+ * Authorization boundary integration tests (focused).
  *
  * Proves, with exact signer call counts, that no path to the mock signer exists without an
  * 'approved' authorization outcome, and that the durable gate, replay protection, and the
@@ -379,6 +379,6 @@ test('15. DENY_ALL_FACILITATOR gateway behaviour is unchanged', async () => {
     }
   }
   const failed = results.filter((r) => !r[1]).length;
-  console.log(`\ntask34.11 boundary: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+  console.log(`\nauthz-boundary: ${results.length - failed}/${results.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

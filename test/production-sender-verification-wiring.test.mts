@@ -1,5 +1,5 @@
 /**
- * TASK 41 — production sender verification wiring tests.
+ * Production sender verification wiring tests.
  *
  * Proves that production (real mode) cannot select the pass-through verifier, that
  * missing/invalid configuration fails closed, and that the mock flow still works.
@@ -149,6 +149,6 @@ test('10. mock mode with sdk but unreachable endpoint constructs provider (fail 
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask41: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nproduction-sender-verification-wiring: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

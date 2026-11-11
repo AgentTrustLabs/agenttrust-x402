@@ -1,5 +1,5 @@
 /**
- * TASK 34.5 — coordinated two-statement raw attack.
+ * Coordinated two-statement raw attack.
  *
  * Models an attacker with direct SQLite access who forges a provenance nonce in the same
  * transaction as the approval row. Recorded as evidence of the residual limitation: SQLite

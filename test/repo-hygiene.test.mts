@@ -1,5 +1,5 @@
 /**
- * TASK 12 — repository hygiene: ignore rules and evidence integrity.
+ * Repository hygiene: ignore rules and evidence integrity.
  *
  * Guards the two properties this task is responsible for, so they cannot silently
  * regress:
@@ -171,7 +171,7 @@ test('07. every committed evidence file is still on disk and parses where JSON',
     for (const rel of walk(base)) {
       count++;
       const p = join(base, rel);
-      // TASK 06 deliberately stores a corrupted checkpoint as tamper evidence; that
+      // A corrupted checkpoint is deliberately stored as tamper evidence; that
       // file is *supposed* to be unparseable and is exempt from the validity check.
       const deliberatelyCorrupt = /10-checkpoint-corrupted|11-torn-tail/.test(rel);
       if (rel.endsWith('.json') && !deliberatelyCorrupt) {
@@ -187,7 +187,7 @@ test('07. every committed evidence file is still on disk and parses where JSON',
   ok(count >= 82, `evidence inventory is intact (${count} files)`);
 });
 
-test('08. the TASK 02 evidence a test reads is present', () => {
+test('08. the registry evidence a test reads is present', () => {
   for (const f of ['docs/evidence/task02/registration-manifest.json', 'docs/evidence/task02/repin-manifest.v2.json']) {
     ok(existsSync(join(ROOT, f)), `${f} exists`);
   }
@@ -251,5 +251,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String((e as Error).message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask12-repo-hygiene: ${n - failed}/${n} passed`);
+console.log(`\nrepo-hygiene: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 /**
- * TASK 50 — Concrete Concordium gRPC transport for the TASK49 adapter.
+ * Concrete Concordium gRPC transport for the adapter.
  *
  * Wraps the installed SDK's `GRPCClient` behind the `ConcordiumTransactionTransport`
  * interface. The transport is injected with a client (real or fake); it never
@@ -42,7 +42,7 @@ export interface ConcordiumGrpcClientLike {
    */
   sendTransaction?(transaction: unknown): Promise<unknown>;
   /**
-   * Deprecated V0-only path. Retained as a compatibility seam for TASK50 fakes
+   * Deprecated V0-only path. Retained as a compatibility seam for fakes
    * and legacy clients; production V1 sponsored submission must not use it.
    */
   sendAccountTransaction?(transaction: unknown, signature: unknown): Promise<unknown>;

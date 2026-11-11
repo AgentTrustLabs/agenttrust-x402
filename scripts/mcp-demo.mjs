@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * TASK 08 — end-to-end hackathon demonstration over the REAL MCP transport.
+ * End-to-end hackathon demonstration over the REAL MCP transport.
  *
  * Spawns `dist/mcp/server.js` as a subprocess and drives it exactly like an MCP
  * host would: initialize → tools/list → tools/call. Nothing is faked at the
@@ -178,7 +178,7 @@ class McpClient {
 
 /**
  * Preflight. The demo drives the compiled server; without it every request would
- * hang and the process would exit 0 having printed nothing (the TASK 09 F3 defect).
+ * hang and the process would exit 0 having printed nothing (the F3 defect).
  */
 function preflight() {
   const serverPath = join(process.cwd(), SERVER);

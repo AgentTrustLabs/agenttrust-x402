@@ -1,5 +1,5 @@
 /**
- * TASK 05 — commerce orchestration + trust policy + audit trail tests.
+ * Commerce orchestration + trust policy + audit trail tests.
  * Fully offline: a stub registry, a stub card fetcher, a mock facilitator.
  *
  * Each test asserts a gate that must hold, and several assert the *ordering*
@@ -656,5 +656,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e.message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask05-commerce: ${n - failed}/${n} passed`);
+console.log(`\ncommerce: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

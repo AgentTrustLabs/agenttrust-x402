@@ -1,5 +1,5 @@
 /**
- * TASK 04 — x402 payment module tests. Fully offline: no facilitator, no network,
+ * x402 payment module tests. Fully offline: no facilitator, no network,
  * no keys, no settlement.
  *
  * Covers: requirement construction, 402 response shape, payload preflight,
@@ -553,5 +553,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e.message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask04-x402-exact: ${n - failed}/${n} passed`);
+console.log(`\nx402-exact: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

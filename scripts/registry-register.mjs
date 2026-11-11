@@ -1,5 +1,5 @@
 /**
- * TASK 02 — live registration orchestration.
+ * Live registration orchestration.
  *
  * Runs the real flow against testnet with the funded owner account:
  *   1. build Agent Card (MCP)
@@ -169,7 +169,7 @@ async function main() {
 
   // ---- Manifest -----------------------------------------------------------
   const manifest = {
-    task: 'TASK 02 — first real CIS-8004 registration',
+    task: 'first real CIS-8004 registration',
     network: 'testnet',
     caip2: TESTNET.caip2,
     generatedAt: new Date().toISOString(),

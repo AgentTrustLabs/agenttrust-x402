@@ -1,5 +1,5 @@
 /**
- * TASK 34.11 — real IPC integration test.
+ * Real IPC integration test.
  *
  * Starts a real authorization owner process (uid authowner) on a Unix socket, points a real
  * FacilitatorCore at it via IpcAuthorizationClient, and proves the signer is reached only on
@@ -116,7 +116,7 @@ const startOwner = async (crashAt = 0): Promise<Owner> => {
 const stopOwner = async () => {
   if (!owner) return;
   // Only kill THIS suite's owner. A pattern-based pkill here would also terminate other
-  // suites' owners (task3413) running concurrently in the same test run.
+  // suites' owners running concurrently in the same test run.
   const pg = await run('pgrep', ['-f', `scripts/authz-owner.mts ${base}`], 'root');
   owner.proc.kill('SIGTERM');
   await new Promise((r) => setTimeout(r, 700));
@@ -194,5 +194,5 @@ try {
 }
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask34.11 IPC: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nipc-integration: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

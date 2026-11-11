@@ -1,5 +1,5 @@
 /**
- * TASK 34.14 — payment context integrity during authorization recovery.
+ * Payment context integrity during authorization recovery.
  *
  * The durable `sign_events` record now binds the full payment context (network, version,
  * sender, sponsor, recipient, asset, amount, expiry, energy, policy version). Recovery must
@@ -179,7 +179,7 @@ test('09. a legacy approved record with NULL context fails closed', async () => 
   repo.claim(A, 'k');
   repo.close();
 
-  // Simulate a record written before TASK 34.14: NULL asset/amount/expiry.
+  // Simulate a legacy record with NULL asset/amount/expiry.
   const { DatabaseSync } = await import('node:sqlite');
   const raw = new DatabaseSync(db);
   raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
@@ -250,6 +250,6 @@ test('13. non-approved recovery never invokes the signer or submission', async (
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask34.14: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\ncontext-integrity: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

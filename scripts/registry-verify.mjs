@@ -1,5 +1,5 @@
 /**
- * TASK 02 verification — independent, local-first.
+ * Verification — independent, local-first.
  *
  * Given a finalized registration tx hash, this script:
  *   1. re-reads the registry (indexer + chain) for the agent record

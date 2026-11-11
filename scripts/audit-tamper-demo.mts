@@ -1,5 +1,5 @@
 /**
- * Tamper demonstrations for TASK 06 — each case copies a real trail, applies one
+ * Tamper demonstrations — each case copies a real trail, applies one
  * modification, and shows the verifier's verdict. Never touches the originals.
  *
  * Run: npx tsx scripts/audit-tamper-demo.mts docs/evidence/commerce-audit

@@ -1,5 +1,5 @@
 /**
- * TASK 19 — interoperability with the official MCP TypeScript SDK client.
+ * Interoperability with the official MCP TypeScript SDK client.
  *
  * Launches the real `dist/mcp/server.js` as a child process over stdio and drives it
  * with `@modelcontextprotocol/sdk` — the same client library MCP hosts build on.
@@ -434,5 +434,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${e?.message ?? e}`);
   }
 }
-console.log(`\ntask19-mcp-interop: ${pass}/${tests.length} passed`);
+console.log(`\nmcp-interop: ${pass}/${tests.length} passed`);
 if (failures.length) process.exitCode = 1;

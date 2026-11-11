@@ -1,5 +1,5 @@
 /**
- * TASK 07 — operator signing boundary.
+ * Operator signing boundary.
  *
  * The gateway never holds a key. This module defines the *only* sanctioned way a
  * real x402 payment may become signable, and it is deliberately incapable of
@@ -362,7 +362,7 @@ export function guardSettlement(input: {
     return {
       ok: false,
       code: 'SETTLEMENT_DISABLED',
-      reason: 'settlement is disabled: TASK 07 never settles, and the flag must be enabled explicitly',
+      reason: 'settlement is disabled: operator signing never settles, and the flag must be enabled explicitly',
     };
   }
   const auth = checkAuthorization(input.authorization, input.requirements, {

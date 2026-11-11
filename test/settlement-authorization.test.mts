@@ -1,5 +1,5 @@
 /**
- * TASK 34.11 — settlement authorization boundary integration.
+ * Settlement authorization boundary integration.
  *
  * Proves that FacilitatorCore.settle() cannot reach the sponsor signer without an
  * 'approved' outcome from the authorization boundary, and that every non-approved outcome
@@ -264,6 +264,6 @@ test('07. rejected authorization leaves the payment rejected, not settled', asyn
     }
   }
   const failed = results.filter((r) => !r[1]).length;
-  console.log(`\ntask34.11: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+  console.log(`\nsettlement-authorization: ${results.length - failed}/${results.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

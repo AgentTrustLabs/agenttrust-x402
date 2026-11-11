@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — same-UID control.
+ * Same-UID control.
  *
  * Runs the raw writer as the OWNER user (authowner) to show that the boundary is a
  * filesystem-ownership boundary, not an application rule. Same UID → access succeeds.

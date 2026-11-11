@@ -1,5 +1,5 @@
 /**
- * TASK 34.2 — atomic durable authorization remediation.
+ * Atomic durable authorization remediation.
  *
  * Verifies the strict durable-state allow-list, the atomic audit gate, exactly-once
  * authorization, and cross-process protection.
@@ -302,7 +302,7 @@ test('18. rejected policy attempts do not block a later valid attempt', async ()
   rm();
 });
 
-test('19. TASK27 replay protection intact (claim still refuses a second submit)', () => {
+test('19. replay protection intact (claim still refuses a second submit)', () => {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
   const d = 'a'.repeat(64);
@@ -315,7 +315,7 @@ test('19. TASK27 replay protection intact (claim still refuses a second submit)'
   rm();
 });
 
-test('20. TASK29.1 crash recovery intact (submitting → outcome_unknown, no resubmit)', () => {
+test('20. crash recovery intact (submitting → outcome_unknown, no resubmit)', () => {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
   const d = 'a'.repeat(64);
@@ -352,5 +352,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log('\ntask342-atomic-authorization: ' + (n - failed) + '/' + n + ' passed');
+console.log('\natomic-authorization: ' + (n - failed) + '/' + n + ' passed');
 process.exit(failed ? 1 : 0);

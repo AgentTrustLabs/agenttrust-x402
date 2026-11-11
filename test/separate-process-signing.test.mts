@@ -1,5 +1,5 @@
 /**
- * TASK 44 — separate-process sponsor signing IPC integration tests.
+ * Separate-process sponsor signing IPC integration tests.
  *
  * Two real OS processes (service + client) over a Unix domain socket. Uses a deterministic
  * fake signer. No real signing, no key material, no submission.
@@ -29,7 +29,7 @@ const check = (name: string, pass: boolean, detail = '') => {
 const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
 const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
 if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`task44: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
+  console.log(`separate-process-signing: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
   process.exit(0);
 }
 
@@ -48,12 +48,10 @@ const chownGroup = async (path: string) => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const startService = async (sock: string, allowedUid: number, crashAt?: number) => {
-  const env: Record<string, string> = {};
-  if (crashAt !== undefined) env.TASK44_CRASH_AT = String(crashAt);
+const startService = async (sock: string, allowedUid: number) => {
   const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-service.mts`, sock, SPONSOR, NETWORK, String(allowedUid)], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, ...env },
+    env: process.env,
   });
   let ready = false;
   await new Promise<void>((resolve) => {
@@ -247,6 +245,6 @@ test('09. distinct PIDs prove process separation', async () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask44: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nseparate-process-signing: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

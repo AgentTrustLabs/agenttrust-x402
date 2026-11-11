@@ -1,5 +1,5 @@
 /**
- * TASK 34.14 — real IPC context integrity.
+ * Real IPC context integrity.
  *
  * Starts a live authorization owner, authorizes a payment, then proves that changing any
  * bound payment-context field (amount, asset, expiry, energy, sponsor, recipient, sender,
@@ -45,7 +45,7 @@ const run = (cmd: string, args: string[], as?: string, timeout = 30000) =>
 const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
 const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
 if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`task34.14 IPC: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
+  console.log(`ipc-context: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
   console.log('  run: sudo -u ubuntu npx tsx test/ipc-context.test.mts');
   process.exit(0);
 }
@@ -128,5 +128,5 @@ try {
 }
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask34.14 IPC: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nipc-context: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

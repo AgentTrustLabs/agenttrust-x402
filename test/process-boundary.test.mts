@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — process-boundary adversarial test for Architecture B.
+ * Process-boundary adversarial test for Architecture B.
  *
  * Orchestrates the owner (authowner UID), a caller (ubuntu UID, in group authclients),
  * and a raw writer. Verifies the OS-level boundary with separate processes.
@@ -259,5 +259,5 @@ await new Promise((r) => setTimeout(r, 500));
 await run('sudo', ['-u', 'root', 'rm', '-rf', base]);
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask346: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nprocess-boundary: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

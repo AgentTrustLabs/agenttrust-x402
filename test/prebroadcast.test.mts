@@ -1,5 +1,5 @@
 /**
- * TASK 29 — pre-broadcast durable transaction hash persistence.
+ * Pre-broadcast durable transaction hash persistence.
  *
  * Ten crash boundaries, exercised with real OS processes sharing one SQLite file.
  * Submission attempts are counted at the signer boundary (append-only ledger), not from
@@ -28,7 +28,7 @@ const ok = (v: unknown, m: string) => check(m, Boolean(v));
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
-// TASK53: the fixture's sponsor must match the mock signer's policy sponsor, or the wire
+// The fixture's sponsor must match the mock signer's policy sponsor, or the wire
 // converter refuses with `wrong_sponsor` before the signer is ever reached.
 const SPONSOR = '3mockSponsorPlaceholderNotARealAccountAddress0000';
 const SERVER = new URL('../services/facilitator/dist/server.js', import.meta.url).pathname;
@@ -286,7 +286,7 @@ console.log('\n── W5. crash immediately after durable hash persistence, befo
   try {
     const r = await settle(proc.url, envelope(p));
     await new Promise(r2 => setTimeout(r2, 120));
-    // TASK 29 makes a prepared row resumable: a recovery process MAY take the claim and
+    // Pre-broadcast persistence makes a prepared row resumable: a recovery process MAY take the claim and
     // submit. The invariant is at-most-one, not zero.
     eq(attempts(w.ledger), 1, 'exactly one submission total (by the recovery process)');
     eq(r.body.transaction, txHash, 'the durable hash is reported back');
@@ -459,5 +459,5 @@ console.log('\n── durability configuration ──');
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask29-prebroadcast: ${results.length - failed}/${results.length} passed`);
+console.log(`\nprebroadcast: ${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

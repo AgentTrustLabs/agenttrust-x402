@@ -35,7 +35,7 @@ export const SDK_CONSTANTS = {
  * A `FacilitatorPort` backed by a live x402 facilitator HTTP endpoint.
  *
  * Constructed only when a caller passes an explicit URL — there is no default,
- * and no code path in this project constructs one during TASK 04.
+ * and no code path in this project constructs one.
  */
 export interface HttpFacilitatorOptions {
   url: string;

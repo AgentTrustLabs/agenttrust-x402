@@ -1,5 +1,5 @@
 /**
- * TASK 35 — SDK adapter integration with the authorization boundary.
+ * SDK adapter integration with the authorization boundary.
  *
  * Proves that the SDK sponsor signer is only reached after an 'approved' authorization,
  * and that the transaction hash is computed after the sponsor signature.
@@ -254,6 +254,6 @@ test('03. approved authorization reaches the SDK adapter and hashes after signin
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask35 integration: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\nadapter-integration: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

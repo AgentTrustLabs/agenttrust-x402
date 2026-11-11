@@ -1,5 +1,5 @@
 /**
- * TASK 46 — facilitator sponsor signer IPC wiring.
+ * Facilitator sponsor signer IPC wiring.
  *
  * Proves: strict config validation, IpcAccountSigner construction through startup wiring,
  * fake signing across a real process boundary, fail-closed lifecycle behaviour, and that no
@@ -32,7 +32,7 @@ const RECIPIENT = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const FACILITATOR_UID = 1001;
 const FACILITATOR_GID = 1002;
-const SVC_UID = 1001; // the TASK44 harness runs as this same UID
+const SVC_UID = 1001; // the harness runs as this same UID
 const WRONG_UID = 1005;
 const NOW = 1_800_000_000;
 
@@ -47,7 +47,7 @@ const realEnv = (over: Record<string, string> = {}) => ({
   FACILITATOR_SENDER_VERIFICATION: 'sdk',
   FACILITATOR_NODE_HOST: 'grpc.testnet.concordium.com',
   FACILITATOR_NODE_PORT: '20000',
-  // TASK 48 wires verifyNode() into real-mode startup; the public Testnet gRPC endpoint
+  // verifyNode() is wired into real-mode startup; the public Testnet gRPC endpoint
   // requires TLS, so the fixture must say so or the genesis check cannot connect.
   FACILITATOR_NODE_USE_TLS: '1',
   FACILITATOR_DB_PATH: '/tmp/t46-real.db',
@@ -902,6 +902,6 @@ test('F06. facilitator database files are 0600 after startup', async () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask46: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nfacilitator-sponsor-signer-wiring: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

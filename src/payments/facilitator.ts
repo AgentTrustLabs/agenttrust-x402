@@ -1,5 +1,5 @@
 /**
- * TASK 07 — facilitator readiness probe and response validation.
+ * Facilitator readiness probe and response validation.
  *
  * Read-only by construction:
  *   - `probeFacilitator` only calls `/supported` (a capability query).

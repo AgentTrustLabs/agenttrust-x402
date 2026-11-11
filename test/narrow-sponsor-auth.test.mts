@@ -1,5 +1,5 @@
 /**
- * TASK 34 — Mock-only NarrowSponsorSigner authorization boundary.
+ * Mock-only NarrowSponsorSigner authorization boundary.
  *
  * Verifies the authorization decision, durable audit event, retry safety, and that NO
  * signing function is ever reached. Uses synthetic test addresses and a mock policy.
@@ -217,7 +217,7 @@ test('15. duplicate payment digest → rejected', async () => {
   repo.markBroadcast('a'.repeat(64), 'tx-1');
   repo.close();
   const r = await signer.authorize(validRequest());
-  // TASK 34.2: a payment in any durable transaction state is refused.
+  // A payment in any durable transaction state is refused.
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'transaction_hash_already_prepared', 'transaction_hash_already_prepared');
   rm();
@@ -325,9 +325,9 @@ test('24. concurrent authorization: exactly *** approved', async () => {
   const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
   const [a, b] = await Promise.all([signer.authorize(validRequest()), signer.authorize(validRequest())]);
   const approved = [a, b].filter(r => r.approved).length;
-  // TASK 34.2 exactly-once: the second attempt must be refused by the durable gate.
+  // Exactly-once: the second attempt must be refused by the durable gate.
   eq(approved, 1, 'exactly one approved');
-  // TASK 34.4 M2: the refused attempt is now audited too, so there are exactly two events:
+  // M2: the refused attempt is now audited too, so there are exactly two events:
   // one approval and one state rejection. Neither count may drift.
   const events = signer['repo'].signEvents('a'.repeat(64));
   eq(events.filter(e => e.decision === 'approved').length, 1, 'one approved event');
@@ -416,5 +416,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask34-narrow-sponsor-auth: ${n - failed}/${n} passed`);
+console.log(`\nnarrow-sponsor-auth: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

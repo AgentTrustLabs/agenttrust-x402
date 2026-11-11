@@ -1,5 +1,5 @@
 /**
- * TASK 80 — focused tests for the real Concordium Testnet chain verifier.
+ * Focused tests for the real Concordium Testnet chain verifier.
  *
  * These tests use an injected fake node client: no live node is contacted by the
  * automated suite. The live read-only validation is performed separately by

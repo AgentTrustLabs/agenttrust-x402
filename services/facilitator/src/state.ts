@@ -13,7 +13,7 @@
  *                                                        verified rejection ─────────────┼──▶ rejected
  *                                                        not found / committed / no evidence ──▶ stays
  *
- * TASK 29 adds the pre-broadcast states. The rule that closes the TASK 27 crash window:
+ * Pre-broadcast states and the rule that closes the crash window:
  *
  *   **A payment may never enter a broadcast-eligible state without a durable transaction hash.**
  *

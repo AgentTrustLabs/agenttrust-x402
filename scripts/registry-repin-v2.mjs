@@ -1,5 +1,5 @@
 /**
- * TASK 02c — rebuild the Agent Card POST-MINT so the badge carries the
+ * Rebuild the Agent Card POST-MINT so the badge carries the
  * canonical tokenAddress, then prepare the setAgentURI re-pin for the new hash.
  *
  * Root cause of badge_valid=false after 02b: the card was generated pre-mint

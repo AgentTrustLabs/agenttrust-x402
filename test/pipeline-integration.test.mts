@@ -1,5 +1,5 @@
 /**
- * TASK 38 — sender verification pipeline integration.
+ * Sender verification pipeline integration.
  *
  * Proves sender verification runs BEFORE authorization and that a rejection produces zero
  * authorization approvals, zero conversions, and zero sponsor-signer calls.
@@ -202,6 +202,6 @@ test('09. default (no verifier injected) still works — mock flow preserved', a
   const failedAssertions = results.filter((r) => !r[1]).length;
   const failed = failedAssertions + threw;
   const passed = results.length - failedAssertions;
-  console.log(`\ntask38 integration: ${passed}/${results.length} assertions passed, ${failed} failed`);
+  console.log(`\npipeline-integration: ${passed}/${results.length} assertions passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

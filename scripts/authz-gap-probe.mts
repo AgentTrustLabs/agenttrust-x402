@@ -1,5 +1,5 @@
 /**
- * TASK 34.5 step 1 — reproduce the remaining gap.
+ * Step 1 — reproduce the remaining gap.
  *
  * Creates a VALID payment (state='created', tx_hash IS NULL) in an isolated temp DB and
  * attempts a direct raw SQL INSERT of an approval. Records the actual SQLite verdict.

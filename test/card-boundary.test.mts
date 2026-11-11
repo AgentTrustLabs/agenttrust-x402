@@ -1,5 +1,5 @@
 /**
- * TASK 20 — Agent Card validation & trust boundary.
+ * Agent Card validation & trust boundary.
  *
  * Every case here is offline and deterministic: the card bytes, the HTTP responses,
  * and the registry record are all injected. Nothing is fetched from the network and
@@ -110,7 +110,7 @@ const test = (name, fn) => tests.push([name, fn]);
 // ═══ A. Retrieval ═══════════════════════════════════════════════════════
 
 test('A1. HTTP 4xx: the card is not served → INCONCLUSIVE, not fraud', async () => {
-  // TASK 23 corrected this. A 404 says the endpoint does not serve the card; it does not
+  // Corrected this. A 404 says the endpoint does not serve the card; it does not
   // say the owner or identity claim is false. Retrieval status is never FAIL.
   const r = await run(bytesOf(card()), { fetchImpl: fetchFailing(404) });
   eq(r.card_retrieved, 'INCONCLUSIVE', 'retrieval status, not a contradiction');
@@ -479,7 +479,7 @@ test('C11. every required check must pass for TRUSTED', () => {
     eq(decideTrust({ ...allPass, [key]: 'NOT_TESTED' }), 'INCONCLUSIVE', `${key}=NOT_TESTED is not consent`);
     eq(decideTrust({ ...allPass, [key]: 'INCONCLUSIVE' }), 'INCONCLUSIVE', `${key}=INCONCLUSIVE`);
   }
-  // Contradiction-capable checks reject; retrieval status never does (TASK 23).
+  // Contradiction-capable checks reject; retrieval status never does.
   for (const key of Object.keys(allPass).filter(k => k !== 'badge_valid' && k !== 'card_retrieved')) {
     eq(decideTrust({ ...allPass, [key]: 'FAIL' }), 'REJECTED', `${key}=FAIL`);
   }
@@ -532,5 +532,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask20-card-boundary: ${n - failed}/${n} passed`);
+console.log(`\ncard-boundary: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

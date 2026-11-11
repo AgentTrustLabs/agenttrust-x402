@@ -1,5 +1,5 @@
 /**
- * TASK 34.9 — real SQLite transaction crash owner (test-only).
+ * Real SQLite transaction crash owner (test-only).
  *
  * Replicates the authorization transaction with deterministic SIGKILL injection points.
  * Uses a raw DatabaseSync for the transaction (so crash injection can happen BETWEEN

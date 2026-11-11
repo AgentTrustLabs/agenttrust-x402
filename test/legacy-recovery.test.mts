@@ -1,5 +1,5 @@
 /**
- * TASK 34.16 — safe legacy authorization recovery (evaluation).
+ * Safe legacy authorization recovery (evaluation).
  *
  * Conclusion: legacy records CANNOT be safely reconstructed. `expiry` is not durably
  * stored anywhere, and the payload is not stored, so the digest cannot be recomputed.
@@ -314,6 +314,6 @@ const setup = () => {
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask34.16: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\nlegacy-recovery: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

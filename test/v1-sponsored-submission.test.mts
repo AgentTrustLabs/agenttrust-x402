@@ -1,5 +1,5 @@
 /**
- * TASK 51 — V1 sponsored submission path and signer-boundary integration (mock only).
+ * V1 sponsored submission path and signer-boundary integration (mock only).
  *
  * Run: npx tsx test/v1-sponsored-submission.test.mts
  */
@@ -141,7 +141,7 @@ test('V1-06. constructor refuses a client without any submission method', () => 
   ok(/requires a client/.test(msg), `refused: "${msg}"`);
 });
 
-test('V1-07. TASK49 adapter works end-to-end with the V1 transport', async () => {
+test('V1-07. adapter works end-to-end with the V1 transport', async () => {
   const client: ConcordiumGrpcClientLike = {
     sendTransaction: async () => HASH,
     getBlockItemStatus: async () => finalized(successSummary()) as never,
@@ -155,7 +155,7 @@ test('V1-07. TASK49 adapter works end-to-end with the V1 transport', async () =>
   eq(f.blockHash, BLOCK, 'block hash');
 });
 
-test('V1-08. TASK49 adapter surfaces a finalized rejection', async () => {
+test('V1-08. adapter surfaces a finalized rejection', async () => {
   const client: ConcordiumGrpcClientLike = {
     sendTransaction: async () => HASH,
     getBlockItemStatus: async () => finalized(failedSummary('NonExistentAccount')) as never,
@@ -167,7 +167,7 @@ test('V1-08. TASK49 adapter surfaces a finalized rejection', async () => {
   eq(f.reason, 'NonExistentAccount', 'reason');
 });
 
-test('V1-09. TASK49 adapter times out on a committed (never finalized) transaction', async () => {
+test('V1-09. adapter times out on a committed (never finalized) transaction', async () => {
   const client: ConcordiumGrpcClientLike = {
     sendTransaction: async () => HASH,
     getBlockItemStatus: async () => ({ status: 'committed', outcomes: [] }) as never,
@@ -199,7 +199,7 @@ test('IPC-01. without a submitter, submission stays fail-closed', async () => {
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    socketPath: '/tmp/task51.sock',
+    socketPath: '/tmp/v1-submitter.sock',
     expectedUid: 1000,
     maxEnergy: 1000n,
     maxFeeMicroCcd: 1000n,
@@ -218,7 +218,7 @@ test('IPC-02. with a submitter, submission delegates and returns the hash', asyn
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    socketPath: '/tmp/task51.sock',
+    socketPath: '/tmp/v1-submitter.sock',
     expectedUid: 1000,
     maxEnergy: 1000n,
     maxFeeMicroCcd: 1000n,
@@ -236,7 +236,7 @@ test('IPC-03. waitForFinalization delegates and maps finalized to finalized', as
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    socketPath: '/tmp/task51.sock',
+    socketPath: '/tmp/v1-submitter.sock',
     expectedUid: 1000,
     maxEnergy: 1000n,
     maxFeeMicroCcd: 1000n,
@@ -256,7 +256,7 @@ test('IPC-04. waitForFinalization maps a finalized rejection to failed', async (
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    socketPath: '/tmp/task51.sock',
+    socketPath: '/tmp/v1-submitter.sock',
     expectedUid: 1000,
     maxEnergy: 1000n,
     maxFeeMicroCcd: 1000n,
@@ -275,7 +275,7 @@ test('IPC-05. waitForFinalization maps a timeout to pending', async () => {
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    socketPath: '/tmp/task51.sock',
+    socketPath: '/tmp/v1-submitter.sock',
     expectedUid: 1000,
     maxEnergy: 1000n,
     maxFeeMicroCcd: 1000n,
@@ -294,7 +294,7 @@ test('IPC-06. waitForFinalization throws on a transport error', async () => {
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    socketPath: '/tmp/task51.sock',
+    socketPath: '/tmp/v1-submitter.sock',
     expectedUid: 1000,
     maxEnergy: 1000n,
     maxFeeMicroCcd: 1000n,
@@ -419,7 +419,7 @@ test('S03. settlement stays disabled by default', async () => {
 });
 
 
-// ── real-process crash windows (reuses the TASK29 harness pattern) ────────────
+// ── real-process crash windows (reuses the harness pattern) ────────────
 
 const CHILD = new URL('../scripts/submission-crash-child.mts', import.meta.url).pathname;
 const { mkdtempSync, rmSync, existsSync, readFileSync } = await import('node:fs');
@@ -512,6 +512,6 @@ test('CW-08. real process: die while finalization is unobserved -> hash durable,
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask51: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nv1-sponsored-submission: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

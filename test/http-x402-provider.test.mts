@@ -1,5 +1,5 @@
 /**
- * TASK 70 — x402 HTTP provider regression tests (mocks only, no node).
+ * x402 HTTP provider regression tests (mocks only, no node).
  *
  * Uses the real x402 protocol layer (buildPaymentRequirements, buildPaymentRequired,
  * preflightPaymentPayload) against a fake facilitator and a fake chain verifier.
@@ -254,5 +254,5 @@ for (const [name, fn] of tests) {
     console.log(`FAIL ${name} — ${(e as Error).message}`);
   }
 }
-console.log(`\ntask70: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+console.log(`\nhttp-x402-provider: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

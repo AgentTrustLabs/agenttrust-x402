@@ -1,5 +1,5 @@
 /**
- * TASK 38 — Concordium sender signature verification.
+ * Concordium sender signature verification.
  *
  * Read-only account information provider + signature verification boundary.
  *

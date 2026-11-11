@@ -1,6 +1,6 @@
 {
   "_status": "PLACEHOLDER — UNUSED",
-  "_note": "Unfilled template from an early TASK 02 iteration. Every value below except contractAddress, receiveName, suggestedEnergy, sender and network is an unreplaced *_REPLACE marker. No script writes to this file and no script or page reads it. The live signing flow uses signing-site/registration.json, read by signing-site/index.html. This file is retained so the historical artifact is not destroyed; it is NOT a valid signing manifest.",
+  "_note": "Unfilled template from an early iteration. Every value below except contractAddress, receiveName, suggestedEnergy, sender and network is an unreplaced *_REPLACE marker. No script writes to this file and no script or page reads it. The live signing flow uses signing-site/registration.json, read by signing-site/index.html. This file is retained so the historical artifact is not destroyed; it is NOT a valid signing manifest.",
   "_superseded_by": "signing-site/registration.json",
 
   "contractAddress": {

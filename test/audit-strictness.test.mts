@@ -1,5 +1,5 @@
 /**
- * TASK 14 — audit trail API strictness (finding S7).
+ * Audit trail API strictness (finding S7).
  *
  * Proves the record() contract is fail-closed, that a rejected event leaves no
  * trace (no seq burn, no hash, no checkpoint write), and that the existing
@@ -398,5 +398,5 @@ for (const [name, fn] of tests) {
   }
 }
 for (const d of roots) rmSync(d, { recursive: true, force: true });
-console.log(`\ntask14-audit-strictness: ${n - failed}/${n} passed`);
+console.log(`\naudit-strictness: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

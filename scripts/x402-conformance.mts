@@ -1,5 +1,5 @@
 /**
- * TASK 04 — x402 offline conformance check (no network, no settlement).
+ * x402 offline conformance check (no network, no settlement).
  *
  * Proves the payment module agrees with the official SDK on constants, price
  * parsing, requirement shape and explorer helpers. Run: npx tsx scripts/x402-conformance.mts

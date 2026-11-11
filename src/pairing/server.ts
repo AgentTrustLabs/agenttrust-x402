@@ -35,7 +35,7 @@ export interface PairingServerConfig {
   port?: number;
   /** Root directory for the static pairing page. */
   staticRoot?: string;
-  /** Full genesis hash for the configured network (TASK 73 wallet records). */
+  /** Full genesis hash for the configured network. */
   genesisHash?: string;
 }
 
@@ -52,13 +52,13 @@ export interface PairingServerDeps {
   getAccountInfo: (address: string) => Promise<AccountInfo | null>;
   /** CIS-8004 identity + Agent Card verification. */
   verifyAgentIdentity: (agentId: string, network: string) => Promise<AgentIdentityVerification>;
-  /** TASK 72 permission manager. Optional; when absent, permission routes fail closed. */
+  /** Permission manager. Optional; when absent, permission routes fail closed. */
   permissions?: import('./permissions.js').PermissionManager;
-  /** TASK 73 agentic wallet manager. Optional; when absent, wallet routes fail closed. */
+  /** Agentic wallet manager. Optional; when absent, wallet routes fail closed. */
   walletManager?: import('./agenticWallet.js').AgenticWalletManager;
-  /** TASK 74 skills layer. Optional; when absent, skills routes fail closed. */
+  /** Skills layer. Optional; when absent, skills routes fail closed. */
   skills?: WalletSkills;
-  /** TASK 75 x402 provider + agent-wallet client. Optional. */
+  /** x402 provider + agent-wallet client. Optional. */
   x402?: {
     provider: import('../x402/provider.js').X402Provider;
     client: import('./walletX402Client.js').AgentWalletX402Client;
@@ -286,13 +286,13 @@ function createApiHandler(deps: PairingServerDeps) {
       const walletAddress = session.snapshot().address;
       store.disconnect(session.snapshot().pairingId ?? '');
       session.disconnect();
-      // TASK 72: unlinking a wallet invalidates every permission derived from it.
+      // Unlinking a wallet invalidates every permission derived from it.
       if (walletAddress) deps.permissions?.invalidateWallet(walletAddress);
       json(res, 200, { ok: true, session: session.snapshot() });
       return;
     }
 
-    // ── TASK 72: permission routes ──────────────────────────────────────
+    // ── Permission routes ──────────────────────────────────────
     const perms = deps.permissions;
 
     if (method === 'GET' && url === '/api/permission') {
@@ -529,7 +529,7 @@ function createApiHandler(deps: PairingServerDeps) {
       return;
     }
 
-    // ── TASK 73: agentic wallet routes ──────────────────────────────────
+    // ── Agentic wallet routes ──────────────────────────────────
     const wallets = deps.walletManager;
 
     if (method === 'GET' && url === '/api/wallets') {
@@ -668,7 +668,7 @@ function createApiHandler(deps: PairingServerDeps) {
       return;
     }
 
-    // ── TASK 75: x402 routes ────────────────────────────────────────────
+    // ── x402 routes ────────────────────────────────────────────
     const x402 = deps.x402;
     if (method === 'GET' && url === '/api/x402/requirement') {
       if (!x402) {
@@ -704,7 +704,7 @@ function createApiHandler(deps: PairingServerDeps) {
       return;
     }
 
-    // ── TASK 74: skills routes ───────────────────────────────────────────
+    // ── Skills routes ───────────────────────────────────────────
     if (method === 'GET' && url === '/api/skills') {
       const skills = deps.skills;
       if (!skills) {

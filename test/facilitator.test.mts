@@ -1,5 +1,5 @@
 /**
- * TASK 25 — isolated facilitator prototype tests.
+ * Isolated facilitator prototype tests.
  *
  * Everything runs offline against an in-process server on an ephemeral loopback port. The
  * signer is the mock: it cannot sign, cannot submit, and contacts no chain. Fixtures are
@@ -284,7 +284,7 @@ test('20. a first settle succeeds and returns a (fake) transaction hash', async 
   const p = payloadFixture();
   const r = await core.settle(envelope(p, p.accepted));
   eq(r.success, true, 'success');
-  // TASK 29: the mock now returns the REAL SDK-computed hash of the fully signed
+  // The mock now returns the REAL SDK-computed hash of the fully signed
   // transaction, so the persisted-hash comparison is meaningful. It is still not a real
   // chain hash — the mock never contacts a chain — but it is a genuine 64-hex identifier.
   ok(/^[0-9a-f]{64}$/.test(r.transaction), `real-shaped hash: ${r.transaction}`);
@@ -389,7 +389,7 @@ test('28. reconciliation cannot turn an unknown outcome into success', async () 
   const digest = r.extra.digest;
   eq(r.success, false, 'pending as expected');
 
-  // TASK 26: reconciliation is no longer callable on the core. It requires an authenticated
+  // Reconciliation is no longer callable on the core. It requires an authenticated
   // operator plus a trusted evidence verifier; the caller cannot state an outcome. The state
   // machine behaviour that used to be asserted here is covered exhaustively in
   // test/settlement-durability.test.mts.
@@ -402,7 +402,7 @@ test('29. a payload with a previous terminal failure needs a new payload', async
   const core = coreWith('finalization-failed');
   const p = payloadFixture();
   await core.settle(envelope(p, p.accepted));
-  // TASK 59: confirm the rejection so it becomes terminal before the second request.
+  // Confirm the rejection so it becomes terminal before the second request.
   await core.recoverPending();
   const second = await core.settle(envelope(p, p.accepted));
   eq(second.success, false, 'refused');
@@ -501,5 +501,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask25-facilitator: ${n - failed}/${n} passed`);
+console.log(`\nfacilitator: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

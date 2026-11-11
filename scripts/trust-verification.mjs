@@ -1,5 +1,5 @@
 /**
- * TASK 23 verification harness — proves each of the eight required claims through the real
+ * Verification harness — proves each of the eight required claims through the real
  * code paths (not through re-implemented logic), and prints an evidence table.
  *
  * Offline except for one explicitly-labelled read-only live block at the end, which is only
@@ -207,7 +207,7 @@ check(
   (await callTool(cfg, 'trust.policy', { trust_decision: 'TRUSTED', intent: 'paid_resource', authorization: { issued_by: 'x' } })).ok === false,
 );
 
-console.log('\n=== 7. TASK20–22 transport protections ===');
+console.log('\n=== 7. transport protections ===');
 const { checkAgentUri, isProhibitedAddress, resolveCardDestination, httpGetPinned } = await import('../src/verify/crossAgent.js');
 const protections = [
   ['scheme file: refused', !checkAgentUri('file:///etc/passwd').ok],
@@ -231,9 +231,9 @@ const rebound = await resolveCardDestination('https://r.example/c.json', async (
 });
 protections.push(['rebinding refused with a single resolution', rebound.ok === false && lookups === 1]);
 for (const [label, ok] of protections) console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`);
-check('8. TASK20–22 transport protections intact', protections.every(([, ok]) => ok), `${protections.length} checks`);
+check('8. transport protections intact', protections.every(([, ok]) => ok), `${protections.length} checks`);
 
-console.log('\n=== 8. bounded deadline still enforced (TASK22) ===');
+console.log('\n=== 8. bounded deadline still enforced ===');
 const t0 = Date.now();
 const hung = await httpGetPinned('https://never.example/c.json', {
   lookup: () => new Promise(() => {}),

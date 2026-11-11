@@ -219,7 +219,7 @@ export function isProhibitedAddress(raw: string): { prohibited: boolean; reason?
 /**
  * Resolve a validated `agent_uri` to the exact destinations the connection may use.
  *
- * This is the correction to TASK 20's gap: hostname validation proved nothing about the
+ * This is the correction to the hostname-validation gap: hostname validation proved nothing about the
  * address the socket would reach, so a hostname that resolves to `127.0.0.1` passed and
  * was contacted. Here every answer is checked, and **one prohibited address in the set
  * refuses the whole set** — picking "the first public one" is precisely how rebinding wins,
