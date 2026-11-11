@@ -51,6 +51,17 @@ export interface LockOptions {
 
 const LOCK_DEFAULTS: Required<LockOptions> = { timeoutMs: 5_000, staleMs: 10_000, retryMs: 25 };
 
+/**
+ * A lock file is created (O_EXCL) and then written, so a concurrent contender
+ * can observe it while its content is still empty or partial (a torn write).
+ * Give such a file a brief grace to become readable before declaring it
+ * malformed; a genuinely broken lock stays unreadable past the grace and
+ * still fails closed. 500ms is generous — a local write completes in
+ * microseconds — and keeps malformed-lock failures fast instead of waiting
+ * out the full timeout.
+ */
+const MALFORMED_GRACE_MS = 500;
+
 export interface LockRecord {
   v: 1;
   /** Unique per acquisition. The only proof of ownership. */
@@ -187,12 +198,16 @@ export function withFileLock<T>(target: string, opts: LockOptions, fn: () => T):
     host: hostname(),
     acquired_at: new Date().toISOString(),
   };
+  // Stringify before creating the file: the open→write window then holds no
+  // JS work, so a concurrent reader almost never observes an empty file.
+  const recordJson = JSON.stringify(me);
+  let malformedSince: number | null = null;
 
   for (;;) {
     try {
       const fd = openSync(lockPath, 'wx'); // O_CREAT | O_EXCL
       try {
-        writeFileSync(fd, JSON.stringify(me));
+        writeFileSync(fd, recordJson);
       } finally {
         closeSync(fd);
       }
@@ -209,6 +224,7 @@ export function withFileLock<T>(target: string, opts: LockOptions, fn: () => T):
       }
 
       if (rec) {
+        malformedSince = null; // a readable record resets the malformed grace
         const status = ownerStatus(rec);
         if (status === 'alive') {
           // Live owner: age is irrelevant. Wait, then fail closed.
@@ -249,7 +265,17 @@ export function withFileLock<T>(target: string, opts: LockOptions, fn: () => T):
         continue;
       }
 
-      // Unreadable / malformed lock: ownership cannot be established.
+      // Unreadable / malformed lock: ownership cannot be established. It may
+      // be a torn write from a concurrent creator (the file exists but its
+      // content is not yet complete), so retry briefly; a lock that stays
+      // unreadable past the grace — or past the caller's timeout — is
+      // genuinely malformed and fails closed, never deleted.
+      const now = Date.now();
+      if (malformedSince === null) malformedSince = now;
+      if (now - malformedSince < MALFORMED_GRACE_MS && now - started <= cfg.timeoutMs) {
+        sleepSync(cfg.retryMs);
+        continue;
+      }
       throw new AuditLockUnrecoverableError(lockPath, 'lock content is unreadable or malformed');
     }
   }
