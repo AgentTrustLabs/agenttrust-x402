@@ -203,7 +203,7 @@ run({
   description,
   agentUri,
   ownerAccount: owner,
-  skills: [{ id: 'trust-gateway', name: 'Trust Gateway', description: 'Multi-agent trust and commerce' }],
+  skills: [{ id: 'trust-gateway', name: 'AgentTrust x402', description: 'Multi-agent trust and commerce' }],
 }, owner, txHash, tokenAddress).catch(e => {
   console.error('ERROR:', e.message);
   process.exit(1);

@@ -33,7 +33,7 @@ const EXPECT = { network: CAIP2, cis8004: '12802.0', cis8: '12801.0', tokenId: 1
 function card(over = {}) {
   return {
     name: 'AgentTrust',
-    description: 'Trust and commerce gateway for independently operated agents',
+    description: 'Verifiable trust and x402 payments for independently operated agents',
     version: '1.0.0',
     url: 'https://api.sabokun.my.id/agenttrust',
     skills: [{ id: 'verify', name: 'verify', description: 'verify an agent' }],

@@ -26,7 +26,7 @@ const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 function cardBody(over = {}) {
   return {
     name: 'AgentTrust',
-    description: 'Trust and commerce gateway for independently operated agents',
+    description: 'Verifiable trust and x402 payments for independently operated agents',
     version: '1.0.0',
     url: 'https://example.test/agenttrust',
     provider: { organization: 'AgentTrust', url: 'https://example.test' },

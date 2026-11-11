@@ -1,6 +1,6 @@
-# AgentTrust — Architecture
+# AgentTrust x402 — Architecture
 
-AgentTrust is a trust and commerce gateway for independently operated AI agents on the
+AgentTrust x402 is a verifiable trust and payment layer for independently operated AI agents on the
 Concordium blockchain. This document describes the system architecture and workflows.
 
 ## Overview

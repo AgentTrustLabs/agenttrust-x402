@@ -2,7 +2,7 @@
   "name": "@agenttrust/facilitator",
   "version": "0.0.0-prototype",
   "private": true,
-  "description": "Isolated x402 Concordium Exact facilitator prototype (mock signer, no chain access). Not the AgentTrust Gateway.",
+  "description": "Isolated x402 Concordium Exact facilitator prototype (mock signer, no chain access). Not AgentTrust x402.",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {

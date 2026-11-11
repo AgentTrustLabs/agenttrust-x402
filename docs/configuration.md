@@ -1,4 +1,4 @@
-# AgentTrust — Configuration
+# AgentTrust x402 — Configuration
 
 This document covers configuration and environment variables for AgentTrust.
 

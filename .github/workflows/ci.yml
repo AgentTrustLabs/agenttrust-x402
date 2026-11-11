@@ -1,4 +1,4 @@
-# CI — AgentTrust Gateway
+# CI — AgentTrust x402
 #
 # Minimal quality gate: install, typecheck, build, test — in order, no
 # failure is hidden (no continue-on-error anywhere). Runs on every push and

@@ -1,6 +1,6 @@
-# AgentTrust Gateway
+# AgentTrust x402
 
-Trust and commerce gateway for independently operated AI agents on the **Concordium** blockchain.
+Verifiable trust and x402 payments for independently operated AI agents on the **Concordium** blockchain.
 
 AgentTrust lets one agent answer a question about another agent with evidence instead of trust: *is
 this agent really who it claims to be, on chain, right now — and should I pay it?*

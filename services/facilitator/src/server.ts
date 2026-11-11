@@ -7,7 +7,7 @@
  *
  * Endpoints: GET /supported, POST /verify, POST /settle, POST /reconcile, GET /healthz
  *
- * This process is deliberately separate from the AgentTrust Gateway. It holds no gateway
+ * This process is deliberately separate from AgentTrust x402. It holds no gateway
  * state and the gateway holds none of its state. In `mock` mode it cannot sign, cannot
  * submit, and binds to loopback only.
  */

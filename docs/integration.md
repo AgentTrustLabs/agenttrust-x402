@@ -1,4 +1,4 @@
-# AgentTrust — Integration
+# AgentTrust x402 — Integration
 
 This document covers integration surfaces: MCP tools, Agent Wallet Skills, x402, and Concordium.
 

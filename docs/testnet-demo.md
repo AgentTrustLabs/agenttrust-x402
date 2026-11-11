@@ -1,4 +1,4 @@
-# AgentTrust — Testnet Demo
+# AgentTrust x402 — Testnet Demo
 
 This document covers running and verifying the AgentTrust demo on Concordium Testnet.
 

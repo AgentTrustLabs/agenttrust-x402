@@ -1,5 +1,5 @@
 /**
- * MCP tool surface for AgentTrust Gateway.
+ * MCP tool surface for AgentTrust x402.
  *
  * Design rule: this module contains **no business logic**. Every tool is a thin,
  * strictly-validated adapter over an existing module:

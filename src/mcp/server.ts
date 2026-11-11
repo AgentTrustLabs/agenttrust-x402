@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * agenttrust-mcp — MCP (JSON-RPC 2.0 over stdio) server exposing AgentTrust Gateway.
+ * agenttrust-mcp — MCP (JSON-RPC 2.0 over stdio) server exposing AgentTrust x402.
  *
  * Transport: newline-delimited JSON-RPC on stdin/stdout, which is what MCP hosts
  * (Claude Desktop, Cursor, Continue, any MCP client) expect for a local server.
@@ -75,7 +75,7 @@ async function handle(req: RpcRequest): Promise<RpcResponse | null> {
         capabilities: { tools: {} },
         serverInfo: SERVER_INFO,
         instructions:
-          'AgentTrust Gateway: discover and independently verify Concordium CIS-8004 agents, evaluate the trust policy, and run trust-gated commerce with a MOCK facilitator. No tool settles, signs, or moves funds, and no tool accepts operator authorization.',
+          'AgentTrust x402: discover and independently verify Concordium CIS-8004 agents, evaluate the trust policy, and run trust-gated commerce with a MOCK facilitator. No tool settles, signs, or moves funds, and no tool accepts operator authorization.',
       });
 
     case 'notifications/initialized':

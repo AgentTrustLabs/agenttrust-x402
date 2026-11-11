@@ -2,7 +2,7 @@
   "name": "agenttrust",
   "version": "0.1.0",
   "private": true,
-  "description": "AgentTrust Gateway — Concordium Agent Registry integration for multi-agent trust and commerce",
+  "description": "AgentTrust x402 — Concordium Agent Registry integration for multi-agent trust and commerce",
   "type": "module",
   "files": [
     "dist/",
