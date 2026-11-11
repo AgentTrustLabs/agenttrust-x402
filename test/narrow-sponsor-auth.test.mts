@@ -249,6 +249,16 @@ test('17. negative energy → rejected', async () => {
   rm();
 });
 
+test('17b. zero energy → rejected (matches LocalAuthorizationClient)', async () => {
+  const { dir, db, rm } = mk();
+  seed(db);
+  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const r = await signer.authorize(validRequest({ energy: 0n }));
+  eq(r.approved, false, 'rejected');
+  eq(r.reason, 'energy_negative', 'energy_negative');
+  rm();
+});
+
 test('18. energy overflow (int64) → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);

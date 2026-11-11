@@ -110,7 +110,7 @@ test('08. real mode + sdk config is accepted (provider constructible, no pass-th
     FACILITATOR_SENDER_VERIFICATION: 'sdk',
     FACILITATOR_NODE_HOST: 'grpc.testnet.concordium.com',
     FACILITATOR_NODE_PORT: '20000',
-    FACILITATOR_DB_PATH: '/tmp/t41-real.db', FACILITATOR_SIGNING_SERVICE_SOCKET: '/tmp/t46-sign.sock', FACILITATOR_SIGNING_SERVICE_UID: '1005',
+    FACILITATOR_DB_PATH: '/tmp/t41-real.db', FACILITATOR_SIGNING_SERVICE_SOCKET: '/tmp/t46-sign.sock', FACILITATOR_SIGNING_SERVICE_UID: '1005', FACILITATOR_AUTHZ_SOCKET: '/tmp/t41-authz.sock',
   }));
   eq(cfg.senderVerification, 'sdk', 'sdk selected');
   // Provider construction must succeed (it does not connect until first use).

@@ -67,7 +67,7 @@ await run('chmod', ['700', dbDir], 'root');
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const peercredBin = join(process.cwd(), 'scripts/authz-peercred');
-const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, 'AUTHZ_SEED_FIXTURES=1', 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
 let ownerErr = '';
 let ready = false;
 owner.stderr.on('data', (c) => (ownerErr += c));

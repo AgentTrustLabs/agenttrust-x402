@@ -14,7 +14,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { statSync } from 'node:fs';
+import { statSync, realpathSync } from 'node:fs';
 import { ConcordiumGRPCNodeClient, credentials } from '@concordium/web-sdk/nodejs';
 import { loadConfig, ConfigurationError } from './config.js';
 import { GrpcAccountInfoProvider } from './grpcAccountInfoProvider.js';
@@ -166,6 +166,47 @@ export function inspectWalletFile(path: string): WalletFileInspection {
 }
 
 /**
+ * F2/F6 — Authorization Owner readiness + shared-database identity.
+ *
+ * The owner and the facilitator must authorize against the SAME SQLite file.
+ * The owner reports the resolved path + device + inode of the file it opened
+ * (db_identity: read-only, creates no state); this compares them with the
+ * facilitator's own database file. A mismatch means the owner would authorize
+ * against the wrong database — the durable gate would be blind to the
+ * facilitator's payments, so startup fails closed. An unreachable owner does
+ * not fail startup (the owner may legitimately start after the facilitator),
+ * but readiness stays unhealthy until it appears.
+ *
+ * Only the file identity is compared and logged (device + inode + resolved
+ * path). No payment data, digest, or decision ever leaves either process here.
+ */
+async function checkOwnerDbIdentity(
+  authorization: IpcAuthorizationClient,
+  facilitatorDbPath: string,
+  timeoutMs: number,
+): Promise<{ reachable: boolean; matches: boolean; ownerDbPath?: string; reason?: string }> {
+  const probe = await authorization.probeDbIdentity(timeoutMs);
+  if (!probe.reachable) return { reachable: false, matches: false, reason: probe.reason };
+  let own: { dev: number; ino: number };
+  try {
+    const resolved = realpathSync(facilitatorDbPath);
+    const st = statSync(resolved);
+    own = { dev: st.dev, ino: st.ino };
+  } catch (e) {
+    return { reachable: true, matches: false, ownerDbPath: probe.dbPath, reason: `cannot stat facilitator database: ${(e as Error)?.message ?? e}` };
+  }
+  const matches = probe.dbDev === own.dev && probe.dbIno === own.ino;
+  return {
+    reachable: true,
+    matches,
+    ownerDbPath: probe.dbPath,
+    reason: matches
+      ? undefined
+      : `owner database (dev=${probe.dbDev} ino=${probe.dbIno}) is not the facilitator database (dev=${own.dev} ino=${own.ino})`,
+  };
+}
+
+/**
  * Build and start the facilitator. Returns the bound URL so tests can point the gateway's
  * `createHttpFacilitator({ url })` at it.
  */
@@ -265,9 +306,11 @@ export async function startFacilitator(
             network: config.network,
             ...(behaviour ? { behaviour } : {}),
           });
-  // TASK 34.11: when an Authorization Owner socket is configured, the facilitator speaks the
-  // IPC protocol and never opens the authorization database. Otherwise it falls back to the
-  // local mock-only client (prototype/test only).
+  // When an Authorization Owner socket is configured, the facilitator speaks the
+  // IPC protocol and never opens the authorization database. Real mode requires
+  // the socket (loadConfig enforces it), so the local mock-only client is only
+  // reachable in mock/test mode. When unset in mock mode the core falls back to
+  // the local client, which can never authorize a real settlement.
   const authorization = config.authorizationSocket
     ? new IpcAuthorizationClient(config.authorizationSocket)
     : undefined;
@@ -331,6 +374,28 @@ export async function startFacilitator(
       : {}),
   });
 
+  // F2/F6 — startup probe of the Authorization Owner (real mode only). Runs
+  // after the core opened the database, so the facilitator's file exists and
+  // its identity is stable. A reachable owner on a DIFFERENT database fails
+  // startup (fail-closed): authorizing against the wrong file would split the
+  // audit trail and blind the durable gate. An unreachable owner does not fail
+  // startup — it makes readiness unhealthy until it appears (see /healthz).
+  if (config.mode === 'real' && authorization) {
+    const check = await checkOwnerDbIdentity(authorization, config.dbPath, 10_000);
+    if (check.reachable && !check.matches) {
+      throw new ConfigurationError(
+        `authorization owner database mismatch: ${check.reason} (owner db: ${check.ownerDbPath ?? 'unknown'})`,
+      );
+    }
+    if (check.reachable) {
+      const resolved = realpathSync(config.dbPath);
+      const st = statSync(resolved);
+      console.log(`authorization owner reachable; shared database ${resolved} (dev=${st.dev} ino=${st.ino})`);
+    } else {
+      console.log(`WARNING: authorization owner unreachable at startup (${check.reason}); readiness will report unhealthy until it appears`);
+    }
+  }
+
   // Reconciliation is opt-in. When disabled the route does not exist at all, so there is no
   // unauthenticated endpoint that can change settlement state.
   const operatorAuth = buildOperatorAuth(
@@ -350,7 +415,26 @@ export async function startFacilitator(
       const method = req.method ?? 'GET';
 
       if (method === 'GET' && url === '/healthz') {
-        json(res, 200, { ok: true, mode: config.mode, network: config.network, canSign: signer.info().canSign });
+        // F6: in real mode, readiness reflects the Authorization Owner live: the
+        // probe checks reachability AND that the owner is on this facilitator's
+        // database file. A dead owner, or one restarted on the wrong database,
+        // makes readiness unhealthy (503). The probe is read-only and creates no
+        // approval, signature, or settlement. Mock mode has no external owner;
+        // the in-process local client is always reachable.
+        if (config.mode === 'real' && authorization) {
+          const check = await checkOwnerDbIdentity(authorization, config.dbPath, 2000);
+          const reachable = check.reachable && check.matches;
+          json(res, reachable ? 200 : 503, {
+            ok: reachable,
+            mode: config.mode,
+            network: config.network,
+            canSign: signer.info().canSign,
+            ownerReachable: reachable,
+            ...(reachable ? {} : { ownerReason: check.reason ?? 'unreachable' }),
+          });
+          return;
+        }
+        json(res, 200, { ok: true, mode: config.mode, network: config.network, canSign: signer.info().canSign, ownerReachable: true });
         return;
       }
       if (method === 'GET' && url === '/supported') {

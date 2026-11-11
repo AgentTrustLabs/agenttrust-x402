@@ -27,7 +27,12 @@ const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const SPONSOR = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const RECIPIENT = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
-const FACILITATOR_UID = 1001; // ubuntu
+// The facilitator UID is the `ubuntu` user's UID. It defaults to 1001 but is
+// overridable: on GitHub-hosted runners UID 1001 belongs to the `runner` user,
+// so CI creates `ubuntu` with a free UID and passes it via this variable.
+// The tested property is unchanged — the owner only accepts the configured
+// facilitator UID, whatever its value is.
+const FACILITATOR_UID = Number(process.env.TEST_FACILITATOR_UID ?? 1001); // ubuntu
 const OWNER_USER = 'authowner';
 
 const D = (c: string) => c.repeat(64);
@@ -88,6 +93,7 @@ const startOwner = async (crashAt = 0): Promise<Owner> => {
     `TASK348_LOG=${logPath}`,
     `TASK348_PEERCRED_BIN=${peercredBin}`,
     `CRASH_AT=${crashAt}`,
+    'AUTHZ_SEED_FIXTURES=1', // F1: fixtures are opt-in now; these tests authorize the seeded digests a..e.
     'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;

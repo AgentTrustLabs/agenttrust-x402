@@ -156,7 +156,7 @@ try {
     await bad.sign(new Uint8Array(32).buffer);
     check('11. wrong sponsor is refused', false, 'unexpectedly signed');
   } catch (e) {
-    check('11. wrong sponsor is refused', /wrong_sponsor|refused/i.test((e as Error).message), (e as Error).message);
+    check('11. wrong sponsor is refused', /wrong_sponsor/.test((e as Error).message), (e as Error).message);
   }
 }
 

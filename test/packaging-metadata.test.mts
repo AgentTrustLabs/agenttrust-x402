@@ -72,7 +72,11 @@ test('F4.3 build, test and typecheck scripts keep their intended meaning', () =>
   eq(s['build'], 'tsc', 'build emits');
   eq(s['typecheck'], 'tsc --noEmit', 'typecheck does not emit');
   eq(s['test'], 'node test/run.mjs', 'test runs the runner');
-  eq(s['pretest'], 'tsc', 'pretest compiles for the MCP transport suites');
+  // pretest compiles for the MCP transport suites: it must run tsc, but it is
+  // not required to be tsc alone — it also builds the peercred helper the
+  // signing suites need ('npm run build:peercred && tsc').
+  const pretestSteps = s['pretest'].split('&&').map((x) => x.trim());
+  ok(pretestSteps.includes('tsc'), 'pretest compiles for the MCP transport suites');
 });
 
 // ─── F5: entry points ───────────────────────────────────────────────────

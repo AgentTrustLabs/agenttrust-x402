@@ -100,7 +100,7 @@ const sponsoredTx = (sponsorNumSigs = 1) => ({
     numSignatures: 1,
     sponsor: { account: SPONSOR, numSignatures: sponsorNumSigs },
   },
-  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '1' },
+  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '250000' },
   signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
 });
 
@@ -373,6 +373,7 @@ test('D03. real-mode startup fails closed when verifyNode() mismatches', async (
       FACILITATOR_DB_PATH: join(dir, 'f.db'),
       FACILITATOR_SIGNING_SERVICE_SOCKET: sock,
       FACILITATOR_SIGNING_SERVICE_UID: String(FACILITATOR_UID),
+      FACILITATOR_AUTHZ_SOCKET: join(dir, 'authz.sock'),
       FACILITATOR_SIGNING_TIMEOUT_MS: '500',
       FACILITATOR_SENDER_VERIFY_TIMEOUT_MS: '500',
     });

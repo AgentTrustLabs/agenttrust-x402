@@ -209,8 +209,8 @@ export function decideAuthorization(
   if (typeof request.energy !== 'bigint') {
     return { approved: false, reason: 'energy_malformed', detail: `energy must be a bigint, got ${typeof request.energy}` };
   }
-  if (request.energy < 0n) {
-    return { approved: false, reason: 'energy_negative', detail: `energy ${request.energy} is negative` };
+  if (request.energy <= 0n) {
+    return { approved: false, reason: 'energy_negative', detail: `energy ${request.energy} is not positive` };
   }
   // Overflow guard: energy must fit in a signed 64-bit transaction energy field.
   if (request.energy > 0x7fffffffffffffffn) {
