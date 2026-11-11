@@ -1,5 +1,5 @@
 /**
- * Strict input validation for audit events (TASK 14).
+ * Strict input validation for audit events.
  *
  * Before this module existed, `AuditTrail.record()` built the event from a fixed
  * field set by spread. An unknown top-level key — `{ outcome, privateKey: 'x' }` —
@@ -12,7 +12,7 @@
  * rejected event is never hashed, never appended, and never written to a checkpoint.
  *
  * Two things this deliberately does NOT do:
- *   - change the canonical serialization or any hash (TASK 06 contract is frozen)
+ *   - change the canonical serialization or any hash (the lock contract is frozen)
  *   - accept a field "for convenience" — adding a field to the schema is a change
  *     that must be made here, visibly, with a test.
  */

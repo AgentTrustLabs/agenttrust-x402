@@ -1,5 +1,5 @@
 /**
- * TASK 05 demo — full trust-gated commerce run against the LIVE registry, with a
+ * Demo — full trust-gated commerce run against the LIVE registry, with a
  * MOCK facilitator. No settlement, no transaction, no key.
  *
  * Writes:

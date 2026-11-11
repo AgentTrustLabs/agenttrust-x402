@@ -1,5 +1,5 @@
 /**
- * TASK 34.8 — executable verification of the agenttrust-authz v1 protocol.
+ * Executable verification of the agenttrust-authz v1 protocol.
  *
  * Orchestrates real OS users:
  *   - owner process  : authowner (UID 997)
@@ -143,7 +143,7 @@ const send = async (request: unknown, as = 'ubuntu', hex = false) => {
 };
 
 /**
- * TASK34.8 §5 — client-visible outcome classification.
+ * §5 — client-visible outcome classification.
  * Distinct from payment workflow states (e.g. settlement_pending).
  */
 const classifyOutcome = (raw: string, code: number): string => {
@@ -423,5 +423,5 @@ try {
 console.log(`\nartifacts: ${base}`);
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask348: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nipc-protocol: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

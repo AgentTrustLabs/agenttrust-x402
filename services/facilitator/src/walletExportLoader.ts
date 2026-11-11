@@ -1,5 +1,5 @@
 /**
- * TASK 57 — bounded local loader for a Concordium Wallet export.
+ * Bounded local loader for a Concordium Wallet export.
  *
  * Reads a wallet-export JSON file from an explicitly configured local path and
  * constructs an SDK `AccountSigner` using the supported SDK APIs

@@ -1,5 +1,5 @@
 /**
- * TASK 44 — signing service client process (test harness).
+ * Signing service client process (test harness).
  *
  * A real separate OS process that uses IpcAccountSigner to sign a digest. Prints the
  * signature (or error) as JSON on stdout and exits.

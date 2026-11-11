@@ -1,5 +1,5 @@
 /**
- * TASK 35 — SDK sponsor signer adapter (deterministic fake signer).
+ * SDK sponsor signer adapter (deterministic fake signer).
  *
  * Proves the adapter:
  *   - uses the official SDK sponsor() flow,
@@ -303,6 +303,6 @@ test('14. constructor accepts only an injected AccountSigner, never a key string
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask35: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\nsdk-sponsor-signer: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

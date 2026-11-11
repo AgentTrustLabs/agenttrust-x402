@@ -1,5 +1,5 @@
 /**
- * TASK 22 — full-phase timeout verification & HTTP failure semantics.
+ * Full-phase timeout verification & HTTP failure semantics.
  *
  * Every phase of the pinned transport is exercised with a deterministic local fixture:
  * controlled resolver, local TCP server, local TLS server with a generated self-signed
@@ -457,5 +457,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask22-phase-timeout: ${n - failed}/${n} passed`);
+console.log(`\nphase-timeout: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 /**
- * TASK 72 — Agent wallet permissions & spending controls.
+ * Agent wallet permissions & spending controls.
  *
  * Mocks only: no browser, no real wallet, no node, no transaction.
  * Ownership is verified through the official SDK using a locally generated test key.
@@ -478,5 +478,5 @@ for (const [name, fn] of tests) {
     console.log(`FAIL ${name} — ${(e as Error).message}`);
   }
 }
-console.log(`\ntask72: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+console.log(`\nagent-wallet-permissions: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

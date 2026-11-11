@@ -18,8 +18,8 @@ export const readText = p => readFileSync(p, 'utf8');
 
 export const sha256Hex = buf => createHash('sha256').update(buf).digest('hex');
 
-/** Known-good values captured live in TASK 02 (see docs/testnet-demo.md). */
-export const TASK02 = {
+/** Known-good values for token 1004, captured live (see docs/testnet-demo.md). */
+export const TOKEN1004 = {
   network: 'testnet',
   caip2: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
   contractIndex: 12802,

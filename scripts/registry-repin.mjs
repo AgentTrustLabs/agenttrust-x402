@@ -1,5 +1,5 @@
 /**
- * TASK 02b — build the CIS-8004.setAgentURI re-pin payload.
+ * Build the CIS-8004.setAgentURI re-pin payload.
  *
  * Re-points token 1004 at the live card host and re-anchors the same SHA-256.
  * Dry-runs against testnet before emitting the signing artefacts.

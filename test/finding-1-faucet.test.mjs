@@ -6,7 +6,7 @@
  * facts: the route shape the wallet builds, the request it uses, and the
  * guard rails our own code applies before calling it.
  *
- * VERIFIED (live, TASK 02): PUT .../v0/testnetGTUDrop/{addr} returned
+ * VERIFIED (live): PUT .../v0/testnetGTUDrop/{addr} returned
  * {"submissionId":"eb21350f..."} and the account balance went 0 -> 20000 CCD.
  * UNDOCUMENTED: it appears nowhere in docs.concordium.com; it was found in
  * concordium-browser-wallet `getCcdDrop()`.
@@ -35,7 +35,7 @@ test('faucet request method is PUT, not POST or GET', () => {
 });
 
 test('faucet response shape is { submissionId }', () => {
-  // Captured live in TASK 02.
+  // Captured live on Testnet.
   const response = { submissionId: 'eb21350f799e8ea41565033c55ea1cfdce89be2ac149e3bd571676bdd2a80ea4' };
   ok(/^[0-9a-f]{64}$/.test(response.submissionId), 'submissionId must be a 32-byte hex string');
   eq(Object.keys(response).length, 1, 'only submissionId is returned');
@@ -59,7 +59,7 @@ test('account must already exist on chain, otherwise faucet errors', () => {
 
 test('faucet can only fund an account once', () => {
   // Documented behaviour: one claim per account, and only before incoming transactions.
-  // Verified in TASK 02: a second claim on an already-funded account returns the same
+  // Verified: a second claim on an already-funded account returns the same
   // submissionId rather than minting more CCD.
   const first = '6f3851799cb3c5cbf602240930cd980081532d771d9eec9f88fd7b57d3ef22f0';
   const second = '6f3851799cb3c5cbf602240930cd980081532d771d9eec9f88fd7b57d3ef22f0';

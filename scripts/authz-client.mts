@@ -1,5 +1,5 @@
 /**
- * TASK 34.8 — protocol client harness.
+ * Protocol client harness.
  *
  * Sends one v1 request over the Unix socket and prints the JSON reply.
  *

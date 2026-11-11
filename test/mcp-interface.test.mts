@@ -1,5 +1,5 @@
 /**
- * TASK 08 — MCP interface: tool surface, input boundary, authorization invariant.
+ * MCP interface: tool surface, input boundary, authorization invariant.
  *
  * Offline. Registry and card fetches are injected, so no network is required and
  * results are deterministic.
@@ -958,5 +958,5 @@ for (const [name, fn] of tests) {
   }
 }
 restoreFetch();
-console.log(`\ntask08-mcp-interface: ${n - failed}/${n} passed`);
+console.log(`\nmcp-interface: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

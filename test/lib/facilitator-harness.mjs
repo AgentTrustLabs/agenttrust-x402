@@ -1,5 +1,5 @@
 /**
- * Multi-process facilitator harness for TASK 27.
+ * Multi-process facilitator harness for crash-window tests.
  *
  * Spawns N real facilitator OS processes, all bound to the same SQLite file, and drives them
  * over HTTP. Submission attempts are counted from a shared append-only ledger written by the

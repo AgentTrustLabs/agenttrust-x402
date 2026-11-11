@@ -1,5 +1,5 @@
 /**
- * TASK 71 — local Connect Wallet / Agent Pairing server (wiring layer).
+ * Local Connect Wallet / Agent Pairing server (wiring layer).
  *
  * Serves the static pairing page from signing-site/ and exposes the pairing API
  * backed by the real read-only Testnet node and the hosted Agent Registry.
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     }),
   });
 
-  // TASK 80: real Testnet chain verifier. The provider never releases content unless
+  // Real Testnet chain verifier. The provider never releases content unless
   // the on-chain read confirms a finalized, matching transaction. The previous
   // `unavailable` mock is retained only behind an explicit env flag for tests.
   const useMockChain = process.env.AGENTTRUST_X402_MOCK_CHAIN === '1';

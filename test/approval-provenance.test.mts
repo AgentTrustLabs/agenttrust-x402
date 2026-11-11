@@ -1,5 +1,5 @@
 /**
- * TASK 34.5 — database-level approval provenance verification.
+ * Database-level approval provenance verification.
  *
  * Probes whether a raw SQL writer can insert an 'approved' event for a valid 'created'
  * payment, bypassing authorizeSignEvent() and its policy checks.
@@ -247,6 +247,6 @@ console.log('\n── existing rejection audit remains durable ──');
 // ═══ summary ═════════════════════════════════════════════════════════════════
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask34.5: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\napproval-provenance: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 console.log('NOTE: tests 1 and 5 are EXPECTED to show the gap — they are recorded evidence, not pass/fail regressions.');
 process.exit(failed ? 1 : 0);

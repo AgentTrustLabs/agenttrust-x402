@@ -1,7 +1,7 @@
 /**
- * TASK 51 — crash-window child process (real SIGKILL, mock transport only).
+ * Crash-window child process (real SIGKILL, mock transport only).
  *
- * Mirrors the TASK 29 / 29.1 harness pattern: a real child process performs a real
+ * Mirrors the crash-window harness pattern: a real child process performs a real
  * (fake-transport) submission and then kills itself at an injected boundary. The parent
  * inspects the durable artefacts and proves what is and is not recoverable.
  *

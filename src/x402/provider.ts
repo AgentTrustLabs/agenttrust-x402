@@ -1,7 +1,7 @@
 import type { PaymentRequirements } from '@x402/core/types';
 
 /**
- * TASK 70 — reusable local HTTP x402 provider (resource server).
+ * Reusable local HTTP x402 provider (resource server).
  *
  * Reuses the existing x402 protocol layer (`src/payments/x402.ts`) and treats the
  * facilitator as an untrusted accelerator: a payment is only honoured after the provider

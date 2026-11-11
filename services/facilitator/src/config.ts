@@ -48,7 +48,7 @@ export interface FacilitatorConfig {
   /** Busy timeout for SQLite writers under multi-process contention. */
   busyTimeoutMs: number;
   /**
-   * TASK 30: which evidence verifier reconciliation uses.
+   * Which evidence verifier reconciliation uses.
    *
    * - `none`   → no trusted verifier configured. Reconciliation cannot finalize anything.
    *              This is the default and must stay the default.
@@ -62,21 +62,21 @@ export interface FacilitatorConfig {
   nodePort: number | null;
   /** Whether the node connection uses TLS. */
   nodeUseTls: boolean;
-  /** TASK 41: sender signature verification mode. */
+  /** Sender signature verification mode. */
   senderVerification: SenderVerificationMode;
-  /** TASK 41: per-request timeout for account info lookups (ms). */
+  /** Per-request timeout for account info lookups (ms). */
   senderVerificationTimeoutMs: number;
   /**
-   * TASK 46: Unix socket path of the dedicated sponsor signing service. Required in real
+   * Unix socket path of the dedicated sponsor signing service. Required in real
    * mode; must be absent in mock mode (the mock signer never uses IPC).
    */
   signingServiceSocket: string | null;
-  /** TASK 46: expected signing-service UID for SO_PEERCRED. Required in real mode. */
+  /** Expected signing-service UID for SO_PEERCRED. Required in real mode. */
   signingServiceUid: number | null;
-  /** TASK 46: per-request timeout for signing IPC calls (ms). */
+  /** Per-request timeout for signing IPC calls (ms). */
   signingServiceTimeoutMs: number;
   /**
-   * TASK 55: maximum sponsor fee (microCCD) accepted per settlement. Validated as a
+   * Maximum sponsor fee (microCCD) accepted per settlement. Validated as a
    * non-negative integer. Default 10_000_000 (10 CCD).
    *
    * Evidence (live Testnet, protocol 10, `getBlockChainParameters`):
@@ -88,7 +88,7 @@ export interface FacilitatorConfig {
    */
   maxFeeMicroCcd: bigint;
   /**
-   * TASK 55: maximum sponsor execution energy accepted per settlement.
+   * Maximum sponsor execution energy accepted per settlement.
    *
    * Default changed from the placeholder `100_000` to `1_000` NRG. The old value implied a
    * worst-case fee of 800 CCD at the conservative rate (717 CCD at the live rate), which
@@ -105,7 +105,7 @@ export interface FacilitatorConfig {
    */
   maxEnergy: bigint;
   /**
-   * TASK 64 (C): absolute path to the sponsor wallet export used by the signing service.
+   * Absolute path to the sponsor wallet export used by the signing service.
    *
    * This is a *path*, never the contents. The facilitator never reads it — it exists so
    * the signing-service launcher and the deployment can be validated from one config
@@ -114,18 +114,18 @@ export interface FacilitatorConfig {
    */
   sponsorWalletFile: string | null;
   /**
-   * TASK 64 (B): run `recoverPending()` once at startup, before advertising readiness.
+   * Run `recoverPending()` once at startup, before advertising readiness.
    * Default `false` (opt-in) so existing mock-mode tests are unaffected.
    */
   recoverOnStartup: boolean;
-  /** TASK 64 (B): bounded timeout for the startup recovery pass (ms). Default 30_000. */
+  /** Bounded timeout for the startup recovery pass (ms). Default 30_000. */
   startupRecoveryTimeoutMs: number;
 }
 
 export type EvidenceMode = 'none' | 'fixture' | 'grpc';
 
 /**
- * TASK 41: sender signature verification mode.
+ * Sender signature verification mode.
  *
  * - `passthrough` → mock/test only. No signature check. MUST NOT be selected in real mode.
  * - `sdk`         → real SDK verification via GrpcAccountInfoProvider + SdkSenderVerifier.
@@ -217,7 +217,7 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     if (!Number.isFinite(v) || v <= 0) throw new ConfigurationError(`${name} must be a positive number`);
   }
 
-  // TASK 30: evidence verifier configuration. Default is `none` — no trusted verifier, so
+  // Evidence verifier configuration. Default is `none` — no trusted verifier, so
   // reconciliation can never finalize anything. That is the safe default.
   const evidenceModeRaw = env['FACILITATOR_EVIDENCE_MODE'] ?? 'none';
   if (evidenceModeRaw !== 'none' && evidenceModeRaw !== 'fixture' && evidenceModeRaw !== 'grpc') {
@@ -284,7 +284,7 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
       ? null
       : authorizationSocketRaw.trim();
 
-  // ── TASK 41: sender signature verification ────────────────────────────────
+  // ── Sender signature verification ────────────────────────────────
   // Selection rule (fail-closed):
   //   - `real` mode: `sdk` is REQUIRED. `passthrough` or unset is an initialization error.
   //   - `mock` mode: `passthrough` is the default. `sdk` is allowed (it will hit a real
@@ -323,7 +323,7 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     throw new ConfigurationError('FACILITATOR_SENDER_VERIFY_TIMEOUT_MS must be a positive number');
   }
 
-  // ── TASK 46: sponsor signing service IPC ─────────────────────────────────
+  // ── Sponsor signing service IPC ─────────────────────────────────
   // Selection rule (fail-closed):
   //   - `real` mode: BOTH socket and UID are REQUIRED. No default is substituted.
   //   - `mock` mode: neither may be set (the mock signer never speaks IPC). Setting them
@@ -397,7 +397,7 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     );
   }
 
-  // ── TASK 48: fee and energy caps ────────────────────────────────────────
+  // ── Fee and energy caps ────────────────────────────────────────
   const maxFeeRaw = env['FACILITATOR_MAX_FEE_MICROCCD'];
   let maxFeeMicroCcd: bigint;
   if (maxFeeRaw === undefined || maxFeeRaw.trim() === '') {
@@ -419,7 +419,7 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     maxEnergy = BigInt(maxEnergyRaw.trim());
   }
 
-  // ── TASK 64 (C): sponsor wallet export path ────────────────────────────────
+  // ── Sponsor wallet export path ────────────────────────────────
   // A path only; the contents are never read here. Fail closed on anything that is not an
   // absolute, traversal-free path.
   const sponsorWalletRaw = env['FACILITATOR_SPONSOR_WALLET_FILE'];
@@ -434,7 +434,7 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     }
   }
 
-  // ── TASK 64 (B): startup recovery ─────────────────────────────────────────
+  // ── Startup recovery ─────────────────────────────────────────
   const recoverRaw = env['FACILITATOR_RECOVER_ON_STARTUP'];
   const recoverOnStartup = recoverRaw === undefined || recoverRaw === '' ? false : recoverRaw === '1';
   if (recoverOnStartup && mode !== 'real') {

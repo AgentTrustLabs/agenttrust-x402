@@ -1,5 +1,5 @@
 /**
- * TASK 71 — Connect Wallet / Agent Pairing tests.
+ * Connect Wallet / Agent Pairing tests.
  *
  * Mocks only where wallet-provider interaction cannot run in automated tests.
  * No browser, no real wallet, no network, no transaction.
@@ -561,5 +561,5 @@ for (const [name, fn] of tests) {
     console.log(`FAIL ${name} — ${(e as Error).message}`);
   }
 }
-console.log(`\ntask71: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+console.log(`\nconnect-wallet-pairing: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

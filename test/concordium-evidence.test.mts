@@ -1,5 +1,5 @@
 /**
- * TASK 30 — Concordium EvidenceVerifier adapter tests (deterministic, no network).
+ * Concordium EvidenceVerifier adapter tests (deterministic, no network).
  *
  * Uses a mock node client implementing `ConcordiumStatusClient`. No real node.
  */
@@ -305,5 +305,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask30-concordium-evidence: ${n - failed}/${n} passed`);
+console.log(`\nconcordium-evidence: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

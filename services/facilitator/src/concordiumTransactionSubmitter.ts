@@ -1,5 +1,5 @@
 /**
- * TASK 49 — Concordium transaction submission & finalization adapter.
+ * Concordium transaction submission & finalization adapter.
  *
  * A focused, dependency-injected adapter that wraps the Concordium SDK's submission
  * and finalization primitives behind a normalized interface. It does NOT sign, does

@@ -1,5 +1,5 @@
 /**
- * TASK 58 — read-only sponsor-account verification (no writes, no signing).
+ * Read-only sponsor-account verification (no writes, no signing).
  *
  * Usage:
  *   npx tsx scripts/sponsor-account-verify.mts <base58check-address>
@@ -91,6 +91,6 @@ const accountThresholdOk = info.accountThreshold === 1;
 const credOk = credCount >= 1 && Object.values(creds).every((c: any) => c?.value?.contents?.credentialPublicKeys?.threshold === 1);
 log('');
 log(`sponsor shape : accountThreshold===1 ? ${accountThresholdOk} ; credentialThreshold===1 ? ${credOk}`);
-log(`ready for TASK57 loader : ${accountThresholdOk && credOk ? 'YES' : 'NO'}`);
+log(`ready for loader: ${accountThresholdOk && credOk ? 'YES': 'NO'}`);
 log('');
 log('DONE');

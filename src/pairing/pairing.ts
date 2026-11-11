@@ -78,7 +78,7 @@ export interface OwnershipVerification {
  *
  * The verifier is injected so the pairing store stays free of network I/O and the
  * tests stay offline. A real implementation is `createAgentIdentityVerifier` in
- * `agentTrust.ts`, which calls the existing `verifyAgent()` pipeline (TASK 03).
+ * `agentTrust.ts`, which calls the existing `verifyAgent()` pipeline.
  */
 export interface AgentIdentityVerification {
   trusted: boolean;

@@ -48,7 +48,7 @@ constants). They are preserved for backward compatibility:
 
 - `TASK348_LOG`, `TASK348_PEERCRED_BIN` — IPC test harness (env vars).
 - `TASK349_LOG`, `TASK349_PEERCRED_BIN` — SQLite crash test (env vars).
-- `TASK48_TEST_KEY` — Ed25519 test key (env var).
+- `TEST_SIGNING_SEED_HEX` — Ed25519 test key (env var).
 - `TASK65_SENDER_WALLET_FILE` — sender wallet file path (env var).
 
 These are internal test identifiers and do not appear in production code paths.

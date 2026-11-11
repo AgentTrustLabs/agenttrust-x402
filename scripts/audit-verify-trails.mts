@@ -1,5 +1,5 @@
 /**
- * TASK 06 — verify a trail directory and emit a machine-readable report.
+ * Verify a trail directory and emit a machine-readable report.
  * Read-only. Run: npx tsx scripts/audit-verify-trails.mts <dir> [<dir> ...]
  */
 

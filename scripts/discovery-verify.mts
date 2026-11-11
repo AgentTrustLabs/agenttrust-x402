@@ -1,5 +1,5 @@
 /**
- * TASK 03 — live read-only discovery + independent cross-agent verification.
+ * Live read-only discovery + independent cross-agent verification.
  *
  * Read-only: no transaction is built, signed or submitted. Nothing here writes
  * to the chain. The only network calls are registry reads, a card GET, and a
@@ -184,7 +184,7 @@ const result = await verifyAgent({
 const finalEvidence = {
   ...result.evidence,
   meta: {
-    task: 'TASK 03 — read-only discovery & independent cross-agent verification',
+    task: 'read-only discovery & independent cross-agent verification',
     network: NETWORK,
     caip2: CAIP2,
     token_id: TOKEN_ID,

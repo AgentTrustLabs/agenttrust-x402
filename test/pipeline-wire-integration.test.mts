@@ -1,9 +1,9 @@
 /**
- * TASK 37 — payment pipeline wire integration tests.
+ * Payment pipeline wire integration tests.
  *
- * Proves that the TASK36 converter is wired into the settlement pipeline, that energy
+ * Proves that the converter is wired into the settlement pipeline, that energy
  * comes from the authoritative policy, that authorization remains mandatory, and that the
- * TASK29 durable ordering is preserved.
+ * Durable ordering is preserved.
  *
  * Run: npx tsx test/pipeline-wire-integration.test.mts
  */
@@ -369,6 +369,6 @@ test('12. mock payment flow remains functional', async () => {
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask37: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\npipeline-wire-integration: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

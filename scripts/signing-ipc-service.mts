@@ -1,5 +1,5 @@
 /**
- * TASK 44 — signing service child process (test harness).
+ * Signing service child process (test harness).
  *
  * A real separate OS process that owns the Unix socket and holds the fake signer.
  * It never has key material — `createFakeSigner()` returns a deterministic signature.

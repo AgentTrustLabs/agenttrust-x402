@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — IPC caller process.
+ * IPC caller process.
  *
  * Sends one JSON request over the owner's Unix socket and prints the JSON reply.
  *

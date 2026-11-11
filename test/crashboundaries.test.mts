@@ -1,5 +1,5 @@
 /**
- * TASK 29 — additional real-process crash-boundary scenarios.
+ * Additional real-process crash-boundary scenarios.
  *
  * These exercise the dieAt injection so every boundary is a real SIGKILL, not a simulation.
  * Appended to the main suite by running this file separately:
@@ -153,5 +153,5 @@ for (const dieAt of boundaries) {
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask29-crashboundaries: ${results.length - failed}/${results.length} passed`);
+console.log(`\ncrashboundaries: ${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

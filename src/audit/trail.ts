@@ -163,7 +163,7 @@ export function assertNoSecrets(value: unknown, path = 'event'): void {
 }
 
 // ─── locking ─────────────────────────────────────────────────────────────
-// Implementation lives in ./lock.ts (TASK 06.1). Re-exported here so existing
+// Implementation lives in ./lock.ts. Re-exported here so existing
 // imports from the trail module keep working.
 
 export {
@@ -235,7 +235,7 @@ export class AuditTrail {
    * an unknown top-level or nested field, a wrong type, or an unknown outcome
    * throws `AuditEventValidationError` and appends nothing. Previously unknown
    * keys were silently dropped before `assertNoSecrets()` could inspect them,
-   * so a caller could believe a field was recorded when it never was (TASK 14).
+   * so a caller could believe a field was recorded when it never was.
    */
   record(
     type: AuditEventType,

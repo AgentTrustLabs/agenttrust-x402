@@ -1,5 +1,5 @@
 /**
- * TASK 39 — read-only Concordium AccountInfoProvider.
+ * Read-only Concordium AccountInfoProvider.
  *
  * Backed by the official `ConcordiumGRPCNodeClient.getAccountInfo()` from
  * `@concordium/web-sdk/nodejs`. Read-only: it never constructs, signs, or submits a
@@ -44,7 +44,7 @@ export interface ConcordiumNetworkIdentity {
 export const KNOWN_NETWORKS: Record<string, ConcordiumNetworkIdentity> = {
   'ccd:4221332d34e1694168c2a0c0b3fd0f27': {
     caip2: 'ccd:4221332d34e1694168c2a0c0b3fd0f27',
-    // TASK 40: corrected to the full Testnet genesis hash observed from the live node.
+    // Corrected to the full Testnet genesis hash observed from the live node.
     // The earlier 32-char value was the CAIP-2 prefix, not the full genesis hash.
     genesisHash: '4221332d34e1694168c2a0c0b3fd0f273809612cb13d000d5c2e00e85f50f796',
   },

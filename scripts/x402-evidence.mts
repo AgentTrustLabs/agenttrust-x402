@@ -1,5 +1,5 @@
 /**
- * TASK 04 — produce the deterministic evidence bundle for the payment module.
+ * Produce the deterministic evidence bundle for the payment module.
  *
  * Offline. No facilitator, no network, no keys, no settlement. Everything here is
  * a local function call whose output is captured to docs/evidence/x402-payment/.

@@ -1,5 +1,5 @@
 /**
- * TASK 07 — facilitator readiness, compatibility, and signing-boundary tests.
+ * Facilitator readiness, compatibility, and signing-boundary tests.
  *
  * All offline. The facilitator is either a mock `fetch` or a mock
  * `ConsumerFacilitator`; the two live probes used as evidence were run once by
@@ -627,5 +627,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String((e as Error).message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask07-facilitator-readiness: ${n - failed}/${n} passed`);
+console.log(`\nfacilitator-readiness: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 /**
- * TASK 53 — recovery child: opens a shared DB and runs `core.recoverPending()`.
+ * Recovery child: opens a shared DB and runs `core.recoverPending()`.
  *
  * Usage: tsx scripts/recovery-child.mts <dbPath> <ledgerPath>
  * Prints one JSON line: {"scanned":N,"finalized":N,...,"submitAttempts":N}

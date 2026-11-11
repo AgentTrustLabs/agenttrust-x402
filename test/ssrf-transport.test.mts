@@ -1,5 +1,5 @@
 /**
- * TASK 21 — SSRF transport hardening & retrieval failure semantics.
+ * SSRF transport hardening & retrieval failure semantics.
  *
  * Everything here is offline and deterministic. A controlled resolver maps hostnames to
  * addresses we choose; a local HTTP server stands in for the card host. No real cloud
@@ -292,7 +292,7 @@ test('18. only permanent failures produce REJECTED; transient ones produce INCON
   for (const status of [408, 429, 500, 502, 503, 504]) {
     eq(results[status], 'INCONCLUSIVE', `HTTP ${status} → INCONCLUSIVE (unavailable, not fraudulent)`);
   }
-  // TASK 23: none of these proves the owner or identity is fraudulent — the endpoint simply
+  // None of these proves the owner or identity is fraudulent — the endpoint simply
   // does not serve the card. They must all be INCONCLUSIVE.
   for (const status of [400, 401, 403, 404, 408, 410, 429, 500, 502, 503, 504]) {
     eq(results[status], 'INCONCLUSIVE', `HTTP ${status} → INCONCLUSIVE (availability, not identity)`);
@@ -348,5 +348,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e?.message ?? e).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask21-ssrf-transport: ${n - failed}/${n} passed`);
+console.log(`\nssrf-transport: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

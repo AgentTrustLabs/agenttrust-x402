@@ -1,5 +1,5 @@
 /**
- * TASK 35 — Concordium SDK sponsor signer adapter.
+ * Concordium SDK sponsor signer adapter.
  *
  * Production-facing sponsor signer boundary. Wraps the official Concordium SDK's
  * `sponsor()` flow behind the existing `SponsorSigner` interface so that
@@ -82,7 +82,7 @@ export function validateSponsorContext(
   if (ctx.sponsor === ctx.recipient) {
     return 'sponsor must not equal recipient';
   }
-  // TASK 48: reject malformed / negative / unsafe values before any comparison.
+  // Reject malformed / negative / unsafe values before any comparison.
   // Integer-safe: both values are bigint, so no float rounding can slip under a cap.
   const energyOk = typeof ctx.energy === 'bigint' && ctx.energy > 0n;
   const feeOk = typeof ctx.feeMicroCcd === 'bigint' && ctx.feeMicroCcd >= 0n;

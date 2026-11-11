@@ -1,5 +1,5 @@
 /**
- * TASK 64 — pre-demo runtime completion.
+ * Pre-demo runtime completion.
  *
  * Workstream A: real-mode logging accuracy.
  * Workstream B: startup recovery integration (fail-closed, never submits).
@@ -476,5 +476,5 @@ console.log('\n── D. mock mode unchanged ──');
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask64: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\npre-demo-runtime-completion: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

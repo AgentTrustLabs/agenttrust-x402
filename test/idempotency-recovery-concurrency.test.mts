@@ -1,5 +1,5 @@
 /**
- * TASK 53 — transaction lifecycle idempotency & recovery concurrency.
+ * Transaction lifecycle idempotency & recovery concurrency.
  *
  * Fake signer, mock transport, isolated persistence. No chain, no keys, no broadcast.
  * Concurrency cases 03 / 05 use real OS processes sharing one SQLite file.
@@ -400,7 +400,7 @@ test('07. a duplicate request after finalized rejection is refused and never reo
     const first = await core.settle(envelope());
     eq(first.success, false, 'rejection is not success');
     eq(first.errorReason, 'transaction_failed', 'transaction_failed');
-    // TASK 59: one rejection observation is recorded, not terminal; confirm via recovery.
+    // One rejection observation is recorded, not terminal; confirm via recovery.
     eq(rowsOf(w.db).state, 'outcome_unknown', 'first rejection recorded, not terminal');
     const confirm = await core.recoverPending();
     eq(confirm.failed, 1, 'confirmation observed');
@@ -479,7 +479,7 @@ test('09. duplicate-key and conflicting-hash writes are refused, never duplicate
     );
     eq(repo.get(d)?.tx_hash, A, 'conflicting re-prepare did not rename the hash');
 
-    // TASK53 fix: a pending record may not rename the persisted hash.
+    // Fix: a pending record may not rename the persisted hash.
     msg = '';
     try {
       repo.markPending(d, B, 'conflicting hash');
@@ -622,7 +622,7 @@ test('13. recovery exposes no submission path', async () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask53: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nidempotency-recovery-concurrency: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();
 

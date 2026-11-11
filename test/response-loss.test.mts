@@ -1,5 +1,5 @@
 /**
- * TASK 34.13 — response-loss and client-restart recovery (real owner process).
+ * Response-loss and client-restart recovery (real owner process).
  *
  * Sequence (deterministic, no exception-before-commit):
  *   1. Owner starts with CRASH_AT=4 (crash after commit + idempotency record, before response).
@@ -48,7 +48,7 @@ const run = (cmd: string, args: string[], as?: string, timeout = 30000) =>
 const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
 const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
 if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`task34.13 response-loss: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
+  console.log(`response-loss: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
   console.log('  run: sudo -u ubuntu npx tsx test/response-loss.test.mts');
   process.exit(0);
 }
@@ -81,7 +81,7 @@ const startOwner = (crashAt: number) => {
 
 // Fixed expiry: the request must be byte-identical across authorize and recover. Using the
 // live clock here would change `expiry` between calls and (correctly) fail recovery now that
-// TASK 34.14 binds expiry into the durable record.
+// Expiry is bound into the durable record.
 const EXPIRY = Math.floor(Date.now() / 1000) + 600;
 const req = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest => ({
   paymentDigest: 'a'.repeat(64),
@@ -156,5 +156,5 @@ try {
 }
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask34.13 response-loss: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nresponse-loss: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 /**
- * TASK 34.11 — narrow authorization client for FacilitatorCore.settle().
+ * Narrow authorization client for FacilitatorCore.settle().
  *
  * Two implementations:
  *   - `LocalAuthorizationClient`: test/mock only. Wraps the durable narrow-sponsor
@@ -55,7 +55,7 @@ export interface AuthorizationClient {
   authorize(request: AuthorizationRequest): Promise<AuthorizationResponse>;
 
   /**
-   * TASK 34.13: owner-mediated recovery.
+   * Owner-mediated recovery.
    *
    * Called only after a response was lost or after `authorization_already_recorded`.
    * The owner inspects durable records and reports whether a matching approval exists.
@@ -68,7 +68,7 @@ export interface AuthorizationClient {
  * Test/mock-only client.
  *
  * Calls the durable atomic gate (`repository.authorizeSignEvent`) directly. This is the
- * exact boundary TASK 34.11 integrates — state must be `created`, `tx_hash` must be NULL,
+ * exact boundary integrates — state must be `created`, `tx_hash` must be NULL,
  * and no prior `approved` event may exist. The audit event is written in the same
  * transaction.
  *
@@ -136,7 +136,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
         recipient: request.recipient,
         energy: String(request.energy),
         policyVersion: this.policy.policyVersion,
-        // TASK 34.14: bind the full payment context into the durable record.
+        // Bind the full payment context into the durable record.
         asset: request.asset,
         amount: request.amount,
         expiry: request.expiry,
@@ -152,7 +152,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
   }
 
   /**
-   * TASK 34.13 — local recovery. Mirrors the owner's recovery logic against the same
+   * Local recovery. Mirrors the owner's recovery logic against the same
    * durable records. Read-only: never writes an authorization record.
    */
   async recover(request: AuthorizationRequest): Promise<AuthorizationResponse> {
@@ -208,9 +208,9 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     if (ev.recipient !== request.recipient) mismatches.push('recipient');
     if (ev.energy !== String(request.energy)) mismatches.push('energy');
     if (ev.policy_version !== this.policy.policyVersion) mismatches.push('policy_version');
-    // TASK 34.14/34.16: bind the full payment context. A NULL in any of these means the
+    // Bind the full payment context. A NULL in any of these means the
     // record predates the binding → fail closed (we cannot prove the context matches).
-    // TASK 34.16: legacy rows (NULL context) are reported with a distinct reason so
+    // Legacy rows (NULL context) are reported with a distinct reason so
     // operators can distinguish "unrecoverable legacy record" from "context mismatch".
     const legacy = ev.asset === null || ev.amount === null || ev.expiry === null;
     if (ev.asset === null) mismatches.push('asset (missing durable evidence)');
@@ -307,7 +307,7 @@ export class IpcAuthorizationClient implements AuthorizationClient {
     });
   }
 
-  /** TASK 34.13 — owner-mediated recovery over IPC. Read-only on the owner side. */
+  /** Owner-mediated recovery over IPC. Read-only on the owner side. */
   async recover(request: AuthorizationRequest): Promise<AuthorizationResponse> {
     const net = await import('node:net');
     return new Promise<AuthorizationResponse>((resolve) => {

@@ -1,5 +1,5 @@
 /**
- * Generates signing-site/registration.json from the TASK 02 artifacts:
+ * Generates signing-site/registration.json from the artifacts:
  * parameterJson (contract params), parameterSchemaBase64 (parameter schema),
  * plus display fields. Also writes the schema binary once.
  */

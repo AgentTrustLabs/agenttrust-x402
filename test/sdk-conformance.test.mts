@@ -1,5 +1,5 @@
 /**
- * TASK 04 — conformance tests against the OFFICIAL SDK (offline).
+ * Conformance tests against the OFFICIAL SDK (offline).
  *
  * Asserts that this project's payment shapes agree with @x402/concordium and
  * @x402/core, and that no code path can reach a live facilitator by default.
@@ -52,7 +52,7 @@ test('CCD asset identifier and decimals match the SDK', () => {
   assertConstantsAgree({ asset: CCD_ASSET, decimals: CCD_DECIMALS, network: CCD_TESTNET_CAIP2 });
 });
 
-test('SDK gRPC endpoint is the one TASK 01 verified live', () => {
+test('SDK gRPC endpoint is the one verified live', () => {
   eq(SDK_CONSTANTS.grpcUrl, 'grpc.testnet.concordium.com:20000', 'grpc');
 });
 
@@ -157,5 +157,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e.message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask04-sdk-conformance: ${n - failed}/${n} passed`);
+console.log(`\nsdk-conformance: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

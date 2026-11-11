@@ -1,8 +1,8 @@
 /**
- * TASK 52.1 — regression: the mock signer and the production path agree on the finalized
+ * Regression: the mock signer and the production path agree on the finalized
  * transaction hash.
  *
- * TASK52 made FacilitatorCore persist `computeFinalizedTransactionHash(sponsored)`. That helper
+ * FacilitatorCore persists `computeFinalizedTransactionHash(sponsored)`. That helper
  * calls `AccountTransactionV1.serializeSignatures`, which throws "No signatures were provided"
  * when the sponsor signature slot is empty. The mock signer used to return the transaction with
  * an empty sponsor slot, so the B06 mock flow failed at hash computation (and the mock's
@@ -223,6 +223,6 @@ test('07. B06 regression: the signer without validateContext settles successfull
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask52.1: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nfinalized-hash-agreement: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

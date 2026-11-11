@@ -1,18 +1,18 @@
 /**
- * TASK 46 — IPC-backed SponsorSigner for real mode.
+ * IPC-backed SponsorSigner for real mode.
  *
- * Composes the TASK35 SDK sponsor adapter with the TASK43 `IpcAccountSigner` so the
+ * Composes the SDK sponsor adapter with the `IpcAccountSigner` so the
  * facilitator can obtain a sponsor signature from a dedicated signing service without ever
  * holding key material.
  *
  * What this DOES:
  *   - addSponsorSignature() → SDK `Transaction.sponsor()` → IPC `sign(digest)` → signature
- *   - TASK51: with an injected `ConcordiumTransactionSubmitter`, `submitTransaction()` and
- *     `waitForFinalization()` delegate to the TASK49 adapter (V1 `finalize` + `sendTransaction`).
+ *   - with an injected `ConcordiumTransactionSubmitter`, `submitTransaction()` and
+ *     `waitForFinalization()` delegate to the adapter (V1 `finalize` + `sendTransaction`).
  *
  * What this does NOT do:
  *   - Without an injected submitter, `submitTransaction()` and `waitForFinalization()`
- *     throw: no broadcast, no finalization, exactly as in TASK 46.
+ *     throw: no broadcast, no finalization.
  *   - This module never constructs a gRPC client, a transport, or a private key.
  *   - The chain-query methods throw: they are only reachable through a settlement path
  *     that is disabled (`DENY_ALL_FACILITATOR` + settlement disabled by default).
@@ -45,8 +45,8 @@ export interface IpcSponsorSignerOptions {
   /** Clock. */
   now?: () => number;
   /**
-   * TASK51: optional submission adapter. When provided, `submitTransaction` and
-   * `waitForFinalization` delegate to the TASK49 adapter (which wraps the V1 gRPC
+   * Optional submission adapter. When provided, `submitTransaction` and
+   * `waitForFinalization` delegate to the adapter (which wraps the V1 gRPC
    * transport). When omitted, both remain fail-closed: no broadcast, no finalization.
    * The caller constructs and injects this; the signer never constructs a transport.
    */
@@ -91,23 +91,23 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
   };
 
   /**
-   * TASK51 — submission at the signer boundary.
+   * Submission at the signer boundary.
    *
    * DECISION: delegate, do not replace. `submitTransaction` remains the single
    * `SponsorSigner` submission seam that `FacilitatorCore.settle()` already calls at step 6
    * (after the durable hash is persisted and the broadcast claim is taken), so delegation
-   * preserves the TASK 29 ordering and the existing authorization architecture. The
+   * preserves the ordering and the existing authorization architecture. The
    * alternative — a second, narrower submission path owned by the signer — would have
    * duplicated the pipeline's hash and claim bookkeeping outside `FacilitatorCore`.
    *
    * The submitter is INJECTED. This module never builds a gRPC client or a transport, and
-   * with no submitter injected both methods stay fail-closed exactly as in TASK 46.
+   * with no submitter injected both methods stay fail-closed.
    */
   const submitter = opts.submitter;
 
   const submitTransaction = async (txJson: unknown): Promise<string> => {
     if (!submitter) return noSubmit('submitTransaction');
-    // TASK49 semantics: `submit` throws on a transport rejection and never returns a hash
+    // Semantics: `submit` throws on a transport rejection and never returns a hash
     // the node did not acknowledge; the hash is already lower-cased 64-hex.
     const result = await submitter.submit(txJson);
     return result.hash;
@@ -127,7 +127,7 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
       txHash,
       timeoutMs !== undefined ? { timeoutMs } : {},
     );
-    // TASK49 outcome → SponsorSigner status. Lossy by necessity: the shared signer
+    // Outcome → SponsorSigner status. Lossy by necessity: the shared signer
     // contract has four values. Mapping is documented in docs/architecture.md.
     switch (observed.status) {
       case 'finalized':

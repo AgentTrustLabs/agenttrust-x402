@@ -1,8 +1,8 @@
 /**
- * TASK 80 — live read-only validation of the real Concordium Testnet chain verifier
+ * Live read-only validation of the real Concordium Testnet chain verifier
  * and of the x402 provider end to end against real finalized transactions.
  *
- * Uses two ALREADY-FINALIZED transactions from TASK 65 and TASK 70. No new
+ * Uses two ALREADY-FINALIZED transactions (the first and second sponsored transfers). No new
  * transaction is constructed, signed, broadcast, or paid for. The facilitator is
  * a local stub only because settlement is out of scope — the provider's resource
  * release is decided solely by the real on-chain read.
@@ -17,8 +17,8 @@ import { buildPaymentRequirements, buildPaymentRequired, preflightPaymentPayload
 const NODE_HOST = process.env.AGENTTRUST_NODE_HOST ?? TESTNET.grpcHost.replace(/^https?:\/\//, '');
 const NODE_PORT = Number(process.env.AGENTTRUST_NODE_PORT ?? TESTNET.grpcPort);
 
-const TX_TASK65 = 'c1029c57ae5d44b3c65870c86f363139fbbc2deaefd2a0a9e95534ae8a1bd67a'; // transaction hash (read-only evidence)
-const TX_TASK70 = 'b472caa354f9c017cc7d6254fbe12ef8fc2bc0ee3c989a561c6cd9bf957220c2'; // transaction hash (read-only evidence)
+const TX_FIRST_SPONSORED = 'c1029c57ae5d44b3c65870c86f363139fbbc2deaefd2a0a9e95534ae8a1bd67a'; // transaction hash (read-only evidence)
+const TX_SECOND_SPONSORED = 'b472caa354f9c017cc7d6254fbe12ef8fc2bc0ee3c989a561c6cd9bf957220c2'; // transaction hash (read-only evidence)
 const TX_UNKNOWN = '0000000000000000000000000000000000000000000000000000000000000000'; // transaction hash (unknown sentinel)
 
 const PAY_TO = '3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB';
@@ -72,7 +72,7 @@ function makeProvider(txHash: string, amount: string, payTo: string, chain: Conc
 }
 
 async function main(): Promise<void> {
-  console.log('=== TASK 80: real Concordium Testnet chain verification ===');
+  console.log('=== real Concordium Testnet chain verification ===');
   console.log(`node=${NODE_HOST}:${NODE_PORT} network=${TESTNET.caip2}`);
 
   const verifier = new ConcordiumChainVerifier({ host: NODE_HOST, port: NODE_PORT, network: TESTNET.caip2, useTls: true });
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   console.log('PASS verifyNode(): node genesis matches configured Testnet');
 
   console.log('\n### Phase 2 — direct chain reads');
-  for (const tx of [TX_TASK65, TX_TASK70]) {
+  for (const tx of [TX_FIRST_SPONSORED, TX_SECOND_SPONSORED]) {
     const s = await verifier.readTransfer(tx);
     console.log(`readTransfer(${tx})`);
     console.log('  ' + JSON.stringify(s));
@@ -94,23 +94,23 @@ async function main(): Promise<void> {
 
   // 3a. correct payment details → 200
   {
-    const p = makeProvider(TX_TASK65, '1', PAY_TO, verifier);
-    const r = await p.handlePayment(paymentHeader(TX_TASK65, '1', PAY_TO));
+    const p = makeProvider(TX_FIRST_SPONSORED, '1', PAY_TO, verifier);
+    const r = await p.handlePayment(paymentHeader(TX_FIRST_SPONSORED, '1', PAY_TO));
     console.log(`correct recipient+amount -> ${r.status} (${r.reason})`);
   }
 
   // 3b. wrong recipient → chain_mismatch
   {
     const wrong = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
-    const p = makeProvider(TX_TASK65, '1', wrong, verifier);
-    const r = await p.handlePayment(paymentHeader(TX_TASK65, '1', wrong));
+    const p = makeProvider(TX_FIRST_SPONSORED, '1', wrong, verifier);
+    const r = await p.handlePayment(paymentHeader(TX_FIRST_SPONSORED, '1', wrong));
     console.log(`wrong recipient -> ${r.status} (${r.reason}) body=${JSON.stringify(r.body)}`);
   }
 
   // 3c. wrong amount → chain_mismatch
   {
-    const p = makeProvider(TX_TASK65, '500', PAY_TO, verifier);
-    const r = await p.handlePayment(paymentHeader(TX_TASK65, '500', PAY_TO));
+    const p = makeProvider(TX_FIRST_SPONSORED, '500', PAY_TO, verifier);
+    const r = await p.handlePayment(paymentHeader(TX_FIRST_SPONSORED, '500', PAY_TO));
     console.log(`wrong amount -> ${r.status} (${r.reason}) body=${JSON.stringify(r.body)}`);
   }
 
@@ -129,10 +129,10 @@ async function main(): Promise<void> {
     const store = new ReplayStore();
     const p = createX402Provider(
       { requirements, resourceUrl: RESOURCE, resource: { body: 'PROTECTED-CONTENT' } },
-      { facilitator: stubFacilitator(TX_TASK70), chain: verifier },
+      { facilitator: stubFacilitator(TX_SECOND_SPONSORED), chain: verifier },
       { preflight: preflightPaymentPayload, buildRequired: buildPaymentRequired, replayStore: store },
     );
-    const h = paymentHeader(TX_TASK70, '1', PAY_TO);
+    const h = paymentHeader(TX_SECOND_SPONSORED, '1', PAY_TO);
     const first = await p.handlePayment(h);
     const second = await p.handlePayment(h);
     console.log(`replay: first=${first.status}/${first.reason} second=${second.status}/${second.reason}`);
@@ -142,8 +142,8 @@ async function main(): Promise<void> {
   const summary = {
     node: `${NODE_HOST}:${NODE_PORT}`,
     network: TESTNET.caip2,
-    t65: await verifier.readTransfer(TX_TASK65),
-    t70: await verifier.readTransfer(TX_TASK70),
+    t65: await verifier.readTransfer(TX_FIRST_SPONSORED),
+    t70: await verifier.readTransfer(TX_SECOND_SPONSORED),
     unknown: await verifier.readTransfer(TX_UNKNOWN),
   };
   console.log(JSON.stringify(summary, null, 2));

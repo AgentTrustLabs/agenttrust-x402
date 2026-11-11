@@ -1,5 +1,5 @@
 /**
- * TASK 57 / TASK 64 — sponsor signing-service launcher with secret injection.
+ * Sponsor signing-service launcher with secret injection.
  *
  * Configuration (preferred, environment-driven):
  *   FACILITATOR_SPONSOR_WALLET_FILE   absolute path to the wallet export
@@ -8,7 +8,7 @@
  *   FACILITATOR_NETWORK               CAIP-2 network
  *   FACILITATOR_SIGNING_SERVICE_UID   allowed peer UID
  *
- * Legacy positional form is still accepted for the TASK57 tests:
+ * Legacy positional form is still accepted for the tests:
  *   npx tsx scripts/sponsor-wallet-service.mts <socket> <sponsor> <network> <uid> <export-path>
  *
  * The export is read BEFORE the socket is bound. Its contents are never logged or printed.

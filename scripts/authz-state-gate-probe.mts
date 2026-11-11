@@ -1,5 +1,5 @@
 /**
- * TASK 34.1 — read-only probe: does the authorization gate reject payments that have already
+ * Read-only probe: does the authorization gate reject payments that have already
  * entered a durable transaction state?
  *
  * This file only READS production code and observes behaviour. It does not modify anything.
@@ -41,7 +41,7 @@ function mk() {
 const rows: Array<[string, string, string]> = [];
 const probe = (name: string, expected: string, actual: string) => {
   // Compare the approved/rejected verdict only; the specific rejection reason is captured
-  // separately by the TASK 34.2 test suite.
+  // separately by the test suite.
   const verdict = actual.startsWith('approved') ? 'approved' : 'rejected';
   const pass = verdict === expected;
   rows.push([name, expected, actual]);

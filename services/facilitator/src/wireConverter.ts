@@ -1,10 +1,10 @@
 /**
- * TASK 36 — Concordium transaction wire converter.
+ * Concordium transaction wire converter.
  *
  * Converts an AgentTrust x402 V2 `SignableV1Transaction` into the canonical Concordium
  * SDK V1 wire shape that `Transaction.signableFromJSON` / `Transaction.sponsor` accept.
  *
- * Why this exists: TASK35 identified that the x402 V2 wire shape and the SDK V1 wire
+ * Why this exists: identified that the x402 V2 wire shape and the SDK V1 wire
  * shape differ in two fields:
  *
  *   1. `header.sponsor.address` (V2)  vs  `header.sponsor.account` (SDK)

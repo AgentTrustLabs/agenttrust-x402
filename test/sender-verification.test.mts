@@ -1,5 +1,5 @@
 /**
- * TASK 38 — sender signature verification (deterministic keys).
+ * Sender signature verification (deterministic keys).
  *
  * Proves the verifier uses the official SDK primitive, enforces threshold, and fails
  * closed on every rejection. Rejected verification → zero authorization + zero signer.
@@ -211,6 +211,6 @@ test('13. transaction with no signatures field → missing_signature', async () 
   // Count actual assertion outcomes, not just non-throwing tests.
   const failed = results.filter((r) => !r[1]).length + threw;
   const passed = results.length - results.filter((r) => !r[1]).length;
-  console.log(`\ntask38: ${passed}/${results.length} assertions passed, ${failed} failed`);
+  console.log(`\nsender-verification: ${passed}/${results.length} assertions passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();
