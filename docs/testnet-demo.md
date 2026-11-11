@@ -95,6 +95,14 @@ Executed against `grpc.testnet.concordium.com:20000` (read-only).
 - Transaction hash: `b472caa354f9c017cc7d6254fbe12ef8fc2bc0ee3c989a561c6cd9bf957220c2`
 - Block hash: `cf0b758b7c79350c3c4fe6458b298da15e1adde31b8eb29d4f19c18708db5022`
 
+### Third transaction — real facilitator payment (2026-11-11)
+
+The first payment settled through the production three-service deployment (Facilitator +
+Authorization Owner + Signing Service) is documented in
+[`docs/demo-real-payment.md`](demo-real-payment.md): transaction
+`b271dc8b69fcd0296b4087c01cb308646d7bc55c22f35001fb9702b6eddcfdbb`, finalized, 1 microCCD,
+635 NRG, sponsor fee 4.620843 CCD. Verify it with `npx tsx scripts/demo-real-payment.mts`.
+
 ### Provider end-to-end over the real verifier
 
 | Scenario | Result |

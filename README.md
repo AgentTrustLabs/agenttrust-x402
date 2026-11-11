@@ -11,9 +11,12 @@ trust policy, runs x402 exact-CCD payment logic behind a hard settlement gate, r
 hash-chained audit trail, and exposes all of it over the Model Context Protocol so any AI agent can use
 it as a tool.
 
-> **Simulated ≠ real.** Every commerce path in this repository settles with a **mock facilitator**.
-> Results carry `settled: false` and a disclaimer. No transaction is signed, submitted, or recorded on
-> chain. See [Simulated settlement](#simulated-settlement--read-this-before-the-demo).
+> **Simulated ≠ real — for the MCP and CLI commerce paths.** `commerce.simulate` and the
+> commerce CLI settle with a **mock facilitator**: results carry `settled: false` and no
+> transaction is signed, submitted, or recorded on chain. The self-hosted **Facilitator
+> service** is different: it settles for real on Concordium Testnet, verified 2026-11-11
+> with a finalized sponsored payment. See [Real Testnet payment demo](docs/demo-real-payment.md).
+> See [Simulated settlement](#simulated-settlement--read-this-before-the-demo) for the mock paths.
 
 ---
 
@@ -26,9 +29,9 @@ it as a tool.
 | Registry discovery, card retrieval, local SHA-256 | **Real** — live registry |
 | Independent trust verification (owner, badge, status, contract refs) | **Real** — `TRUSTED` on token 1004 |
 | Trust-gated commerce orchestration + audit trail | **Real logic, simulated payment** |
-| x402 exact-CCD payment requirements, verification, settlement gate | **Real code, no live settlement** |
+| x402 exact-CCD payment requirements, verification, settlement gate | **Real** — verified live 2026-11-11 (1 Testnet payment, finalized) |
 | MCP server (6 tools, stdio) | **Real** |
-| Live CCD settlement | **Not available** — no public CCD facilitator exists |
+| Live CCD settlement | **Real** — self-hosted facilitator on Testnet (not a public service) |
 
 ---
 
@@ -46,7 +49,7 @@ The gateway also runs a full agent-wallet stack on top of the trust and payment 
 | Agent Wallet Skills (`wallet_get_status`, `wallet_get_permissions`, `wallet_request_payment`, `wallet_request_approval`, `wallet_get_activity`) | **Real** |
 | HTTP x402: 402 requirement → wallet → payment → independent provider verification | **Real flow, mock facilitator + mock chain read** |
 | On-chain agent account creation / funding | **Not implemented** — requires a credential deployment transaction |
-| Real on-chain settlement | **Not available** — no public CCD facilitator exists |
+| Real on-chain settlement | **Real via self-hosted facilitator (Testnet)** — the wallet HTTP x402 flow still uses a mock facilitator |
 
 The signing boundary keeps private keys inside a local key store; agent-facing APIs and
 the browser never see key material. Spending is gated by the permission layer: limits,
@@ -133,6 +136,11 @@ Six tools: `registry.search`, `registry.card`, `trust.verify`, `trust.policy`, `
 
 ## Simulated settlement — read this before the demo
 
+This section describes the **MCP and CLI mock paths**. A real settlement now exists
+separately: the self-hosted Facilitator service settled a sponsored Testnet payment on
+2026-11-11 — see [Real Testnet payment demo](docs/demo-real-payment.md) and the
+runbook ([`docs/demo-runbook.md`](docs/demo-runbook.md)). Nothing below applies to it.
+
 `commerce.simulate` and the commerce CLI run a **deterministic local mock** in place of a facilitator:
 
 - `simulation.settled: false`, `simulation.facilitator: "mock"`
@@ -144,13 +152,15 @@ Six tools: `registry.search`, `registry.card`, `trust.verify`, `trust.policy`, `
 `access_granted` therefore means **"the trust gate and the payment gate both passed in a simulation"** —
 nothing more.
 
-### Why settlement is not real
+### Why settlement is not real (mock paths)
 
 There is **no publicly reachable CCD x402 facilitator** for `ccd:4221332d34e1694168c2a0c0b3fd0f27`.
 Every plausible Concordium facilitator hostname resolves to NXDOMAIN, and the public
 `x402.org/facilitator` advertises nine networks — none of them `ccd:`. This was verified directly, twice,
 in the archived facilitator discovery report (now consolidated into `docs/integration.md`). Real
-settlement needs a facilitator that the gateway does not have and will not fabricate.
+settlement therefore needs a facilitator of its own: the project now runs one, self-hosted
+on Testnet, and it settled a real payment (see the demo doc above). It does not rely on a
+public facilitator and will not fabricate one.
 
 ### Why the gateway cannot sign
 
@@ -196,7 +206,7 @@ src/
   cli/        verify / commerce / registration entry points
 test/         70+ suites, offline
 scripts/      per-task verification + demo scripts
-docs/         architecture, configuration, integration, testnet demo
+docs/         architecture, configuration, integration, testnet demo, real-payment demo
 ```
 
 ## Documentation
@@ -207,10 +217,14 @@ docs/         architecture, configuration, integration, testnet demo
 | [`docs/configuration.md`](docs/configuration.md) | Environment variables, secret handling, sponsor wallet provisioning, spending controls |
 | [`docs/integration.md`](docs/integration.md) | MCP tools, wallet skills, x402, Concordium integration, BLOCKED status |
 | [`docs/testnet-demo.md`](docs/testnet-demo.md) | Running and verifying the Testnet demo, live evidence, troubleshooting |
+| [`docs/demo-real-payment.md`](docs/demo-real-payment.md) | Real sponsored Testnet payment: architecture, flow, evidence, verification |
+| [`docs/demo-runbook.md`](docs/demo-runbook.md) | Reproducible demo runbook: prerequisites, startup order, commands, cleanup |
 
 ## Known limitations
 
-1. **No real settlement.** No CCD facilitator exists; nothing here proves a live x402 payment works.
+1. **Real settlement is Testnet-only and self-hosted.** A live x402 payment is now proven
+   ([demo doc](docs/demo-real-payment.md)); there is still no public CCD facilitator, and
+   no Mainnet settlement.
 2. **No operator authorization channel.** Authorization is refused at the MCP boundary by design.
 3. **stdio only** — no HTTP/SSE transport, so no remote or multi-tenant deployment.
 4. **Unauthenticated.** Any local process that can spawn the server can call the tools. Acceptable only
