@@ -1,13 +1,13 @@
 /**
- * TASK 75 — Agent Wallet x402 integration tests.
+ * Agent Wallet x402 integration tests.
  *
  * Mocks only: no browser, no node, no real transaction. The provider's chain
  * verifier is a fake that returns a finalized transfer for the mock facilitator's
  * simulated transaction hash. Replay protection is the real `ReplayStore`.
  *
  * Two executors are in play, both from existing code:
- *   - `createWalletPaymentExecutor` (TASK74) backs `wallet_request_payment`.
- *   - `createProviderPaymentExecutor` (TASK75) binds a payment to the provider's
+ *   - `createWalletPaymentExecutor` backs `wallet_request_payment`.
+ *   - `createProviderPaymentExecutor` binds a payment to the provider's
  *     exact requirement and is what the x402 client uses.
  */
 
@@ -493,5 +493,5 @@ for (const [name, fn] of tests) {
     console.log(`FAIL ${name} — ${(e as Error).message}`);
   }
 }
-console.log(`\ntask75: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+console.log(`\nagent-wallet-x402: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

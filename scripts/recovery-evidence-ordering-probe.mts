@@ -1,10 +1,10 @@
 /**
- * TASK53 independent probe — evidence ordering between concurrent recovery workers.
+ * Independent probe — evidence ordering between concurrent recovery workers.
  *
  * Question: if two workers poll the SAME persisted hash and the transport answers
  * inconsistently (one `failed`, one `finalized`), which terminal state wins?
  *
- * This is NOT covered by the TASK53 suite (test 03 uses a consistent `finalized`
+ * This is NOT covered by the suite (test 03 uses a consistent `finalized`
  * answer from both children), and it is not a duplicate-submission hazard — so it is
  * a limitation probe, not a fix probe.
  */

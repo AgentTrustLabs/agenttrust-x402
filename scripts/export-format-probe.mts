@@ -1,5 +1,5 @@
 /**
- * TASK 60 — export-format compatibility probe (read-only, synthetic fixtures only).
+ * Export-format compatibility probe (read-only, synthetic fixtures only).
  *
  * Confirms, against the REAL SDK 12.0.2 `parseWallet` / `buildAccountSigner`, which
  * documented export shapes are accepted by `loadWalletExportSigner` and which are not.
@@ -135,5 +135,5 @@ console.log('\n── G. loader rejects a desktop-backup file ──');
 rmSync(dir, { recursive: true, force: true });
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask60: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nexport-format-probe: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

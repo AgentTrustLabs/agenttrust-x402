@@ -22,7 +22,7 @@
  *     **throws** on user rejection; the wallet prepends bytes internally so the
  *     message can never be replayed as a transaction. Returns the signature
  *     directly (credential → key → hex), NOT a `{ signature: string }` wrapper.
- *   • `sendTransaction(...)` exists but is deliberately NOT exposed: TASK 71 never
+ *   • `sendTransaction(...)` exists but is deliberately NOT exposed: this connector never
  *     constructs, signs, or broadcasts a transaction.
  *
  * Nothing here holds, requests, or transmits key material. The connector only ever

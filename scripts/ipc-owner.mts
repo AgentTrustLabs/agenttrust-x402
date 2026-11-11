@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — authorization database owner process (proof of concept).
+ * Authorization database owner process (proof of concept).
  *
  * This process is the ONLY writer of the authorization database. It:
  *   - creates the DB in a private directory,

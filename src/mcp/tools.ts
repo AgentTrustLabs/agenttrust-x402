@@ -1,15 +1,15 @@
 /**
- * TASK 08 — MCP tool surface for AgentTrust Gateway.
+ * MCP tool surface for AgentTrust Gateway.
  *
  * Design rule: this module contains **no business logic**. Every tool is a thin,
  * strictly-validated adapter over an existing module:
  *
  *   registry.search   → AgentRegistryMcp.callToolRaw('search_agents')
  *   registry.card     → AgentRegistryMcp.callToolRaw('agent_of') + fetchCardBytes
- *   trust.verify      → crossAgent.verifyAgent (TASK 03, untouched)
- *   trust.policy      → trustPolicy.evaluateTrustPolicy (TASK 05, untouched)
+ *   trust.verify      → crossAgent.verifyAgent (untouched)
+ *   trust.policy      → trustPolicy.evaluateTrustPolicy (untouched)
  *   commerce.simulate → orchestrator.runCommerce with the shared mock facilitator
- *   audit.verify      → AuditTrail.verify (TASK 06, untouched)
+ *   audit.verify      → AuditTrail.verify (untouched)
  *
  * ── Security posture ────────────────────────────────────────────────────
  *
@@ -22,7 +22,7 @@
  * ── OperatorAuthorization invariant ─────────────────────────────────────
  *
  * There is deliberately **no tool** that issues, accepts, mutates, or references
- * an OperatorAuthorization. TASK 07 authorization is operator-side and
+ * an OperatorAuthorization. Authorization is operator-side and
  * out-of-process; a client that submits a JSON object with authorization-shaped
  * fields is rejected (`AUTHORIZATION_NOT_ACCEPTED`) rather than silently ignored,
  * so a client can never believe it authorized anything. See `REJECTED_FIELDS`.
@@ -69,7 +69,7 @@ export const LIMITS = {
 const NETWORKS = ['testnet', 'mainnet', 'devnet'] as const;
 const CAIP2_BY_NETWORK: Record<string, string> = {
   testnet: CCD_TESTNET_CAIP2,
-  // Documented mainnet CAIP-2 (TASK 01); kept for completeness, read-only paths only.
+  // Documented mainnet CAIP-2; kept for completeness, read-only paths only.
   mainnet: 'ccd:9dd9ca4d19e9393877d2c44b70f89acb',
 };
 
@@ -810,7 +810,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'trust.policy',
     description:
-      'Evaluate the TASK 05 trust policy for a verdict and intent. Rejects REJECTED and INCONCLUSIVE by default.',
+      'Evaluate the trust policy for a verdict and intent. Rejects REJECTED and INCONCLUSIVE by default.',
     inputSchema: {
       type: 'object',
       properties: {

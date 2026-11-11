@@ -1,5 +1,5 @@
 /**
- * TASK 34.13 — real IPC recovery probe.
+ * Real IPC recovery probe.
  *
  * Starts a live authorization owner, authorizes a payment, then recovers it over IPC and
  * probes mismatch / absence / rejection cases. Verifies the owner never writes a record
@@ -51,7 +51,7 @@ const FACILITATOR_GID = 1002;
 const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
 const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
 if (uid !== FACILITATOR_OS_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`task34.13 IPC: SKIPPED — requires uid ${FACILITATOR_OS_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
+  console.log(`ipc-recovery: SKIPPED — requires uid ${FACILITATOR_OS_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
   console.log('  run: sudo -u ubuntu npx tsx test/ipc-recovery.test.mts');
   process.exit(0);
 }
@@ -132,5 +132,5 @@ try {
 }
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask34.13 IPC: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nipc-recovery: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -1,9 +1,9 @@
 /**
- * TASK 03 — regression tests for discovery + cross-agent verification.
+ * Regression tests for discovery + cross-agent verification.
  *
  * Fully offline. No network, no chain, no MCP. Fixtures live in test/fixtures/discovery/.
  *
- * Positive cases walk the real TASK 03 evidence; negative cases mutate it to prove
+ * Positive cases walk the real registry evidence; negative cases mutate it to prove
  * that every failure mode is detected and that none of them can yield TRUSTED.
  */
 
@@ -190,7 +190,7 @@ test('rejects a card with no Concordium badge extension', () => {
   ok(c.errors.some(e => e.includes('badge extension')), 'reason');
 });
 
-test('rejects a card whose extension has a null tokenAddress (the TASK 02 bug)', () => {
+test('rejects a card whose extension has a null tokenAddress', () => {
   const card = JSON.parse(new TextDecoder().decode(CARD()));
   const ext = card.capabilities.extensions.find(e => e.uri === BADGE_EXTENSION_URI);
   ext.params.tokenAddress = null;
@@ -309,7 +309,7 @@ test('all checks PASS yields TRUSTED', () => {
 });
 
 test('a single FAIL yields REJECTED on a contradiction-capable check', () => {
-  // TASK 23: `card_retrieved` is retrieval status, not an identity check. A FAIL there means
+  // `card_retrieved` is retrieval status, not an identity check. A FAIL there means
   // "no card", which cannot contradict anything — it is handled by its own assertion below.
   for (const key of Object.keys(allPass)) {
     if (key === 'badge_valid') continue; // advisory
@@ -363,7 +363,7 @@ test('card unavailable: retrieval failure → INCONCLUSIVE (not fraud)', async (
     fetchImpl: fetchFailing(404),
     badge: { consulted: false, raw: null, error: null },
   });
-  // TASK 23: 404 means the endpoint does not serve the card. That is availability, not a
+  // 404 means the endpoint does not serve the card. That is availability, not a
   // contradiction of the agent's identity claims — REJECTED would be an accusation.
   eq(r.card_retrieved, 'INCONCLUSIVE', 'retrieval status');
   eq(r.hash_matches_on_chain, 'NOT_TESTED', 'hash never evaluated');
@@ -375,7 +375,7 @@ test('network error during card fetch → INCONCLUSIVE (an outage is not fraud)'
   // A DNS/TLS failure establishes nothing about the agent. It must not be reported as a
   // positive contradiction of the card claim — that would make an attacker-triggerable
   // outage look like proof of misconduct, and would let a transient failure deny access
-  // to an otherwise honest agent. TASK 20 reclassified transport failures.
+  // to an otherwise honest agent. Transport failures were reclassified.
   const r = await verifyAgent({
     expect: EXPECT,
     discoveryPayload: SEARCH(),
@@ -502,5 +502,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e.message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask03-discovery-and-trust: ${n - failed}/${n} passed`);
+console.log(`\ndiscovery-and-trust: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

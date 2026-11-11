@@ -1,5 +1,5 @@
 /**
- * TASK 57 — local sponsor wallet secret loading (synthetic fixtures only).
+ * Local sponsor wallet secret loading (synthetic fixtures only).
  *
  * No real wallet material is used. SDK parser/builder are exercised via test
  * doubles where the task requires, and with a synthetic in-memory export where
@@ -277,5 +277,5 @@ console.log('\n── 9. signing service does not start with a failed load ─�
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask57: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nlocal-sponsor-wallet-secret-loading: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

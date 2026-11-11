@@ -1,5 +1,5 @@
 /**
- * TASK 10 — packaging and clean-checkout reliability regressions.
+ * Packaging and clean-checkout reliability regressions.
  *
  * Covers the four defects fixed in this task:
  *   F1  npm run build emits dist/
@@ -218,5 +218,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String((e as Error).message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask10-packaging: ${n - failed}/${n} passed`);
+console.log(`\npackaging-clean-checkout: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

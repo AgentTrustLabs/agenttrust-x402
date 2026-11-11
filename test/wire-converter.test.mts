@@ -1,5 +1,5 @@
 /**
- * TASK 36 — converter unit tests.
+ * Converter unit tests.
  *
  * Run: npx tsx test/wire-converter.test.mts
  */
@@ -268,6 +268,6 @@ test('27. signatures are preserved', () => {
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask36: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\nwire-converter: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

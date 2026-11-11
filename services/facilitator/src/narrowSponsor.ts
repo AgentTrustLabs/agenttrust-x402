@@ -1,5 +1,5 @@
 /**
- * TASK 34 — Narrow Sponsor Signer authorization boundary.
+ * Narrow Sponsor Signer authorization boundary.
  *
  * The official SDK's `AccountSigner.sign(digest)` is a **general-purpose** digest signer: it
  * will sign any digest handed to it. The SDK does not constrain which digest may be signed.
@@ -46,7 +46,7 @@ export interface SponsorAuthorizationRequest {
   energy: bigint;
   /** The AgentTrust payment digest (replay key). */
   paymentDigest: string;
-  // TASK 34.2 (L1): `paymentState` was removed. It was accepted but never read, and the
+  // `paymentState` was removed. It was accepted but never read, and the
   // durable database row is the only authoritative source for state. Callers must not be
   // able to assert a state.
 }
@@ -73,7 +73,7 @@ export type SponsorRejectionReason =
   | 'duplicate_payment'
   | 'unsupported_asset'
   | 'audit_write_failed'
-  // TASK 34.2 durable-state gate reasons.
+  // Durable-state gate reasons.
   | 'unknown_payment'
   | 'payment_not_authorizable'
   | 'transaction_hash_already_prepared'

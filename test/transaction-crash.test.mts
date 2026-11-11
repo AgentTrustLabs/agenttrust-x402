@@ -1,5 +1,5 @@
 /**
- * TASK 34.9 — real SQLite transaction crash verification.
+ * Real SQLite transaction crash verification.
  *
  * For each of the five crash points, start a real owner process, send a real request,
  * SIGKILL the owner mid-transaction, restart against the same database, and inspect the
@@ -203,5 +203,5 @@ for (const [point, label, digestChar, expected] of points) {
 await run('rm', ['-rf', base], 'root');
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask349: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\ntransaction-crash: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

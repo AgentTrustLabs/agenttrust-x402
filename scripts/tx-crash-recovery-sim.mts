@@ -1,5 +1,5 @@
 /**
- * TASK 28 — crash-recovery simulation using a locally precomputed transaction hash.
+ * Crash-recovery simulation using a locally precomputed transaction hash.
  *
  * Demonstrates the state machine from docs/architecture.md:
  *
@@ -71,7 +71,7 @@ const hashOf = (tx: AccountTransactionV1.Type) =>
 type State =
   | 'prepared'        // signed tx exists locally, hash persisted, never submitted
   | 'submitting'      // claim taken, submission in flight
-  | 'outcome_unknown' // we broadcast but never recorded the result — the TASK 27 window
+  | 'outcome_unknown' // we broadcast but never recorded the result — the window
   | 'finalized'
   | 'rejected'
   | 'recovery_unavailable';
@@ -309,5 +309,5 @@ console.log('\n── H. distinct payments have distinct hashes and independent 
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask28-recovery-sim: ${results.length - failed}/${results.length} passed`);
+console.log(`\ntx-crash-recovery-sim: ${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

@@ -1,7 +1,7 @@
 /**
  * Trust policy — decides whether an independently verified agent may transact.
  *
- * The policy consumes the TASK 03 `TrustResult` and nothing else. It never reads
+ * The policy consumes the `TrustResult` and nothing else. It never reads
  * the provider's own claims: the card is already folded into that result by the
  * verifier, so re-reading it here could only weaken the decision.
  *

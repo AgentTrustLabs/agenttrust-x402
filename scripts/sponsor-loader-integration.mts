@@ -1,8 +1,8 @@
 /**
- * TASK 62 — sponsor wallet loader integration check.
+ * Sponsor wallet loader integration check.
  *
  * Two modes:
- *   --synthetic   (default) Exercise the loader + signing service against the TASK61
+ *   --synthetic   (default) Exercise the loader + signing service against the
  *                 sponsor ADDRESS with SYNTHETIC key material, proving the integration
  *                 mechanics for that exact address. No real wallet material.
  *   <export-path> Load a maintainer-supplied wallet export from a local path.
@@ -33,7 +33,7 @@ let cleanup = (): void => {};
 let exportPath: string;
 
 if (synthetic) {
-  // Synthetic export bound to the TASK61 sponsor address. Keys are obvious placeholders
+  // Synthetic export bound to the sponsor address. Keys are obvious placeholders
   // ('aa'/'bb'/'cc' repeats) — NOT the sponsor's real key material.
   const dir = mkdtempSync(join(tmpdir(), 't62-'));
   exportPath = join(dir, 'synthetic-wallet.json');
@@ -78,7 +78,7 @@ try {
   check('01. export file exists', false, 'file not found at the given path');
 }
 
-// ── 2. load through the TASK57 loader ───────────────────────────────────────
+// ── 2. load through the loader ───────────────────────────────────────
 let signer;
 try {
   signer = loadWalletExportSigner(exportPath);
@@ -87,7 +87,7 @@ try {
   check('04. loadWalletExportSigner constructs a signer', false, (e as Error).message);
   // Fail closed: do not continue with a partial signer.
   const failed = results.filter(([, p]) => !p).length;
-  console.log(`\ntask62: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+  console.log(`\nsponsor-loader-integration: ${results.length - failed}/${results.length} passed, ${failed} failed`);
   cleanup();
   process.exit(2);
 }
@@ -98,13 +98,13 @@ check('05. getSignatureCount() === 1', count === 1n, `observed ${count}`);
 
 // ── 4. address correspondence ───────────────────────────────────────────────
 {
-  // The loader validated value.address is non-empty; recover it to compare against TASK61.
+  // The loader validated value.address is non-empty; recover it to compare against the sponsor address.
   const { readFileSync } = await import('node:fs');
   const raw = JSON.parse(readFileSync(exportPath, 'utf8')) as {
     value?: { address?: string; accountKeys?: { threshold?: number; keys?: Record<string, { threshold?: number }> } };
   };
   const exportedAddress = raw.value?.address ?? '';
-  check('06. export address === TASK61 sponsor', exportedAddress === SPONSOR, `export=${exportedAddress}`);
+  check('06. export address === sponsor', exportedAddress === SPONSOR, `export=${exportedAddress}`);
   const thresholds = raw.value?.accountKeys;
   check('07. account threshold === 1', thresholds?.threshold === 1, `observed ${String(thresholds?.threshold)}`);
   const credThresholds = Object.values(thresholds?.keys ?? {}).map((c) => c.threshold);
@@ -177,5 +177,5 @@ cleanup();
 rmSync(dir2, { recursive: true, force: true });
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask62: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nsponsor-loader-integration: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

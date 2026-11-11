@@ -1,5 +1,5 @@
 /**
- * TASK 34.3 — read-only adversarial probe.
+ * Read-only adversarial probe.
  *
  * Checks whether the public repository API still exposes a path that can record an
  * authorization approval WITHOUT passing the durable-state gate in authorizeSignEvent().
@@ -41,7 +41,7 @@ const event = (digest: string) => ({
   policyVersion: 'probe',
 });
 
-console.log('── probe 1: no public approval-insertion API (TASK 34.4 M1) ──');
+console.log('── probe 1: no public approval-insertion API ──');
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
@@ -51,7 +51,7 @@ console.log('── probe 1: no public approval-insertion API (TASK 34.4 M1) ─
   repo.prepare(d, 'tx-prepared');
   console.log(`   state before: ${repo.get(d)?.state} tx_hash: ${repo.get(d)?.tx_hash}`);
 
-  // TASK 34.4: recordSignEvent must no longer exist on the public interface.
+  // RecordSignEvent must no longer exist on the public interface.
   const hasLegacy = typeof (repo as unknown as { recordSignEvent?: unknown }).recordSignEvent === 'function';
   console.log(`   recordSignEvent still exposed publicly: ${hasLegacy}`);
   // Even a raw SQL insert of an approved row must fail the DB-level trigger.
@@ -107,7 +107,7 @@ console.log('\n── probe 3: two approved events via the gate (unique index ba
   rm();
 }
 
-console.log('\n── probe 4: is a gate rejection audited? (TASK 34.4 M2) ──');
+console.log('\n── probe 4: is a gate rejection audited? ──');
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
@@ -161,7 +161,7 @@ console.log('\n── probe 5: fresh database has the unique partial index ─�
 console.log('\n── probe 6: legacy DB with duplicate approved events (migration path) ──');
 {
   const { db, rm } = mk();
-  // Simulate a pre-TASK34.2 database: create the table WITHOUT the unique index, insert two
+  // Simulate a database without the unique index: create the table WITHOUT the unique index, insert two
   // approved rows, then open it through the real repository and see what happens.
   const { DatabaseSync } = await import('node:sqlite');
   const raw = new DatabaseSync(db);

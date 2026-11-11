@@ -2,7 +2,7 @@
  * Finding 4 — Concordium Wallet API serialization requirements.
  *
  * Every assertion here mirrors code paths read in concordium-browser-wallet and
- * is backed by a live failure observed during TASK 02. The wallet is the contract;
+ * is backed by a live failure observed on Testnet. The wallet is the contract;
  * this suite pins the exact shapes that make it work.
  *
  * Live failures this suite prevents from recurring:

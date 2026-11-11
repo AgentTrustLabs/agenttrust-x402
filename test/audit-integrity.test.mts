@@ -1,5 +1,5 @@
 /**
- * TASK 06 — audit trail integrity, truncation detection, concurrency.
+ * Audit trail integrity, truncation detection, concurrency.
  *
  * Deterministic, offline, temp directories only. Every test constructs a real
  * trail on disk, tampers with it, and asserts the verifier reports it.
@@ -417,9 +417,9 @@ test('13b. checkpoint content carries no secrets', () => {
   }
 });
 
-// ─── compatibility with TASK 05 ──────────────────────────────────────────
+// ─── compatibility with the commerce run ──────────────────────────────────────────
 
-test('14. TASK 05 commerce run still produces a verifiable chained trail', async () => {
+test('14. commerce run still produces a verifiable chained trail', async () => {
   const { runCommerce } = await import('../src/commerce/orchestrator.js');
   const { CCD_TESTNET_CAIP2, X402_VERSION } = await import('../src/payments/x402.js');
   const { readFileSync: rf } = await import('node:fs');
@@ -462,7 +462,7 @@ test('14. TASK 05 commerce run still produces a verifiable chained trail', async
   ok(result.granted, `commerce failed: ${result.reason}`);
   const v = AuditTrail.verify(file);
   ok(v.ok, `trail invalid: ${v.problems.join('; ')}`);
-  eq(v.events.length, 8, 'same 8 events as TASK 05');
+  eq(v.events.length, 8, 'same 8 events as the commerce run');
   eq(
     v.events.map(e => e.type).join(','),
     'agent.discovered,agent.card.retrieved,agent.trust.verified,payment.requirement.created,' +
@@ -505,5 +505,5 @@ for (const [name, fn] of tests) {
   }
 }
 for (const d of roots) rmSync(d, { recursive: true, force: true });
-console.log(`\ntask06-audit-integrity: ${n - failed}/${n} passed`);
+console.log(`\naudit-integrity: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

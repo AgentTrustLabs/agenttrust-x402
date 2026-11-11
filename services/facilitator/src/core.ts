@@ -67,7 +67,7 @@ export interface CoreOptions {
   signer: SponsorSigner;
   store?: SettlementRepository;
   /**
-   * TEST ONLY: SIGKILL the process at the named point. Used by the TASK 29 crash-window
+   * TEST ONLY: SIGKILL the process at the named point. Used by the crash-window
    * harness to terminate a real OS process at an exact boundary. Never set outside tests.
    */
   dieAt?: 'after-claim' | 'after-sponsor-sign' | 'after-hash' | 'after-persist' | 'before-submit' | 'after-submit';
@@ -75,25 +75,25 @@ export interface CoreOptions {
   dbPath?: string;
   authorization?: AuthorizationClient;
   /**
-   * TASK 55: sponsor energy cap for the authorization boundary. Defaults to 1_000n.
+   * Sponsor energy cap for the authorization boundary. Defaults to 1_000n.
    * The owner re-derives this from its own policy; the value here only affects the local
    * mock-only client. Aligned with FACILITATOR_MAX_ENERGY default (see config.ts).
    */
   maxAuthorizationEnergy?: bigint;
   /**
-   * TASK 55: maximum execution energy accepted by the wire converter. Defaults to 1_000.
+   * Maximum execution energy accepted by the wire converter. Defaults to 1_000.
    * This is the converter's own policy cap; the authorization owner enforces the
    * authoritative cap independently. Aligned with FACILITATOR_MAX_ENERGY default.
    */
   maxWireEnergy?: number;
   /**
-   * TASK 37: wire converter seam. Defaults to the real `convertV2ToSdkV1`. Tests may
+   * Wire converter seam. Defaults to the real `convertV2ToSdkV1`. Tests may
    * inject an instrumented converter to prove ordering (convert-before-sign, and
    * zero conversions when authorization is refused).
    */
   wireConverter?: (input: unknown, policy: WireConversionPolicy) => ReturnType<typeof convertV2ToSdkV1>;
   /**
-   * TASK 38: sender signature verifier. Defaults to a pass-through (mock-only) so existing
+   * Sender signature verifier. Defaults to a pass-through (mock-only) so existing
    * mock flows keep working. Production must inject an SDK-backed verifier with a real
    * account-info provider.
    */
@@ -134,7 +134,7 @@ export class FacilitatorCore {
         now: this.now,
         ...(opts.busyTimeoutMs !== undefined ? { busyTimeoutMs: opts.busyTimeoutMs } : {}),
       });
-    // TASK 34.11: the authorization boundary. When none is injected, fall back to the local
+    // The authorization boundary. When none is injected, fall back to the local
     // mock-only client bound to this facilitator's own store and the mock signer's placeholder
     // sponsor. An explicit client (e.g. IpcAuthorizationClient) is required for production.
     this.authorization =
@@ -151,11 +151,11 @@ export class FacilitatorCore {
         repository: this.store,
         now: this.now,
       });
-    // TASK 37: wire conversion policy. The energy cap mirrors the authorization cap; the
+    // Wire conversion policy. The energy cap mirrors the authorization cap; the
     // authoritative energy VALUE comes from deriveEnergyExposure(), never from the client.
     this.maxWireEnergy = opts.maxWireEnergy ?? 1_000;
     this.wireConverter = opts.wireConverter ?? convertV2ToSdkV1;
-    // TASK 38: default pass-through (mock-only). A real verifier must be injected.
+    // Default pass-through (mock-only). A real verifier must be injected.
     this.senderVerifier = opts.senderVerifier ?? (async () => ({ ok: true }));
   }
 
@@ -223,7 +223,7 @@ export class FacilitatorCore {
     if (!guard.ok) {
       switch (guard.reason) {
         case 'pending':
-          // TASK 29.1: if the previous process died between submitTransaction() and
+          // If the previous process died between submitTransaction() and
           // markBroadcast(), the row is still `submitting`. The transaction may already have
           // reached the node, so the correct state is `outcome_unknown` — reconcile by hash,
           // never resubmit.
@@ -268,18 +268,18 @@ export class FacilitatorCore {
       };
     }
 
-    // TASK 29: a `resumable` claim means the hash is already durable from a previous,
+    // A `resumable` claim means the hash is already durable from a previous,
     // crashed attempt. Skip prepare() (it is already done) and use the persisted hash.
     const resumableHash = guard.claim === 'resumable' ? guard.transaction : null;
 
-    // ── TASK 34.11: authorization boundary ────────────────────────────────────────────
+    // ── Authorization boundary ────────────────────────────────────────────
     // ORDER: validate → expiry → replay claim → AUTHORIZE → signer. No path reaches
     // `addSponsorSignature()` without an 'approved' outcome from the owner.
     //
     // A `resumable` payment already has a durable approval (it was authorized before the
     // crash that produced the persisted hash), so re-authorizing would be refused by the
     // durable gate. It skips the boundary and continues with the persisted hash.
-    // ── TASK 38: sender signature verification (BEFORE authorization) ────────────────
+    // ── Sender signature verification (BEFORE authorization) ────────────────
     // ORDER: validate → claim → SENDER VERIFY → authorize → recover → convert → signer.
     // A resumable payment already passed verification when its hash was durably persisted.
     // Verification failure fails closed: authorization and signing are never reached.
@@ -293,7 +293,7 @@ export class FacilitatorCore {
       }
     }
 
-    // TASK 37: the authoritative execution energy, derived from the transaction itself by
+    // The authoritative execution energy, derived from the transaction itself by
     // the energy policy. Hoisted so the wire converter can consume the SAME value the
     // authorization boundary priced — a client-supplied energy never becomes the policy
     // decision.
@@ -331,7 +331,7 @@ export class FacilitatorCore {
       }
 
       if (auth.outcome !== 'approved') {
-        // TASK 34.13: a prior approval was recorded. Do NOT trust the reason code alone.
+        // A prior approval was recorded. Do NOT trust the reason code alone.
         // Ask the owner to verify the durable approval against the current canonical context.
         // Only continue if the owner independently confirms a matching approval.
         if (auth.reason === 'authorization_already_recorded') {
@@ -363,7 +363,7 @@ export class FacilitatorCore {
           // Recovered: a matching durable approval exists. Continue with the signer.
         } else {
           // Never reach the signer. The payment is recorded as terminally rejected for this
-          // payload, so a retry requires a new payload (TASK26 state machine, unchanged).
+          // payload, so a retry requires a new payload.
           this.store.markFailed(digest, `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'}`);
           const reasonMap: Record<string, string> = {
             rejected: 'authorization_rejected',
@@ -399,7 +399,7 @@ export class FacilitatorCore {
       await new Promise(() => {});
     }
 
-    // ── TASK 37: wire conversion (BEFORE the signer, AFTER authorization) ──────────────
+    // ── Wire conversion (BEFORE the signer, AFTER authorization) ──────────────
     // ORDER: validate → claim → authorize → recover → CONVERT → signer → hash → submit.
     // The converter receives the policy-derived energy, never a client-supplied value.
     // A conversion failure fails closed: the signer is never invoked.
@@ -443,7 +443,7 @@ export class FacilitatorCore {
     }
 
     // ── submission. The mock cannot sign; nothing here reaches a chain. ──
-    // TASK 29 ordering (closes the TASK 27 crash window):
+    // Ordering (closes the crash window):
     //   1. complete preparation (already done — claim + agreement + expiry + replay)
     //   2. obtain the sponsor signature (the mock marks the tx; real signer would sign)
     //   3. calculate the final transaction hash from the fully signed tx
@@ -453,10 +453,10 @@ export class FacilitatorCore {
     //   7. record the broadcast (submitting → outcome_unknown)
     //   8. compare the returned hash to the persisted one; mismatch → never finalize
     let txHash: string;
-    // The signer receives the canonical SDK V1 wire object (TASK36). On a resumable path
+    // The signer receives the canonical SDK V1 wire object. On a resumable path
     // there is no session payload to convert, so the persisted pipeline continues with the
     // original payload — the sponsor signature is already bound into the durable hash.
-    // TASK 48: fee/energy context validation, actually invoked before signing.
+    // Fee/energy context validation, actually invoked before signing.
     // Runs only when the signer exposes validateContext (real/IPC signers); mock signers
     // omit it, so mock flows are byte-for-byte unchanged.
     if (typeof this.signer.validateContext === 'function' && !resumableHash && derivedEnergy !== null) {
@@ -514,7 +514,7 @@ export class FacilitatorCore {
     // Step 5: take the broadcast claim against the exact persisted hash.
     const submitClaim = this.store.claimSubmit(digest, persistedHash);
     if (!submitClaim.ok) {
-      // TASK 29.1: a `submitting` row means the previous process took the broadcast claim
+      // A `submitting` row means the previous process took the broadcast claim
       // but may or may not have reached the node. Transition it to `outcome_unknown` so
       // recovery can reconcile it — never resubmit.
       if (submitClaim.reason === 'not prepared (state=submitting)' || submitClaim.reason.startsWith('not prepared')) {
@@ -624,7 +624,7 @@ export class FacilitatorCore {
     };
   }
 
-  // ─── TASK 52: restart recovery ────────────────────────────────────────
+  // ─── Restart recovery ────────────────────────────────────────
 
   /**
    * Recover payments that have a persisted transaction hash but no confirmed finalization.
@@ -706,7 +706,7 @@ export class FacilitatorCore {
             evidenceSource: `${this.signer.info().address}/recovery`,
             evidenceDigest: evidenceDigestOf({ txHash: hash, status: 'failed' }),
           });
-          // TASK 59: only count the rejection as terminal when the confirmation gate
+          // Only count the rejection as terminal when the confirmation gate
           // actually advanced the state. A recorded-but-unconfirmed observation is
           // evidence, not a terminal failure.
           if (r.ok && r.changed) summary.failed++;

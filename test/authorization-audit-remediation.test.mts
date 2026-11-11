@@ -1,5 +1,5 @@
 /**
- * TASK 34.4 — authorization audit boundary remediation.
+ * Authorization audit boundary remediation.
  *
  * Verifies:
  *  - M1: no public approval-insertion API; a raw SQL insert of an approved event is refused
@@ -419,5 +419,5 @@ console.log('\n── restart preserves history ──');
 // ═══ summary ══════════════════════════════════════════════════════════════════
 
 const failed = results.filter((r) => !r[1]).length;
-console.log(`\ntask34.4: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nauthorization-audit-remediation: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

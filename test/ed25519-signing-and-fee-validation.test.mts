@@ -1,5 +1,5 @@
 /**
- * TASK 48 — Ed25519 signing integration, sponsor signature count, fee validation,
+ * Ed25519 signing integration, sponsor signature count, fee validation,
  * and network identity verification.
  *
  * The signing tests need uid 1001 + group authclients (1002); they self-skip otherwise:
@@ -304,7 +304,7 @@ test('C01. SDK sponsor() requires sponsor.numSignatures >= 1', async () => {
     maxEnergy: 100_000n,
     maxFeeMicroCcd: 10_000_000n,
   });
-  // sponsor.numSignatures = 0 is what produced the TASK 47 failure. Note the SDK's error
+  // sponsor.numSignatures = 0 is what produced the failure. Note the SDK's error
   // text says "sender" for the sponsor slot too (missing role argument) — see the report.
   let msg = '';
   try {
@@ -397,7 +397,7 @@ if (!hasIpc) {
 
   const startService = async (socketPath: string, allowedUid: number, key?: TestKey) => {
     const env = { ...process.env };
-    if (key) env['TASK48_TEST_KEY'] = key.privateKeyHex;
+    if (key) env['TEST_SIGNING_SEED_HEX'] = key.privateKeyHex;
     const proc = spawn('npx', ['tsx', serviceScript, socketPath, SPONSOR, NETWORK, String(allowedUid)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
@@ -678,6 +678,6 @@ test('F02. settlement stays disabled by default (guardSettlement)', async () => 
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask48: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\ned25519-signing-and-fee-validation: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

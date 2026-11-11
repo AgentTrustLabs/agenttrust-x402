@@ -73,7 +73,7 @@ export function payloadDigest(payload: unknown): string {
  *    endpoint, so the resource must not segment the key.
  *  - `accepted` — this is the client's *restatement* of the requirements. Including it lets
  *    a caller present the SAME signed transaction with a rewritten `accepted` object and
- *    obtain a fresh digest, i.e. a second submission. (Reproduced during TASK 27: altering
+ *    obtain a fresh digest, i.e. a second submission. (Altering
  *    `accepted.amount` alone produced a second submit.) `accepted` agreement is checked
  *    separately against the seller's requirements; it must never key identity.
  */

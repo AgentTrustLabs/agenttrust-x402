@@ -1,5 +1,5 @@
 /**
- * TASK 15 — package metadata and publication-readiness regressions.
+ * Package metadata and publication-readiness regressions.
  *
  * Guards the properties this task fixed, so packaging cannot silently drift back:
  *
@@ -228,5 +228,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String((e as Error).message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask15-packaging: ${n - failed}/${n} passed`);
+console.log(`\npackaging-metadata: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

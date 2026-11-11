@@ -1,8 +1,8 @@
 /**
- * TASK 59 — finalization confirmation & rejection evidence.
+ * Finalization confirmation & rejection evidence.
  *
- * GAP E (TASK53): a single `rejected` observation permanently terminalized a payment.
- * TASK59 requires REJECTION_CONFIRMATIONS_REQUIRED (2) consistent observations of the
+ * GAP E: a single `rejected` observation permanently terminalized a payment.
+ * The rejection gate requires REJECTION_CONFIRMATIONS_REQUIRED (2) consistent observations of the
  * SAME transaction hash before `rejected` is applied.
  *
  * Fake signer / fake transport / isolated SQLite only. No broadcast, no signing.
@@ -436,7 +436,7 @@ console.log('\n── 6. preserved behaviour ──');
   const hash = 'f1'.repeat(32);
   seed(repo, digest, hash);
 
-  // markFailed on a broadcast-capable row with a hash is still a no-op (TASK53).
+  // markFailed on a broadcast-capable row with a hash is still a no-op.
   repo.markFailed(digest, 'late failure');
   eq(repo.get(digest)!.state, 'outcome_unknown', '62. markFailed cannot terminalize a broadcast row');
   repo.close();
@@ -460,5 +460,5 @@ console.log('\n── 6. preserved behaviour ──');
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask59: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nfinalization-confirmation-evidence: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

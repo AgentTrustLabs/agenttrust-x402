@@ -1,5 +1,5 @@
 /*
- * TASK 34.8 — SO_PEERCRED gate (test-only harness helper).
+ * SO_PEERCRED gate (test-only harness helper).
  *
  * Reads the peer credentials of a connected Unix socket fd and writes them as JSON to
  * stdout. This is a REAL kernel peer credential read, not a caller claim.

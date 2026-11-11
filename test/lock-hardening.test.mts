@@ -1,5 +1,5 @@
 /**
- * TASK 06.1 — stale-lock race and ownership hardening.
+ * Stale-lock race and ownership hardening.
  *
  * Real subprocesses throughout: a "live writer" is a separate node process that
  * holds the lock while it sleeps, and "contenders" are separate processes that
@@ -93,7 +93,7 @@ const test = (name, fn) => tests.push([name, fn]);
 
 test('A1. an active writer is protected beyond the stale threshold', async () => {
   const { file } = tmp();
-  // Hold for 1.2s while the stale threshold is 300ms — the TASK 06 code would
+  // Hold for 1.2s while the stale threshold is 300ms — the code would
   // have deleted the live lock and let a second writer in.
   const holder = await startHolder(file, 1200);
   await holder.held;
@@ -414,5 +414,5 @@ for (const [name, fn] of tests) {
   }
 }
 for (const d of roots) rmSync(d, { recursive: true, force: true });
-console.log(`\ntask06.1-lock-hardening: ${n - failed}/${n} passed`);
+console.log(`\nlock-hardening: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 /**
- * TASK 03 CLI contract tests — offline.
+ * CLI contract tests — offline.
  *
  * The CLI itself talks to the network, but everything it decides is delegated to
  * src/verify/crossAgent.ts. These tests pin the contracts the CLI depends on:
@@ -208,5 +208,5 @@ for (const [name, fn] of tests) {
     console.log(`  FAIL ${name}\n       ${String(e.message).replace(/\n/g, '\n       ')}`);
   }
 }
-console.log(`\ntask03-cli-contract: ${n - failed}/${n} passed`);
+console.log(`\ncli-contract: ${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);

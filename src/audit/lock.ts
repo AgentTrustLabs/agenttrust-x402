@@ -1,7 +1,7 @@
 /**
- * TASK 06.1 — safe lock acquisition for the audit trail.
+ * Safe lock acquisition for the audit trail.
  *
- * The TASK 06 implementation broke a lock purely on file age. Three failures
+ * An earlier implementation broke a lock purely on file age. Three failures
  * followed from that:
  *
  *   1. a writer alive for longer than `staleMs` had its live lock deleted;

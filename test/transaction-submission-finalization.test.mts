@@ -1,5 +1,5 @@
 /**
- * TASK 49 — Concordium transaction submission & finalization adapter tests.
+ * Concordium transaction submission & finalization adapter tests.
  *
  * Deterministic mock transport only. No Concordium Testnet or Mainnet contact.
  *
@@ -340,6 +340,6 @@ test('S04. constructing the adapter without a transport fails closed', () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask49: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\ntransaction-submission-finalization: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

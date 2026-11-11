@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — test helper: migrate the owner's sign_events table.
+ * Test helper: migrate the owner's sign_events table.
  * Used to force an audit-write failure. Runs as the owner user only.
  *
  * Run: npx tsx scripts/ipc-migrate.mts <db-path> <rename|restore>

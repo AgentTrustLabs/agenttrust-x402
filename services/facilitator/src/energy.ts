@@ -1,5 +1,5 @@
 /**
- * TASK 34.11 — derive the authorization energy exposure from a sponsored V1 transaction.
+ * Derive the authorization energy exposure from a sponsored V1 transaction.
  *
  * Uses the same formula the chain uses (Concordium `energyCost.js`):
  *

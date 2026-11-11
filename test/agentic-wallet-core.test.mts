@@ -1,5 +1,5 @@
 /**
- * TASK 73 — Agentic Wallet Core tests.
+ * Agentic Wallet Core tests.
  *
  * Mocks only: no browser, no node, no transaction. Ownership is verified through
  * the official SDK using a locally generated test key. Wallets are persisted in a
@@ -288,7 +288,7 @@ test('11. signature verifies against the wallet public key; no private key leaks
   eq(Object.keys(signer as unknown as object).sort().join(','), 'publicKeyHex,signDigest,walletId', 'signer exposes only public fields');
 });
 
-// ── 4. TASK72 integration ───────────────────────────────────────────────────
+// ── 4. spending-limits integration ───────────────────────────────────────────────────
 
 test('12. provisioning does not grant payment permission', async () => {
   const pairing = pairedStore();
@@ -302,7 +302,7 @@ test('12. provisioning does not grant payment permission', async () => {
   eq((r as { reason: string }).reason, 'no_permission', 'reason');
 });
 
-test('13. TASK72 spending limits remain enforced for agent wallets', async () => {
+test('13. spending limits remain enforced for agent wallets', async () => {
   const pairing = pairedStore();
   await seedPairing(pairing, SENDER, 'agent-1');
   const permissions = new PermissionManager({ now: () => 1_000_000_000_000 });
@@ -326,7 +326,7 @@ test('13. TASK72 spending limits remain enforced for agent wallets', async () =>
   eq(within.ok, true, 'within-limit allowed');
 });
 
-test('14. wallet pause/revoke invalidates TASK72 payment authorization', async () => {
+test('14. wallet pause/revoke invalidates payment authorization', async () => {
   const pairing = pairedStore();
   await seedPairing(pairing, SENDER, 'agent-1');
   const permissions = new PermissionManager({ now: () => 1_000_000_000_000 });
@@ -444,5 +444,5 @@ for (const [name, fn] of tests) {
     console.log(`FAIL ${name} — ${(e as Error).message}`);
   }
 }
-console.log(`\ntask73: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+console.log(`\nagentic-wallet-core: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

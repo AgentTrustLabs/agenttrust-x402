@@ -7,7 +7,7 @@
  *
  * `createSigner()` fails closed: in `real` mode it throws, because a real signer is not
  * implemented here. That is deliberate — the alternative (a signer that reads a private key
- * from the environment inside this repository) is exactly what TASK 24 ruled out.
+ * from the environment inside this repository) is exactly what was ruled out.
  *
  * The interface below mirrors the SDK's `FacilitatorConcordiumSigner` closely enough that a
  * genuine implementation can be dropped in later without changing the facilitator core.
@@ -58,7 +58,7 @@ export interface MockSignerOptions {
  *
  * Kept for the non-instrumented mock. The instrumented `createHashingLedgerSigner` below
  * computes a REAL Concordium V1 transaction hash via the installed SDK, so a pre-broadcast
- * hash is available before submission — the entire point of TASK 29.
+ * hash is available before submission — the entire point of pre-broadcast persistence.
  */
 export const MOCK_TX_HASH_PREFIX = 'simulated-';
 
@@ -112,7 +112,7 @@ export interface SponsorSigner {
   getTokenBalance(address: string, tokenId: string): Promise<bigint | undefined>;
   getTokenDecimals(tokenId: string): Promise<number>;
   /**
-   * TASK 48: optional fee/energy context validation. Returns null on success, an error
+   * Optional fee/energy context validation. Returns null on success, an error
    * message on failure. When present, the pipeline calls it BEFORE signing and fails
    * closed on a non-null result. Mock signers omit it, so mock flows are unaffected.
    */
@@ -155,7 +155,7 @@ export function createMockSigner(opts: MockSignerOptions): SponsorSigner {
         // Resolves far in the future: models a broadcast whose outcome we never learn.
         await new Promise(resolve => setTimeout(resolve, 60_000));
       }
-      // TASK 29: return the REAL hash of the fully signed transaction, so the caller's
+      // Return the REAL hash of the fully signed transaction, so the caller's
       // persisted-hash comparison is meaningful. The mock does not contact a chain; it just
       // reports the identifier the node would report for this exact transaction.
       //
@@ -198,7 +198,7 @@ export function createMockSigner(opts: MockSignerOptions): SponsorSigner {
 /**
  * A mock signer that records every *actual submission attempt* to a shared append-only ledger.
  *
- * This is the instrumentation TASK 27 needs: HTTP responses can be counted from the client
+ * This is the submission-counting instrumentation: HTTP responses can be counted from the client
  * side, but "did this process really call submitTransaction?" can only be answered at the
  * submission boundary. `O_APPEND` writes of a short line are atomic on POSIX, so several
  * processes appending to one file is a safe deterministic counter.
@@ -375,8 +375,8 @@ export function toSdkV1Transaction(txJson: unknown): AccountTransactionV1.Type {
  * `sha256(serialize(tx))` — signatures, header, payload. The block-item kind byte is excluded.
  *
  * The sponsor signature MUST already be present: the hash covers it, so an unsigned
- * transaction hashes differently. That is the ordering constraint TASK 28 established and
- * TASK 29 enforces by calling this only after `addSponsorSignature`.
+ * transaction hashes differently. That is the ordering constraint established and
+ * enforced by calling this only after `addSponsorSignature`.
  *
  * No network, no signing, no key material. Pure local computation.
  */
@@ -387,7 +387,7 @@ export function computeTransactionHash(txJson: unknown): string {
 }
 
 /**
- * TASK52 — hash of the transaction AS SUBMITTED.
+ * Hash of the transaction AS SUBMITTED.
  *
  * `Transaction.finalize` recomputes the energy amount from the payload, signatures and
  * header, so the node-reported hash for a V1 sponsored transaction is the hash of the

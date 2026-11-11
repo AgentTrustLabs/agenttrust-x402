@@ -1,5 +1,5 @@
 /**
- * TASK 55 — production Testnet wiring corrections (SDK 12.0.2).
+ * Production Testnet wiring corrections (SDK 12.0.2).
  *
  * Focused regression coverage for:
  *   - B3: real-mode submitter injection into `createIpcSponsorSigner`
@@ -124,7 +124,7 @@ console.log('\n── A. B3 — submitter injection ──');
 }
 
 {
-  // No submitter → fail closed (unchanged from TASK 46).
+  // No submitter → fail closed (unchanged).
   const signer = createIpcSponsorSigner({
     sponsorAddress: SPONSOR,
     network: CAIP2,
@@ -233,7 +233,7 @@ console.log('\n── B. B4 — SDK 12.0.2 client construction ──');
   const nodejs = await import('@concordium/web-sdk/nodejs');
   const exported = nodejs as unknown as Record<string, unknown>;
   eq(typeof exported['ConcordiumGRPCNodeClient'], 'function', 'B01. ConcordiumGRPCNodeClient is exported');
-  eq(exported['GRPCClient'], undefined, 'B02. GRPCClient is NOT exported (the TASK54 defect)');
+  eq(exported['GRPCClient'], undefined, 'B02. GRPCClient is NOT exported (the defect)');
 
   const creds = (nodejs as unknown as { credentials: { createSsl: () => unknown; createInsecure: () => unknown } }).credentials;
   ok(typeof creds.createSsl === 'function', 'B03. credentials.createSsl is available');
@@ -447,5 +447,5 @@ console.log('\n── E. mock-mode compatibility ──');
 // ── summary ─────────────────────────────────────────────────────────────────
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask55: ${results.length - failed}/${results.length} passed, ${failed} failed`);
+console.log(`\nproduction-testnet-wiring: ${results.length - failed}/${results.length} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

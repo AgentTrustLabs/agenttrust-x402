@@ -1,5 +1,5 @@
 /**
- * TASK 43 — sponsor signing service (fake signer, in-process).
+ * Sponsor signing service (fake signer, in-process).
  *
  * Proves the service contract: validation, SO_PEERCRED, replay, wrong sponsor/network,
  * signer failure, and that only valid requests reach the fake signer.
@@ -174,6 +174,6 @@ test('13. validateSigningRequest accepts valid', () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask43 service: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nsigning-service: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

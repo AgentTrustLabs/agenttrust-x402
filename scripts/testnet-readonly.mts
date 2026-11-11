@@ -1,5 +1,5 @@
 /**
- * TASK 31 — read-only Concordium Testnet connectivity + evidence verification.
+ * Read-only Concordium Testnet connectivity + evidence verification.
  *
  * Authorized read-only network access to grpc.testnet.concordium.com:20000 only.
  * No signing, no submission, no private keys, no transaction construction.
@@ -74,5 +74,5 @@ for (const h of KNOWN_HASHES) {
 try { (client as any).close?.(); } catch { /* ignore */ }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask31-testnet-readonly: ${results.length - failed}/${results.length} passed`);
+console.log(`\ntestnet-readonly: ${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

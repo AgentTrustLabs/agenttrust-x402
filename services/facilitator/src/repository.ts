@@ -31,7 +31,7 @@ import {
 } from './state.js';
 
 /**
- * TASK53 — states in which a broadcast may already be in flight for the recorded hash.
+ * States in which a broadcast may already be in flight for the recorded hash.
  *
  * From any of these, only verified evidence (`reconcile`) may produce a terminal state.
  * `prepared` is excluded on purpose: the hash is durable but `claimSubmit()` was never
@@ -49,14 +49,14 @@ export interface PaymentRow {
   /** True once any settlement attempt has been authorised for this payment. */
   attempted: number;
   /**
-   * TASK 59: consecutive consistent rejection observations for this payment.
+   * Consecutive consistent rejection observations for this payment.
    * 0 until a rejection is observed; reset to 0 by any non-rejection observation.
    * A terminal `rejected` state requires this to reach `REJECTION_CONFIRMATIONS_REQUIRED`.
    */
   rejection_observation_count: number;
 }
 
-/** TASK 59: how many consistent rejection observations a terminal rejection requires. */
+/** How many consistent rejection observations a terminal rejection requires. */
 export const REJECTION_CONFIRMATIONS_REQUIRED = 2;
 
 export interface TransitionRow {
@@ -74,7 +74,7 @@ export type ClaimResult =
   /** First time we have seen this payment: safe to attempt. */
   | { ok: true; claim: 'fresh' }
   /**
-   * TASK 29: the hash is durable and the broadcast claim is still available. A new process
+   * The hash is durable and the broadcast claim is still available. A new process
    * may resume: it must call `claimSubmit()` with the returned hash, which is atomic.
    */
   | { ok: true; claim: 'resumable'; transaction: string }
@@ -115,7 +115,7 @@ export interface SignEventRow {
   recipient: string;
   energy: string;
   policy_version: string;
-  /** TASK 34.14 — null on legacy rows; recovery must fail closed for those. */
+  /** Null on legacy rows; recovery must fail closed for those. */
   asset: string | null;
   amount: string | null;
   expiry: number | null;
@@ -126,7 +126,7 @@ export type AuthorizeSignResult =
   | { ok: false; reason: 'unknown_payment' | 'payment_not_authorizable' | 'transaction_hash_already_prepared' | 'authorization_already_recorded' | 'payment_digest_mismatch' };
 
 /**
- * TASK 34.4 — audit row for an authorization attempt whose payment does not exist.
+ * Audit row for an authorization attempt whose payment does not exist.
  *
  * Kept in a separate table because `sign_events` has a foreign key to `payments`; inserting
  * an event for a missing payment would either violate that constraint or require inventing a
@@ -159,7 +159,7 @@ export interface SignEventInput {
   energy: string;
   policyVersion: string;
   /**
-   * TASK 34.14 — payment context that must be bound into the durable record. Omit only for
+   * Payment context that must be bound into the durable record. Omit only for
    * legacy audit paths; an approval recorded without them cannot be recovered (fail closed).
    */
   asset?: string;
@@ -173,7 +173,7 @@ export interface SettlementRepository {
   /** Atomically claim a payment for settlement. */
   claim(paymentDigest: string, requirementsKey: string): ClaimResult;
   /**
-   * TASK 29: persist the final transaction hash BEFORE any broadcast.
+   * Persist the final transaction hash BEFORE any broadcast.
    *
    * Transitions `created → prepared` and writes the hash + settlement row in one
    * `BEGIN IMMEDIATE` transaction. After this returns, the identifier is durable and the
@@ -181,17 +181,17 @@ export interface SettlementRepository {
    */
   prepare(paymentDigest: string, transaction: string): void;
   /**
-   * TASK 29: take the broadcast claim against an already-persisted hash.
+   * Take the broadcast claim against an already-persisted hash.
    *
    * `prepared → submitting`. Refuses unless the row is `prepared` and the hash matches exactly,
    * so a process can never start a broadcast against a hash it did not persist.
    */
   claimSubmit(paymentDigest: string, transaction: string): { ok: true } | { ok: false; reason: string };
-  /** TASK 29: record that the broadcast has been attempted (submitting → outcome_unknown). */
+  /** Record that the broadcast has been attempted (submitting → outcome_unknown). */
   markBroadcast(paymentDigest: string, transaction: string): void;
-  /** TASK 29: record that the node reported the tx exists but is not final. */
+  /** Record that the node reported the tx exists but is not final. */
   markObserved(paymentDigest: string, transaction: string, reason: string): void;
-  /** TASK 29: record that recovery could not obtain evidence. Non-terminal. */
+  /** Record that recovery could not obtain evidence. Non-terminal. */
   markRecoveryUnavailable(paymentDigest: string, transaction: string, reason: string): void;
   /** Record that a submission was accepted and is now awaiting confirmation. */
   markPending(paymentDigest: string, transaction: string, reason: string): void;
@@ -202,7 +202,7 @@ export interface SettlementRepository {
   /** Apply verified evidence. The ONLY path to `finalized`. */
   reconcile(input: ReconcileInput): ReconcileResult;
   /**
-   * TASK 34.4: read authorization attempts that could not be matched to a payment row.
+   * Read authorization attempts that could not be matched to a payment row.
    * Newest first. These events are kept in a separate table (no FK) so that referential
    * integrity on `sign_events` is never weakened.
    */
@@ -212,7 +212,7 @@ export interface SettlementRepository {
    */
   signEvents(paymentDigest: string): SignEventRow[];
   /**
-   * TASK 34.2: atomically verify payment state + persist the authorization audit event.
+   * Atomically verify payment state + persist the authorization audit event.
    * Returns ok:false with a stable reason if the payment is not authorizable. Never throws
    * for a state-based rejection; throws only on unexpected DB errors.
    */
@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL,
   attempted        INTEGER NOT NULL DEFAULT 0,
-  -- TASK 59: bounded confirmation gate for terminal rejection. A single 'failed'/'rejected'
+  -- bounded confirmation gate for terminal rejection. A single 'failed'/'rejected'
   -- observation does not terminalize; the count must reach 2 consistent observations.
   rejection_observation_count INTEGER NOT NULL DEFAULT 0
 );
@@ -287,7 +287,7 @@ CREATE TABLE IF NOT EXISTS sign_events (
   recipient        TEXT NOT NULL,
   energy           TEXT NOT NULL,
   policy_version   TEXT NOT NULL,
-  -- TASK 34.14: full payment context bound into the durable authorization record so recovery
+  -- full payment context bound into the durable authorization record so recovery
   -- can prove the context matches. NULL = legacy row with incomplete evidence (fail closed).
   asset            TEXT,
   amount           TEXT,
@@ -295,12 +295,12 @@ CREATE TABLE IF NOT EXISTS sign_events (
   FOREIGN KEY (payment_digest) REFERENCES payments(payment_digest)
 );
 CREATE INDEX IF NOT EXISTS idx_sign_events_payment ON sign_events(payment_digest, id);
--- TASK 34.2: database-level exactly-once guard. Only one 'approved' sign event per payment.
+-- database-level exactly-once guard. Only one 'approved' sign event per payment.
 -- Rejected attempts are still recorded, so this is a partial index.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_sign_events_approved
   ON sign_events(payment_digest) WHERE decision = 'approved';
 
--- TASK 34.4: authorization attempts whose payment row does not exist.
+-- authorization attempts whose payment row does not exist.
 -- No foreign key on purpose: a missing payment must be auditable without inventing a
 -- payments row. Only rejections can be recorded here — there is no column or code path
 -- that can produce an approval in this table.
@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS sign_attempts (
 );
 CREATE INDEX IF NOT EXISTS idx_sign_attempts_payment ON sign_attempts(payment_digest, id);
 
--- TASK 34.4 (M1): runtime enforcement, not TypeScript visibility.
+-- (M1): runtime enforcement, not TypeScript visibility.
 -- An approved event may only exist for a payment that is still 'created' with no durable
 -- transaction hash. This holds for EVERY writer, including a raw SQL insert that bypasses
 -- the repository entirely, and it is enforced by the database across processes.
@@ -371,7 +371,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 
   /**
-   * TASK 34.14 — add the payment-context columns to `sign_events` for databases created
+   * Add the payment-context columns to `sign_events` for databases created
    * before the binding existed. Existing rows keep NULL in the new columns, which recovery
    * treats as "cannot verify" and fails closed. No data is invented.
    */
@@ -388,7 +388,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
         this.db.exec(`ALTER TABLE sign_events ADD COLUMN ${name} ${type}`);
       }
     }
-    // TASK 59: the rejection confirmation counter must exist on databases created before it.
+    // The rejection confirmation counter must exist on databases created before it.
     // Existing rows default to 0, which is the correct semantics: no rejection evidence yet.
     const paymentCols = this.db.prepare('PRAGMA table_info(payments)').all() as Array<{ name: string }>;
     const paymentExisting = new Set(paymentCols.map((c) => c.name));
@@ -509,7 +509,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
       if (!row) return;
       // A terminal row is never reopened or rewritten: the hash is the recovery authority.
       if (isTerminal(row.state)) return;
-      // TASK53: the persisted hash is the recovery authority. A pending record must name the
+      // The persisted hash is the recovery authority. A pending record must name the
       // SAME hash already recorded for this payment. Silently overwriting it would
       // desynchronize `payments.tx_hash` from `settlements.tx_hash` and let recovery poll
       // the wrong hash (confirmed: `markPending(A→B)` left `payments.tx_hash=B` while
@@ -542,7 +542,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
     });
   }
 
-  // ─── TASK 29: pre-broadcast persistence ──────────────────────────────
+  // ─── Pre-broadcast persistence ──────────────────────────────
 
   /**
    * Persist the final transaction hash before any broadcast. `created → prepared`.
@@ -685,7 +685,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
       const row = this.read(paymentDigest);
       if (!row) return;
       if (isTerminal(row.state)) return; // terminal stays terminal
-      // TASK53: once a broadcast may have happened, only `reconcile()` may set the terminal
+      // Once a broadcast may have happened, only `reconcile()` may set the terminal
       // state. A late failure from a stale path (e.g. a duplicate request that re-ran the
       // pre-broadcast checks while recovery was polling) must not reject a payment that the
       // chain may still finalize. `prepared` is exempt: the broadcast claim was never taken,
@@ -739,7 +739,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
 
       const decision = interpretObservation(input.observed);
 
-      // TASK 59: bounded confirmation gate for terminal rejection. A single rejection
+      // Bounded confirmation gate for terminal rejection. A single rejection
       // observation must not terminalize the payment. The counter must reach
       // REJECTION_CONFIRMATIONS_REQUIRED (2) consistent observations before `rejected`
       // is applied. Success is never gated; pending/unknown/transport-error stay
@@ -816,7 +816,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 
   /**
-   * TASK 34.4 — audit rows for authorization attempts with no matching payment row.
+   * Audit rows for authorization attempts with no matching payment row.
    * Newest first.
    */
   signAttempts(paymentDigest: string): SignAttemptRow[] {
@@ -836,7 +836,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 
   /**
-   * TASK 34.2 — atomic authorization gate.
+   * Atomic authorization gate.
    *
    * Everything happens inside ONE `BEGIN IMMEDIATE` transaction:
    *   1. read the durable payment row
@@ -861,7 +861,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
         | { payment_digest: string; state: SettlementState; tx_hash: string | null }
         | undefined;
 
-      // TASK 34.4 (M2): a missing payment cannot be audited in `sign_events` (FK to payments),
+      // A missing payment cannot be audited in `sign_events` (FK to payments),
       // so it is recorded in `sign_attempts` — no payment row is invented, and referential
       // integrity on `sign_events` is untouched.
       if (!row) {
@@ -869,7 +869,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
         return { ok: false as const, reason: 'unknown_payment' as const };
       }
 
-      // TASK 34.4 (M2): every state-based rejection is audited inside this same transaction.
+      // Every state-based rejection is audited inside this same transaction.
       if (row.payment_digest !== input.paymentDigest) {
         this.insertRejectedSignEvent(input, t, 'payment_digest_mismatch');
         return { ok: false as const, reason: 'payment_digest_mismatch' as const };
@@ -946,7 +946,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 
   /**
-   * TASK 34.4 — internal audit writer for the single authorized decision.
+   * Internal audit writer for the single authorized decision.
    *
    * Only called from inside `authorizeSignEvent()`, which has already passed the durable-state
    * gate. This method can never be reached from a public path, and its caller guarantees the
@@ -975,7 +975,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 
   /**
-   * TASK 34.4 — internal writer for a state-based rejection.
+   * Internal writer for a state-based rejection.
    *
    * Hard-codes `decision = 'rejected'` and takes no decision parameter, so no caller can
    * produce an approval through this path. Must be called inside the same transaction as the
@@ -1004,7 +1004,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 
   /**
-   * TASK 34.4 — internal writer for an attempt whose payment row does not exist.
+   * Internal writer for an attempt whose payment row does not exist.
    *
    * Lives in `sign_attempts` (no FK) so a missing payment can be audited without inventing a
    * payment row. `decision` is constrained by the schema to 'rejected'.

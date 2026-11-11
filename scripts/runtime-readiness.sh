@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TASK63 — real-mode runtime readiness probe (read-only; no payment requests, no signing).
+# real-mode runtime readiness probe (read-only; no payment requests, no signing).
 set -u
 
 SPONSOR=3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK

@@ -1,7 +1,7 @@
 /**
  * Finding 3 — post-registration token identity in the Agent Card.
  *
- * Two-part finding, both verified live in TASK 02:
+ * Two-part finding, both verified live on Testnet:
  *
  *   (a) `build_agent_card` LEFT `params.tokenAddress` null even when `token_id`
  *       was supplied, because it was called through our typed wrapper which did
@@ -15,7 +15,7 @@
  * on-chain v2 card must be byte-identical to the fixture with token_id=1004.
  */
 
-import { eq, ok, notOk, readJson, readText, sha256Hex, TASK02, EVIDENCE, FIXTURES } from './helpers.mjs';
+import { eq, ok, notOk, readJson, readText, sha256Hex, TOKEN1004, EVIDENCE, FIXTURES } from './helpers.mjs';
 
 const cardFix = readJson(`${FIXTURES}mcp-build-agent-card-token1004.json`);
 const badgeFix = readJson(`${FIXTURES}mcp-build-agent-badge-token1004.json`);
@@ -31,7 +31,7 @@ test('card with token_id carries a non-null CAIP-19 tokenAddress', () => {
   ok(params.tokenAddress, 'tokenAddress must be present');
   eq(
     params.tokenAddress,
-    `${TASK02.caip2}/cis-2:${TASK02.tokenAddress}`,
+    `${TOKEN1004.caip2}/cis-2:${TOKEN1004.tokenAddress}`,
     'tokenAddress is CAIP-2 chain + CAIP-19 cis-2 asset',
   );
 });
@@ -40,10 +40,10 @@ test('card with token_id carries an ERC-8004 registrations entry', () => {
   const card = JSON.parse(cardFix.agent_card_json);
   ok(Array.isArray(card.registrations), 'registrations must be an array');
   eq(card.registrations.length, 1, 'exactly one registration');
-  eq(card.registrations[0].agentId, TASK02.tokenId, 'agentId equals token id');
+  eq(card.registrations[0].agentId, TOKEN1004.tokenId, 'agentId equals token id');
   eq(
     card.registrations[0].agentRegistry,
-    `${TASK02.caip2}:${TASK02.contractIndex}.0`,
+    `${TOKEN1004.caip2}:${TOKEN1004.contractIndex}.0`,
     'agentRegistry is the CIS-8004 contract as CAIP-10',
   );
 });
@@ -56,13 +56,13 @@ test('pre-mint card has tokenAddress null (the failure mode)', () => {
 
 test('build_agent_card with token_id reproduces the on-chain v2 card byte-for-byte', () => {
   eq(cardFix.agent_card_json, onChainCard, 'fixture vs on-chain anchored bytes');
-  eq(sha256Hex(Buffer.from(cardFix.agent_card_json, 'utf8')), TASK02.cardSha256, 'recomputed sha256');
-  eq(Buffer.byteLength(cardFix.agent_card_json, 'utf8'), TASK02.cardBytes, 'byte length');
+  eq(sha256Hex(Buffer.from(cardFix.agent_card_json, 'utf8')), TOKEN1004.cardSha256, 'recomputed sha256');
+  eq(Buffer.byteLength(cardFix.agent_card_json, 'utf8'), TOKEN1004.cardBytes, 'byte length');
 });
 
 test('build_agent_badge merges the badge into an existing card and keeps the hash', () => {
-  eq(badgeFix.metadata_hash_hex, TASK02.cardSha256, 'badge tool returns the anchored hash');
-  eq(badgeFix.token_address, TASK02.tokenAddress, 'resolved token address');
+  eq(badgeFix.metadata_hash_hex, TOKEN1004.cardSha256, 'badge tool returns the anchored hash');
+  eq(badgeFix.token_address, TOKEN1004.tokenAddress, 'resolved token address');
   const card = JSON.parse(badgeFix.agent_card_json);
   ok(card.capabilities.extensions[0].params.tokenAddress, 'badge card has tokenAddress');
 });
@@ -104,10 +104,10 @@ test('hosted verifier accepts the anchored card (recorded verdict)', () => {
 test('every on-chain reference in the card is a CAIP identifier', () => {
   const card = JSON.parse(cardFix.agent_card_json);
   const p = card.capabilities.extensions[0].params;
-  ok(p.tokenAddress.startsWith(`${TASK02.caip2}/cis-2:`), 'tokenAddress CAIP-19');
-  ok(p.owner.account.startsWith(`${TASK02.caip2}:`), 'owner.account CAIP-10');
-  eq(p.contracts.cis8004, `${TASK02.caip2}:${TASK02.contractIndex}.0`, 'cis8004 CAIP-10');
-  eq(p.contracts.cis8, `${TASK02.caip2}:${TASK02.cis8Index}.0`, 'cis8 CAIP-10');
+  ok(p.tokenAddress.startsWith(`${TOKEN1004.caip2}/cis-2:`), 'tokenAddress CAIP-19');
+  ok(p.owner.account.startsWith(`${TOKEN1004.caip2}:`), 'owner.account CAIP-10');
+  eq(p.contracts.cis8004, `${TOKEN1004.caip2}:${TOKEN1004.contractIndex}.0`, 'cis8004 CAIP-10');
+  eq(p.contracts.cis8, `${TOKEN1004.caip2}:${TOKEN1004.cis8Index}.0`, 'cis8 CAIP-10');
 });
 
 test('card extension URI is the published Concordium badge extension', () => {

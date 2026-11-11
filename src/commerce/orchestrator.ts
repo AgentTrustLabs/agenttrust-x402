@@ -105,7 +105,7 @@ export interface OrchestratorDeps {
   /** Bound on a single card fetch, in ms. */
   cardTimeoutMs?: number;
   /**
-   * TASK 72: permission gate + reservation hooks. Runs before the facilitator is
+   * Permission gate + reservation hooks. Runs before the facilitator is
    * called. `permissionCheck` must reserve capacity synchronously.
    */
   permissionCheck?: (params: { recipient: string; amountMicroCcd: string; network: string; nowSeconds: number }) =>

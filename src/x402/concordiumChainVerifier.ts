@@ -1,5 +1,5 @@
 /**
- * Real Concordium Testnet chain verifier for the x402 provider (TASK 80).
+ * Real Concordium Testnet chain verifier for the x402 provider.
  *
  * Read-only: it only calls `getBlockItemStatus` on the configured Testnet node.
  * It never signs, submits, constructs transactions, or holds keys.

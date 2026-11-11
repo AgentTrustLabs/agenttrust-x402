@@ -1,5 +1,5 @@
 /**
- * TASK 28 — local-only proof: a Concordium V1 transaction hash can be computed
+ * Local-only proof: a Concordium V1 transaction hash can be computed
  * BEFORE submission, from fixture data only, with the installed SDK.
  *
  * No network. No signing. No private keys. Signature bytes are fixture literals.
@@ -180,7 +180,7 @@ try {
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask28-prehash: ${results.length - failed}/${results.length} passed`);
+console.log(`\ntx-prehash: ${results.length - failed}/${results.length} passed`);
 if (hash1) console.log(`\nfixture transaction hash: ${hash1}`);
 if (hashUnsigned) console.log(`fixture hash (no sponsor sig): ${hashUnsigned}`);
 process.exit(failed ? 1 : 0);

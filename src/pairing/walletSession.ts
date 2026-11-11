@@ -11,7 +11,7 @@
  *
  * Connecting a wallet grants nothing. Pairing grants nothing. Only an explicit
  * `grantPermission` call moves the fourth flag, and only an explicit
- * `authorizeTransaction` call moves the fifth. TASK 71 never sets either
+ * `authorizeTransaction` call moves the fifth. The connector never sets either
  * automatically and never signs or broadcasts anything.
  */
 
@@ -188,7 +188,7 @@ export class WalletSession {
   }
 
   /**
-   * Explicit per-transaction authorization. TASK 71 does not call this for any
+   * Explicit per-transaction authorization. The connector does not call this for any
    * real transaction; it exists so the permission model is complete and testable.
    */
   authorizeTransaction(): { ok: boolean; reason?: string } {

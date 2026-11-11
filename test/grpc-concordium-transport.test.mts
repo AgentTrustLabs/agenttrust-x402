@@ -1,5 +1,5 @@
 /**
- * TASK 50 — gRPC Concordium transport tests (fake GRPCClient only).
+ * gRPC Concordium transport tests (fake GRPCClient only).
  *
  * The injected client mirrors the installed SDK's `GRPCClient` surface:
  *   sendAccountTransaction(tx, sig) / getBlockItemStatus(hash)
@@ -290,7 +290,7 @@ test('11c. constructor refuses a null client', () => {
   ok(/requires a client/.test(msg), `refused: "${msg}"`);
 });
 
-test('12. TASK49 submitter works end-to-end with the gRPC transport', async () => {
+test('12. submitter works end-to-end with the gRPC transport', async () => {
   const client: ConcordiumGrpcClientLike = {
     sendAccountTransaction: async () => HASH,
     getBlockItemStatus: async () => finalized(successSummary()) as never,
@@ -305,7 +305,7 @@ test('12. TASK49 submitter works end-to-end with the gRPC transport', async () =
   eq(f.blockHash, BLOCK, 'block hash');
 });
 
-test('12b. TASK49 submitter surfaces a transport rejection reason', async () => {
+test('12b. submitter surfaces a transport rejection reason', async () => {
   const client: ConcordiumGrpcClientLike = {
     sendAccountTransaction: async () => HASH,
     getBlockItemStatus: async () => finalized(failedSummary('OutOfEnergy')) as never,
@@ -317,7 +317,7 @@ test('12b. TASK49 submitter surfaces a transport rejection reason', async () => 
   eq(f.reason, 'OutOfEnergy', 'reason through the adapter');
 });
 
-test('12c. TASK49 submitter times out while the transport stays committed', async () => {
+test('12c. submitter times out while the transport stays committed', async () => {
   const client: ConcordiumGrpcClientLike = {
     sendAccountTransaction: async () => HASH,
     getBlockItemStatus: async () => ({ status: 'committed', outcomes: [] }) as never,
@@ -402,6 +402,6 @@ test('S04. the transport is independently constructible and does not self-constr
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask50: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\ngrpc-concordium-transport: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

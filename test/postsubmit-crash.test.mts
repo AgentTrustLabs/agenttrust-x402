@@ -1,5 +1,5 @@
 /**
- * TASK 29.1 — post-submission / pre-markBroadcast crash verification.
+ * Post-submission / pre-markBroadcast crash verification.
  *
  * The exact window: submitTransaction() returned successfully, but the process was SIGKILLed
  * before markBroadcast() committed. The database still says "submitting" even though the
@@ -398,5 +398,5 @@ console.log('\n── 8. replay protection remains intact ──');
 }
 
 const failed = results.filter(([, p]) => !p).length;
-console.log(`\ntask29.1-postsubmit-crash: ${results.length - failed}/${results.length} passed`);
+console.log(`\npostsubmit-crash: ${results.length - failed}/${results.length} passed`);
 process.exit(failed ? 1 : 0);

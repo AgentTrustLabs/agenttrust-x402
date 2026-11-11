@@ -1,5 +1,5 @@
 /**
- * TASK 40 — live Concordium Testnet account verification (read-only).
+ * Live Concordium Testnet account verification (read-only).
  *
  * Read-only gRPC only. No signing, no transaction construction, no submission.
  *
@@ -20,7 +20,7 @@ const ACCOUNT = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const out: string[] = [];
 const log = (s: string) => { out.push(s); console.log(s); };
 
-log('══ TASK 40 — live Testnet account verification (read-only) ══');
+log('══ live Testnet account verification (read-only) ══');
 log('');
 log('── 1. provider construction ──');
 log(`  endpoint: ${HOST}:${PORT} (TLS)`);

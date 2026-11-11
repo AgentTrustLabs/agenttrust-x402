@@ -1,5 +1,5 @@
 /**
- * TASK 52 — FacilitatorCore V1 submission integration + restart recovery (mock transport only).
+ * FacilitatorCore V1 submission integration + restart recovery (mock transport only).
  *
  * Run: npx tsx test/core-submission-recovery.test.mts
  */
@@ -86,7 +86,7 @@ function fakeClient(over: {
   };
 }
 
-/** SponsorSigner backed by the TASK49/50/51 submitter (no keys, no network). */
+/** SponsorSigner backed by the submitter (no keys, no network). */
 function submitterSigner(client: ConcordiumGrpcClientLike) {
   const submitter = new ConcordiumTransactionSubmitter(new GrpcConcordiumTransport(client));
   return {
@@ -124,7 +124,7 @@ function submitterSigner(client: ConcordiumGrpcClientLike) {
 
 /**
  * Signer that signs (fixture signature only) but has NO submission adapter configured,
- * mirroring a TASK46-era `IpcSponsorSigner` with no `submitter` injected. Must stay
+ * mirroring an `IpcSponsorSigner` with no `submitter` injected. Must stay
  * fail-closed exactly like `noSubmit('submitTransaction')`.
  */
 function noSubmitterSigner() {
@@ -206,7 +206,7 @@ test('03. a finalized rejection is terminal failure, not success', async () => {
     const res = await core.settle(envelope(p));
     eq(res.success, false, 'not success');
     eq(res.errorReason, 'transaction_failed', 'reason');
-    // TASK 59: one rejection observation is not terminal; confirm it with a second
+    // One rejection observation is not terminal; confirm it with a second
     // observation through recovery (same node status) before asserting the terminal state.
     eq(core.store.get(paymentDigest(p))?.state, 'outcome_unknown', 'first rejection recorded, not terminal');
     const summary = await core.recoverPending();
@@ -374,7 +374,7 @@ test('09. restart after finalized rejection stays terminal and is never reopened
     const p = payloadFixture();
     eq((await core1.settle(envelope(p))).success, false, 'rejected');
 
-    // TASK 59: confirm the rejection with a second observation so it becomes terminal.
+    // Confirm the rejection with a second observation so it becomes terminal.
     const confirm = submitterSigner(fakeClient({ status: () => finalizedStatus(failedSummary('NonExistentAccount')), onSend: () => { submits++; } }));
     const coreConfirm = new FacilitatorCore({ network: CAIP2, signer: confirm.signer as never, dbPath: w.db, now: () => NOW * 1000 });
     const confirmSummary = await coreConfirm.recoverPending();
@@ -583,6 +583,6 @@ test('S03. recovery exposes no submission method of its own', () => {
       console.log(`FAIL ${name} — ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask52: ${passed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\ncore-submission-recovery: ${passed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

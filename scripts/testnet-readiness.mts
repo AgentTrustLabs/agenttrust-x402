@@ -1,5 +1,5 @@
 /**
- * TASK54 — read-only Testnet readiness probe. No signing, no construction for broadcast,
+ * Read-only Testnet readiness probe. No signing, no construction for broadcast,
  * no submission, no faucet, no private-key access. Public chain queries only.
  *
  * Run: npx tsx scripts/testnet-readiness.mts

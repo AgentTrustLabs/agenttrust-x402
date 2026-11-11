@@ -1,5 +1,5 @@
 /**
- * TASK 34.6 — raw writer probe, run as a NON-owner OS user.
+ * Raw writer probe, run as a NON-owner OS user.
  *
  * Attempts to open the owner's SQLite database for writing and insert an approval.
  * Reports the exact OS/SQLite error so an OS permission failure can be distinguished

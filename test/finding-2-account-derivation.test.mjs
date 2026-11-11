@@ -11,7 +11,7 @@
  *   - the exact error the chain/faucet returns for such an address
  *   - entropy/derivation separation: seed != account signing key != credential
  *
- * Live evidence (TASK 02): address 4SjjGXAx3kt74spfwnZHHxscwFEomVnyuaVpULn37xRPuENXqB
+ * Live evidence: address 4SjjGXAx3kt74spfwnZHHxscwFEomVnyuaVpULn37xRPuENXqB
  * (50 chars, valid base58check) -> PUT faucet -> HTTP 400 "Account creation is not finalized".
  */
 
@@ -110,14 +110,14 @@ test('structurally valid keypair address is still not a chain account', () => {
   ok(liveRejection.length > 0, 'documented live rejection reason');
 });
 
-test('existing account from TASK 02 has the same encoding', () => {
+test('existing registered account has the same encoding', () => {
   const raw = base58Decode('4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d');
   eq(raw.length, 37, 'decoded length');
   eq(raw[0], 1, 'version byte');
 });
 
 test('identity issuance needs an IP + anonymity revokers, not just a key', () => {
-  // Testnet IP registry (live, TASK 02): ipIdentity 0 / 3 / 4 / 5, each with ARs 1-3.
+  // Testnet IP registry (live): ipIdentity 0 / 3 / 4 / 5, each with ARs 1-3.
   const ipIds = [0, 3, 4, 5];
   ok(ipIds.every(Number.isInteger), 'ipIdentity values are integers');
   eq(ipIds[0], 0, 'Concordium testnet IP is ipIdentity 0');
@@ -139,7 +139,7 @@ test('no credential material is stored in the repository', () => {
       notOk(text.includes(needle), `${file} must not contain field "${needle}"`);
     }
     // A bare 64-hex-char string could be a raw ed25519 key. The only ones allowed
-    // are the public artefacts of TASK 02: card SHA-256 and transaction hashes.
+    // are the public artefacts: card SHA-256 and transaction hashes.
     const allowed = new Set([
       '3f6144046d843b7bae1b071f279e26c4dc0c4711a30b925220c1dbf94aeab564', // on-chain card sha256
       '1f001ec9bd89f8ce48f2d3bf343f9ebd41604155f42f6a2fec426dd5101d7f84', // pre-mint card sha256

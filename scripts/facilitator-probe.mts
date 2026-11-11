@@ -1,5 +1,5 @@
 /**
- * TASK 07 — read-only facilitator probe. Writes evidence JSON.
+ * Read-only facilitator probe. Writes evidence JSON.
  *
  * Only `/supported` is contacted. This script has no code path that reaches
  * `/verify` or `/settle`; the two `/verify` observations recorded in the report

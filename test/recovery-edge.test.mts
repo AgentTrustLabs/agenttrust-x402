@@ -1,5 +1,5 @@
 /**
- * TASK 34.13 — additional recovery cases: conflicting/duplicate records, malformed durable
+ * Additional recovery cases: conflicting/duplicate records, malformed durable
  * rows, concurrent recovery, and caller-supplied decision rejection.
  *
  * Run: npx tsx test/recovery-edge.test.mts
@@ -179,6 +179,6 @@ test('17. caller-supplied decision fields are not part of the recovery contract'
       console.log(`FAIL ${name} — threw: ${(e as Error).message}`);
     }
   }
-  console.log(`\ntask34.13 edge: ${passed}/${passed + failed} passed, ${failed} failed`);
+  console.log(`\nrecovery-edge: ${passed}/${passed + failed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();

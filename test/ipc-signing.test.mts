@@ -1,5 +1,5 @@
 /**
- * TASK 43 — IPC signing service integration test.
+ * IPC signing service integration test.
  *
  * Starts a real signing service on a Unix socket, then drives `IpcAccountSigner` against
  * it. Uses a deterministic fake signer. No real signing, no key material.
@@ -33,7 +33,7 @@ const FACILITATOR_GID = 1002;
 const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
 const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
 if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`task43 IPC: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
+  console.log(`ipc-signing: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
   process.exit(0);
 }
 
@@ -160,6 +160,6 @@ test('06. timeout → error', async () => {
     }
   }
   rmSync(base, { recursive: true, force: true });
-  console.log(`\ntask43 IPC: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
+  console.log(`\nipc-signing: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();
