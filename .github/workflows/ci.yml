@@ -8,13 +8,19 @@
 # Known status (2026-11-10, local run on the authorization-owner branch):
 # typecheck + build pass (root and services/facilitator). The full suite had
 # 5 failures, all addressed in the working copy (see the "Set up test users"
-# step below, src/audit/lock.ts, and test/packaging-metadata.test.mts):
+# step below, src/audit/lock.ts, and test/packaging-metadata.test.mts).
+# CI run #1 (42839620365) still failed with the same 5 because the fixes
+# were not on the branch yet — only this workflow file was — and because
+# the test users had no home directory (see the setup step). This version
+# of the workflow fixes the environment part; the code fixes travel with
+# the next push of the four changed files.
 #  - test/ipc-protocol.test.mts, test/process-boundary.test.mts,
 #    test/transaction-crash.test.mts: need OS users authowner, ubuntu and
 #    authzintruder (group authclients), run via sudo. The setup step creates
-#    them; UID 1001 is taken by the `runner` user on GitHub-hosted runners,
-#    so `ubuntu` gets a free UID and the tests read it via
-#    TEST_FACILITATOR_UID (default 1001).
+#    them with a home directory and makes the checkout readable; UID 1001
+#    is taken by the `runner` user on GitHub-hosted runners, so `ubuntu`
+#    gets a free UID and the tests read it via TEST_FACILITATOR_UID
+#    (default 1001).
 #  - test/lock-hardening.test.mts E1: torn-write race in the audit lock —
 #    a contender could read the lock file while its creator was still
 #    writing it and fail as unrecoverable. Fixed: pre-stringify before
@@ -53,14 +59,25 @@ jobs:
       # The IPC suites (ipc-protocol, process-boundary, transaction-crash)
       # spawn real processes as OS users via `sudo -u`. A stock runner has
       # none of them, so create them here. This touches only the ephemeral
-      # runner: no passwords, no home directories, no login shells, and the
-      # users are test-only (they never own production data). UID 1001 is
-      # taken by the `runner` user on GitHub-hosted runners, so `ubuntu`
-      # gets the first free UID and the tests read it via
-      # TEST_FACILITATOR_UID (their default is 1001). `authowner`'s UID
-      # does not matter to the tests (only the name is used), so it takes
-      # 997 when free, otherwise any free UID. `authzintruder` must be a
-      # different UID from the facilitator and a member of authclients.
+      # runner: no passwords, no login shells, and the users are test-only
+      # (they never own production data). UID 1001 is taken by the `runner`
+      # user on GitHub-hosted runners, so `ubuntu` gets the first free UID
+      # and the tests read it via TEST_FACILITATOR_UID (their default is
+      # 1001). `authowner`'s UID does not matter to the tests (only the name
+      # is used), so it takes 997 when free, otherwise any free UID.
+      # `authzintruder` must be a different UID from the facilitator and a
+      # member of authclients.
+      #
+      # Two environment facts the CI #1 run exposed (run 42839620365):
+      #  - The users need a real home directory. Created with `-M` (no
+      #    home), `npx` run as a test user fails with EACCES trying to
+      #    create /home/<user> for its cache. So the users are created
+      #    with `-m`.
+      #  - The users must be able to READ the checkout: `npx` resolves tsx
+      #    from ./node_modules/.bin, and when it cannot it falls back to
+      #    fetching from the registry. So the workspace is made
+      #    world-readable and every directory on the path to it is made
+      #    traversable.
       # `sudo -u <user> npx` uses sudo's secure_path, which does not
       # include the setup-node tool cache, so node/npx are exposed under
       # /usr/local/bin.
@@ -69,20 +86,28 @@ jobs:
           set -euo pipefail
           sudo groupadd -f authclients
           if ! id -u authowner >/dev/null 2>&1; then
-            if ! getent passwd 997 >/dev/null 2>&1; then sudo useradd -M -s /usr/sbin/nologin -u 997 authowner;
-            else sudo useradd -M -s /usr/sbin/nologin authowner; fi
+            if ! getent passwd 997 >/dev/null 2>&1; then sudo useradd -m -s /usr/sbin/nologin -u 997 authowner;
+            else sudo useradd -m -s /usr/sbin/nologin authowner; fi
           fi
           if ! id -u ubuntu >/dev/null 2>&1; then
-            if ! getent passwd 1001 >/dev/null 2>&1; then sudo useradd -M -s /usr/sbin/nologin -u 1001 ubuntu;
-            else sudo useradd -M -s /usr/sbin/nologin ubuntu; fi
+            if ! getent passwd 1001 >/dev/null 2>&1; then sudo useradd -m -s /usr/sbin/nologin -u 1001 ubuntu;
+            else sudo useradd -m -s /usr/sbin/nologin ubuntu; fi
           fi
           if ! id -u authzintruder >/dev/null 2>&1; then
-            sudo useradd -M -s /usr/sbin/nologin authzintruder
+            sudo useradd -m -s /usr/sbin/nologin authzintruder
           fi
           sudo usermod -aG authclients ubuntu
           sudo usermod -aG authclients authzintruder
           sudo ln -sf "$(command -v node)" /usr/local/bin/node
           sudo ln -sf "$(command -v npx)" /usr/local/bin/npx
+          # The test users must be able to read the checkout.
+          sudo chmod -R a+rX "$GITHUB_WORKSPACE"
+          d="$GITHUB_WORKSPACE"
+          while [ "$d" != "$HOME" ] && [ "$d" != "/" ]; do
+            sudo chmod a+rx "$d"
+            d="$(dirname "$d")"
+          done
+          sudo chmod a+rx "$HOME"
           echo "TEST_FACILITATOR_UID=$(id -u ubuntu)" >> "$GITHUB_ENV"
           id ubuntu; id authowner; id authzintruder; getent group authclients
 
