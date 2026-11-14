@@ -64,29 +64,104 @@ Skills: `wallet_get_status`, `wallet_get_permissions`, `wallet_request_payment`,
 - `@x402/concordium` and `@x402/core` SDKs.
 - `createHttpFacilitator`, `buildResourceServer`.
 
-### HTTP provider (`src/x402/provider.ts`)
+### HTTP x402 resource server (the 402 → payment → grant loop)
 
-- Serves a protected resource.
-- Emits a 402 requirement.
-- Verifies the payment proof against live Testnet.
-- Grants 200 only on a finalized matching transfer.
-- Rejects replay and mismatched parameters.
+The loop is implemented. Four layers, each reusing the existing components —
+no second payment architecture:
+
+| Layer | File | Role |
+|---|---|---|
+| Provider gate | `src/x402/provider.ts` | Decides access: header → preflight → resource binding → facilitator verify → facilitator settle → independent on-chain read → atomic replay claim. No HTTP, no keys. |
+| Chain verifier | `src/x402/concordiumChainVerifier.ts` | Read-only Testnet `getBlockItemStatus`, genesis-bound. The facilitator's word alone never unlocks the resource. |
+| Facilitator client | `src/payments/x402Sdk.ts` (`createHttpFacilitator`) | POSTs `{ x402Version: 2, paymentPayload, paymentRequirements }` to the self-hosted facilitator's `/verify` + `/settle` — exactly the envelope its core `parseEnvelope` accepts (pinned by `test/http-x402-resource-server.test.mts` test 19). |
+| HTTP transport | `src/x402/resourceServer.ts` | Maps HTTP to the provider and back. No payment logic of its own. |
+
+Flow:
+
+```
+GET /protected                 → 402 + PaymentRequired challenge
+GET /protected + X-PAYMENT     → 200 + resource + PAYMENT-RESPONSE header
+                                (base64 JSON settlement, SDK convention;
+                                 X-PAYMENT-RESPONSE alias also sent)
+                                — or 400 malformed / 402 unpaid-or-invalid /
+                                409 replay / 503 verification unavailable
+```
+
+Run it (loopback only, never expose publicly without an auth layer in front):
+
+```
+npx tsx scripts/x402-resource-server.mts
+# env: AGENTTRUST_X402_HOST (127.0.0.1), AGENTTRUST_X402_PORT (4590),
+#   AGENTTRUST_FACILITATOR_URL (http://127.0.0.1:8787),
+#   AGENTTRUST_X402_PAY_TO (default: recipient of both verified live payments),
+#   AGENTTRUST_X402_AMOUNT (default 1 microCCD), AGENTTRUST_X402_RESOURCE_PATH (/protected),
+#   AGENTTRUST_X402_SENDER / AGENTTRUST_X402_SPONSOR (optional pins),
+#   AGENTTRUST_NODE_HOST / AGENTTRUST_NODE_PORT (Testnet node for the chain verifier)
+```
+
+Startup fails closed: the facilitator is probed via `/supported` first
+(`classifyCompatibility` — the sponsor address comes from the facilitator's
+own announcement, never from local config), and the chain verifier checks
+the node genesis before serving. This process never signs and holds no keys.
 
 ### Payment client
 
-- Parses the 402 requirement.
-- Constructs a signed V1 sponsored transaction using the existing sender wallet loader.
+- `src/x402/client.ts` (`fetchPaidResource`) — GET → 402 → parse the
+  challenge → build a signed payload via an injected creator → retry once
+  with `X-PAYMENT` → 200 + decoded settlement header, or the failure passed
+  through. Exactly one paid attempt; a rejected payment is never retried
+  automatically. Amount, recipient, network and resource always come from
+  the server's 402 challenge, never from the caller.
+- `scripts/x402-pay.mts` — the production payload creator: sender wallet
+  export (`loadWalletExportSigner`) + live nonce (`GrpcAccountInfoProvider`)
+  + `Transaction.signableFromJSON` / `Transaction.sign` / `Transaction.toJSON`
+  (with the SDK 12 BigInt → Number conversion for `header.nonce` and
+  `header.executionEnergyAmount`). The sender signs only the sender part;
+  the sponsor signature is added by the facilitator's signing service. The
+  sponsor account is read from the requirement's `extra.feePayer`.
+  **Live script: signs a real transaction and pays real (test) CCD — run only
+  with a separate, explicit operator authorization for one payment.**
 
 ### Request-to-transaction binding
 
 - The 402 requirement (resource URL, amount, recipient, network, expiry) is bound to the
   signed transaction.
+- X-PAYMENT payload contract (this deployment): the standard SDK shape
+  (`x402Version`, `accepted`, `payload.signedTransaction` — `PaymentPayload`
+  in `@x402/core` carries an optional `resource`) plus two binding fields
+  the provider requires: `resource: { url }` (must equal the 402's resource
+  URL) and `requestId` (unique per paid attempt; the replay store claims the
+  `(requestId, txHash)` pair atomically, so a second redemption of the same
+  payment is refused with 409 even across different request ids).
 
 ### Settlement safety gate
 
 - Preconditions for a live settlement (all required): sender verified, recipient verified,
   amount exact, network exact, sponsor funded, transaction finalized.
-- Deliberate omissions: no real facilitator, no key custody in the gateway.
+- Deliberate omissions: no public facilitator (settlement runs through the self-hosted
+  facilitator — see [Real settlement](demo-real-payment.md)), no key custody in the gateway.
+
+### Verification status
+
+- Provider gate: 21 tests (`test/http-x402-provider.test.mts`, mocks only)
+  + read-only validation against live Testnet (`scripts/verify-testnet-chain.mts`).
+- HTTP loop: 19 tests (`test/http-x402-resource-server.test.mts`, real HTTP on
+  loopback, fake facilitator + fake chain): unpaid 402, valid 200 + settlement
+  headers, malformed header, invalid verify, expired, replay 409, settle
+  throw → 503, settle without hash → 402, pending → 402, chain mismatch →
+  402, chain unavailable → 503, client 402 → pay → 200, client payload
+  failure never reaches settle, malformed 402, facilitator envelope contract.
+- **Live end-to-end run (real facilitator + real chain + real signed payment)
+  has NOT been run yet** — the deployment is down (VM replacement) and a live
+  payment needs a separate operator authorization. See [runbook](demo-runbook.md)
+  for the live-test procedure.
+
+### MCP interface (audit)
+
+- `commerce.simulate` is mock-only by design: it runs the offline mock
+  facilitator and always labels its receipt simulated. No MCP tool settles,
+  signs, or touches the facilitator — the real payment path is the HTTP loop
+  above, not MCP. That is intentional, not a gap to close here.
 
 ## Concordium integration
 
@@ -118,25 +193,29 @@ Skills: `wallet_get_status`, `wallet_get_permissions`, `wallet_request_payment`,
 - Schema: `{ type: 'module', value: <base64 module schema> }`.
 - `schemaVersion` may be omitted.
 
-## BLOCKED: end-to-end HTTP x402 real settlement
+## Live end-to-end HTTP x402 run: implemented, not yet run live
 
-**Status: BLOCKED.** Phase A (inspection) complete; Phases B/C/D not attempted.
+**Status: implemented + verified locally with mocks; live run pending.**
 
-The existing facilitator, x402 protocol layer, and signing infrastructure are ready. There is
-no HTTP provider or payment client to integrate for a complete real settlement.
+The complete HTTP loop is now implemented (see [HTTP x402 resource
+server](#http-x402-resource-server-the-402--payment--grant-loop) above):
+a 402 requirement served by the resource server, paid through the
+self-hosted facilitator, and granted only after independent on-chain
+verification. The provider gate was validated read-only against live Testnet
+(`scripts/verify-testnet-chain.mts`); the HTTP transport + client were
+verified locally against fake facilitator + fake chain
+(`test/http-x402-resource-server.test.mts`, 19/19).
 
-Missing integrations (minimum for a complete HTTP flow):
+What remains for a live run (all outside this task's authorization):
 
-1. **HTTP provider endpoint** — serve protected resource, emit 402, accept payment proof,
-   grant 200 only after independent verification.
-2. **Payment client** — construct and sign an x402 payment payload from a 402 requirement.
-3. **Independent on-chain verification at the provider** — query Testnet, verify transfer
-   recipient, amount, sender, network, finality before granting access.
-4. **Replay protection at the provider** — track consumed payment digests or transaction
-   hashes.
-5. **Request-to-transaction binding** — bind the 402 requirement to the signed transaction.
-6. **Failure-path coverage** — malformed payment, wrong network, wrong recipient, wrong amount,
-   invalid agent identity, invalid signature, pending/rejected transaction, replay.
+1. **Re-provision the deployment** (services are down after the VM
+   replacement) — needs separate operator authorization.
+2. **Start the resource server** against the live facilitator
+   (`scripts/x402-resource-server.mts`).
+3. **One authorized live payment** via `scripts/x402-pay.mts` (separate
+   authorization + preflight: sender nonce, balances, facilitator health),
+   then verify: 200 + `PAYMENT-RESPONSE` with the real transaction hash,
+   explorer confirmation, and a second identical `X-PAYMENT` returning 409.
 
 Constraints honoured: no unrestricted public facilitator access, no automatic retry, no
 private key exposure.
@@ -154,5 +233,6 @@ private key exposure.
 
 - Create with Concordium Wallet for Web or mobile (Testnet).
 - Export private key → Export to file (single-account JSON).
-- Safe destination: `/etc/agenttrust/sponsor-wallet.json`, `chmod 600`.
+- Safe destination: `/home/agenttrust/.agenttrust/sponsor-3xRV448Q.export`, `chmod 600`,
+  owned by the service user. Keep it in place — the service needs it on every restart.
 - Verify: `npx tsx scripts/sponsor-account-verify.mts <account-address>`.
