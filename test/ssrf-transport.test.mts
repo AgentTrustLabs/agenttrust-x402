@@ -185,10 +185,11 @@ test('12. a redirect chain and a redirect loop behave identically: not followed'
 test('13. proxy environment variables do not redirect the connection', async () => {
   const srv = await cardServer('{"ok":true}');
   const resolver = makeResolver({ 'cards.example': ['127.0.0.1'] });
-  const before = { HTTP_PROXY: process.env.HTTP_PROXY, HTTPS_PROXY: process.env.HTTPS_PROXY, http_proxy: process.env.http_proxy };
+  const before = { HTTP_PROXY: process.env.HTTP_PROXY, HTTPS_PROXY: process.env.HTTPS_PROXY, http_proxy: process.env.http_proxy, https_proxy: process.env.https_proxy };
   process.env.HTTP_PROXY = 'http://127.0.0.1:9';
   process.env.HTTPS_PROXY = 'http://127.0.0.1:9';
   process.env.http_proxy = 'http://127.0.0.1:9';
+  process.env.https_proxy = 'http://127.0.0.1:9';
   try {
     const res = await httpGetPinned(`http://cards.example:${srv.port}/agent.json`, { lookup: resolver.lookup, allowPrivateHosts: true });
     eq(res.ok, true, 'retrieved from the pinned destination, not through the proxy');

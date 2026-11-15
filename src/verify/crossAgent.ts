@@ -278,7 +278,8 @@ export async function resolveCardDestination(
 }
 
 /**
- * A parsed HTTP proxy (from an environment variable or an explicit option).
+ * A parsed HTTP proxy (from an explicit option — never from the environment:
+ * a pinned fetch must not be redirected by ambient proxy variables).
  * `auth` is the `user:password` pair for `Proxy-Authorization`, or null when the
  * proxy URL carries no credentials. The value is used only to build the header;
  * it is never logged.
@@ -312,83 +313,20 @@ export function parseProxyUrl(raw: string | undefined | null): ProxyConfig | nul
   return { host: u.hostname, port, auth };
 }
 
-function noProxyMatches(host: string, entry: string): boolean {
-  const e = entry.trim().toLowerCase();
-  if (!e) return false;
-  if (e === '*') return true;
-  const h = host.toLowerCase();
-  if (h === e) return true;
-  // A bare entry matches the host itself and every subdomain of it, the way
-  // curl and browsers treat no_proxy: `sabokun.my.id` bypasses
-  // `api.sabokun.my.id` too, not just `sabokun.my.id`.
-  if (h.endsWith(`.${e}`)) return true;
-  if (e.startsWith('.') && h.endsWith(e)) return true;
-  return false;
-}
-
-/**
- * Does a resolved destination address bypass an environment proxy?
- *
- * `no_proxy` is matched against the hostname by {@link getProxyForUrl}, but a
- * hostname can resolve to an address that is itself listed (loopback, a
- * private range, the runtime gateway). When the pinned DNS answer contains
- * such an address, routing through a proxy would hand the proxy a hostname it
- * cannot resolve (a test fixture's `*.example`, or a private name) — or ask it
- * to reach an internal destination. So an environment proxy is bypassed when
- * ANY resolved address is in `no_proxy`. This is checked against the resolved
- * addresses, not the hostname, because the pinning is what decides where the
- * socket actually goes.
- *
- * An explicitly passed proxy (`opts.proxy` as a string) is NOT bypassed by
- * this: the caller chose it (a test exercising the proxy path, or a deployment
- * that routes even local destinations through a proxy), so it is honoured as
- * given. Only the environment-resolved proxy is bypassed here.
- */
-export function resolvedAddressBypassesProxy(
-  addresses: Array<{ address: string }>,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  const noProxy = env.no_proxy ?? env.NO_PROXY ?? '';
-  if (!noProxy) return false;
-  const entries = noProxy.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-  if (entries.includes('*')) return true;
-  for (const a of addresses) {
-    let addr = a.address.trim().toLowerCase().replace(/^\[|\]$/g, '');
-    // Normalise IPv4-mapped IPv6 (::ffff:127.0.0.1) to the embedded IPv4.
-    const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(addr);
-    if (mapped) addr = mapped[1]!;
-    if (entries.includes(addr)) return true;
-  }
-  return false;
-}
-
-/**
- * Resolve the proxy (if any) for a URL from the process environment, the way
- * curl and other HTTP clients do: `https_proxy`/`HTTPS_PROXY` for `https:`,
- * `http_proxy`/`HTTP_PROXY` for `http:`, honouring `no_proxy`/`NO_PROXY`.
- * Returns the raw proxy URL string, or null when no proxy applies. The caller
- * validates it with {@link parseProxyUrl}.
- */
-export function getProxyForUrl(url: URL, env: NodeJS.ProcessEnv = process.env): string | null {
-  const isTls = url.protocol === 'https:';
-  const raw = isTls ? env.https_proxy ?? env.HTTPS_PROXY : env.http_proxy ?? env.HTTP_PROXY;
-  if (!raw) return null;
-  const noProxy = env.no_proxy ?? env.NO_PROXY ?? '';
-  const host = url.hostname.toLowerCase();
-  for (const entry of noProxy.split(',')) {
-    if (noProxyMatches(host, entry)) return null;
-  }
-  return raw;
-}
-
+// NOTE: there is deliberately NO environment-proxy support in this transport.
+// `httpGetPinned` never reads HTTP_PROXY / HTTPS_PROXY / http_proxy /
+// https_proxy, and honours no `no_proxy`: an ambient proxy variable must
+// not redirect a security-sensitive pinned fetch to a proxy that resolves
+// the hostname itself. Only an explicitly passed proxy is honoured, and
+// only as a CONNECT tunnel to the pinned destination IP (see below).
 /**
  * Open a CONNECT tunnel through an HTTP proxy to `targetHost:targetPort`.
  *
- * The proxy is asked to connect to the *hostname*, not to a locally resolved
- * IP: in a runtime whose local resolver returns NAT/CGNAT addresses that do
- * not reach the real host, a tunnel to the resolved IP goes nowhere, while the
- * proxy resolves the hostname itself to the real address. The DNS gate in
- * {@link resolveCardDestination} still runs first and refuses any hostname
+ * `targetHost` MUST be the pinned destination IP (never the hostname): the
+ * proxy is asked to connect to the already-validated address, so it performs
+ * no DNS resolution of its own and the pin holds. An IPv6 literal is bracketed
+ * (`CONNECT [::1]:443`), as the CONNECT request-target requires. The DNS gate
+ * in {@link resolveCardDestination} still runs first and refuses any hostname
  * whose local answers include a prohibited address, so the proxy is never
  * asked to reach an internal destination.
  *
@@ -426,9 +364,13 @@ export async function connectViaProxy(
       }, Math.max(1, timeoutMs));
       socket.once('error', fail);
       socket.once('connect', () => {
+        // The CONNECT request-target is a literal IP (the pinned address).
+        // Bracket an IPv6 literal; a bare `::1:443` would be malformed.
+        const bare = targetHost.replace(/^\[|\]$/g, '');
+        const target = bare.includes(':') ? `[${bare}]` : bare;
         const lines = [
-          `CONNECT ${targetHost}:${targetPort} HTTP/1.1`,
-          `Host: ${targetHost}:${targetPort}`,
+          `CONNECT ${target}:${targetPort} HTTP/1.1`,
+          `Host: ${target}:${targetPort}`,
           ...(proxy.auth ? [`Proxy-Authorization: Basic ${Buffer.from(proxy.auth).toString('base64')}`] : []),
           'Proxy-Connection: Keep-Alive',
           '',
@@ -472,29 +414,31 @@ export async function connectViaProxy(
 /**
  * Open a TLS session to a host through an HTTP CONNECT proxy.
  *
- * The CONNECT tunnel is opened first, then the TLS handshake runs inside it
- * with `servername` set to the destination hostname and certificate
- * verification fully active (`rejectUnauthorized` is never disabled). Returns
- * the secured socket. The caller sends HTTP over it as if it were a plain
- * socket — the bytes are already encrypted by this layer.
+ * The CONNECT tunnel goes to `targetHost` — the pinned destination IP, never
+ * the hostname — so the proxy performs no DNS resolution and the pin holds.
+ * The TLS handshake then runs inside the tunnel with `servername` set to the
+ * destination hostname (`opts.servername`) and certificate verification fully
+ * active (`rejectUnauthorized` is never disabled). Returns the secured socket.
+ * The caller sends HTTP over it as if it were a plain socket — the bytes are
+ * already encrypted by this layer.
  */
 export async function connectTlsViaProxy(
   proxy: ProxyConfig,
-  hostname: string,
+  targetHost: string,
   port: number,
-  opts: { ca?: string | Buffer | (string | Buffer)[]; timeoutMs: number },
+  opts: { servername: string; ca?: string | Buffer | (string | Buffer)[]; timeoutMs: number },
 ): Promise<TLSSocket> {
-  const tunnel = await connectViaProxy(proxy, hostname, port, opts.timeoutMs);
+  const tunnel = await connectViaProxy(proxy, targetHost, port, opts.timeoutMs);
   const socket = tlsConnect({
     socket: tunnel,
-    servername: hostname,
+    servername: opts.servername,
     ...(opts.ca !== undefined ? { ca: opts.ca } : {}),
     // rejectUnauthorized defaults to true — never set to false.
   });
   try {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new Error(`TLS handshake with ${hostname}:${port} timed out after ${opts.timeoutMs}ms`));
+        reject(new Error(`TLS handshake with ${opts.servername}:${port} timed out after ${opts.timeoutMs}ms`));
       }, Math.max(1, opts.timeoutMs));
       socket.once('secureConnect', () => {
         clearTimeout(timer);
@@ -520,15 +464,19 @@ export async function connectTlsViaProxy(
  * hostname is still used for the `Host` header and for TLS SNI/certificate verification
  * (`servername`), so pinning does not break virtual hosting or TLS.
  *
- * Proxy awareness: when a proxy is configured (explicit `proxy` option, otherwise the
- * `https_proxy`/`http_proxy` environment variables, honouring `no_proxy`), the connection
- * goes through it — `https:` via a CONNECT tunnel, `http:` as an absolute-form request.
- * The proxy only ever forwards bytes: for `https:` the TLS handshake runs end-to-end
- * inside the tunnel with `servername` set to the destination hostname and certificate
- * verification fully active (`rejectUnauthorized` is never disabled, and no fallback
- * trusts the proxy). The DNS gate still runs first, and the card hash is still compared
- * against the on-chain metadata hash, so a proxy that resolved the hostname to a wrong
- * address cannot produce a trusted card. When no proxy is configured the transport
+ * Proxy awareness: only an explicitly passed `proxy` option is honoured. The
+ * environment is NEVER consulted: ambient `HTTP_PROXY` / `HTTPS_PROXY` /
+ * `http_proxy` / `https_proxy` cannot redirect a pinned fetch to a proxy that
+ * resolves the hostname itself. An explicit proxy is used only as a
+ * byte-forwarding tunnel: CONNECT to the pinned destination IP (never the
+ * hostname), so the proxy performs no DNS resolution and the pin holds. For
+ * `https:` the TLS handshake runs end-to-end inside the tunnel with
+ * `servername` set to the destination hostname and certificate verification
+ * fully active (`rejectUnauthorized` is never disabled, and no fallback
+ * trusts the proxy). For `http:` the origin-form request is sent inside the
+ * tunnel. The DNS gate still runs first, and the card hash is still compared
+ * against the on-chain metadata hash, so a proxy that served a wrong card
+ * cannot produce a trusted card. When no proxy is configured the transport
  * connects directly to the pinned address, exactly as before.
  *
  * Deliberate properties:
@@ -550,9 +498,10 @@ export async function httpGetPinned(
     maxBytes?: number;
     allowPrivateHosts?: boolean;
     /**
-     * Proxy for the connection. `undefined` (default) reads the environment
-     * (`https_proxy`/`http_proxy`, honouring `no_proxy`); `null` disables the
-     * proxy entirely; a string is the proxy URL to use.
+     * Explicit proxy for the connection. `undefined` (default) and `null`
+     * both mean direct: the environment is never consulted for a pinned
+     * fetch. A string is an explicit proxy URL, used only as a CONNECT
+     * tunnel to the pinned destination IP.
      */
     proxy?: string | null;
     /**
@@ -628,29 +577,28 @@ export async function httpGetPinned(
   const pinned = addresses[0]!;
   const port = url.port ? Number(url.port) : isTls ? 443 : 80;
 
-  // Proxy resolution. `undefined` ⇒ environment (the runtime's egress proxy in
-  // this VM); `null` ⇒ direct; a string ⇒ that proxy URL. An unparseable proxy
-  // URL is treated as "no proxy" — the direct path is attempted instead of
-  // failing the fetch on a misconfigured variable.
-  const proxyRaw = opts.proxy === undefined ? getProxyForUrl(url) : opts.proxy;
-  let proxy = proxyRaw ? parseProxyUrl(proxyRaw) : null;
-  // An environment proxy is bypassed when the pinned DNS answer resolves to
-  // an address in `no_proxy` (loopback/private). Routing that through a proxy
-  // would hand the proxy a hostname it cannot resolve, or ask it to reach an
-  // internal destination. An explicitly passed proxy is honoured as given.
-  if (opts.proxy === undefined && proxy && resolvedAddressBypassesProxy(addresses)) {
-    proxy = null;
-  }
+  // Proxy resolution. Only an explicitly passed proxy is honoured; the
+  // environment is NEVER consulted for a pinned fetch (see the NOTE above
+  // `connectViaProxy`). `undefined`/`null` ⇒ direct; a string ⇒ that proxy
+  // URL. An unparseable proxy URL is treated as "no proxy" — the direct
+  // path is attempted instead of failing the fetch on a misconfigured
+  // value. The pin is preserved either way: direct connects to the
+  // validated address, and a proxy tunnel goes to the pinned IP (below).
+  const proxy = opts.proxy ? parseProxyUrl(opts.proxy) : null;
 
-  // HTTPS through a proxy: open the CONNECT tunnel and the TLS session inside
-  // it *before* the request is built. The socket is already encrypted when it
-  // is handed to the HTTP layer, so `http.request` (not `https.request`) sends
-  // the GET over it. Certificate verification happens here, bound to the
-  // destination hostname — the proxy only ever forwards bytes.
+  // Explicit proxy: open a CONNECT tunnel to the pinned IP *before* the
+  // request is built. The tunnel is a byte pipe to the validated address —
+  // the proxy resolves nothing. For `https:` the TLS session runs inside it
+  // (servername = destination hostname, certificate verification fully
+  // active); for `http:` the origin-form request is sent inside it. Either
+  // way the socket handed to the HTTP layer is already connected to the
+  // pinned destination.
+  let tunnelSocket: NetSocket | null = null;
   let tlsSocket: TLSSocket | null = null;
   if (proxy && isTls) {
     try {
-      tlsSocket = await connectTlsViaProxy(proxy, url.hostname, port, {
+      tlsSocket = await connectTlsViaProxy(proxy, pinned.address, port, {
+        servername: url.hostname,
         ...(opts.ca !== undefined ? { ca: opts.ca } : {}),
         timeoutMs: remaining(),
       });
@@ -661,7 +609,7 @@ export async function httpGetPinned(
         url: url.toString(),
         bytes: null,
         contentType: null,
-        error: `proxy TLS failed: ${(e as Error).message}`,
+        error: `proxy tunnel failed: ${(e as Error).message}`,
         failure: 'transient',
       };
     }
@@ -674,6 +622,32 @@ export async function httpGetPinned(
         bytes: null,
         contentType: null,
         error: `card fetch exceeded ${timeoutMs}ms during proxy TLS`,
+        failure: 'transient',
+      };
+    }
+  } else if (proxy && !isTls) {
+    try {
+      tunnelSocket = await connectViaProxy(proxy, pinned.address, port, remaining());
+    } catch (e) {
+      return {
+        ok: false,
+        status: 0,
+        url: url.toString(),
+        bytes: null,
+        contentType: null,
+        error: `proxy CONNECT failed: ${(e as Error).message}`,
+        failure: 'transient',
+      };
+    }
+    if (Date.now() >= deadlineAt) {
+      tunnelSocket.destroy();
+      return {
+        ok: false,
+        status: 0,
+        url: url.toString(),
+        bytes: null,
+        contentType: null,
+        error: `card fetch exceeded ${timeoutMs}ms during proxy CONNECT`,
         failure: 'transient',
       };
     }
@@ -796,23 +770,30 @@ export async function httpGetPinned(
         },
         onResponse,
       );
-    } else if (proxy && !isTls) {
-      // Plain HTTP through a proxy: an absolute-form request to the proxy.
+    } else if (tunnelSocket) {
+      // Plain HTTP through an explicit proxy: the CONNECT tunnel already
+      // reaches the pinned IP, so the origin-form request goes over it.
+      // No absolute-form request: the proxy must never be asked to fetch
+      // (and resolve) the URL itself. The tunnel socket is handed to the
+      // HTTP layer the same way as the TLS socket above (Proxy-Authorization
+      // was already sent with the CONNECT request).
+      const agent = new httpMod.Agent();
+      (agent as unknown as { createConnection: (options: unknown, cb: (err: Error | null, s: unknown) => void) => unknown }).createConnection = (
+        _options: unknown,
+        cb: (err: Error | null, s: unknown) => void,
+      ) => {
+        cb(null, tunnelSocket);
+        return tunnelSocket;
+      };
       req = httpMod.request(
         {
           protocol: 'http:',
-          host: proxy.host,
-          port: proxy.port,
-          path: url.toString(),
+          host: url.hostname,
+          port,
+          path: `${url.pathname}${url.search}`,
           method: 'GET',
-          headers: {
-            host: url.host,
-            connection: 'keep-alive',
-            ...(proxy.auth
-              ? { 'proxy-authorization': `Basic ${Buffer.from(proxy.auth).toString('base64')}` }
-              : {}),
-          },
-          agent: false,
+          headers: { connection: 'keep-alive' },
+          agent,
         },
         onResponse,
       );
@@ -1009,8 +990,10 @@ export async function fetchCardBytes(
     /** Resolver used by the pinned transport. Defaults to {@link defaultLookup}. */
     lookup?: (hostname: string) => Promise<{ address: string; family: number }[]>;
     /**
-     * Proxy for the pinned transport. `undefined` (default) reads the
-     * environment; `null` disables the proxy; a string is the proxy URL.
+     * Explicit proxy for the pinned transport. `undefined` (default) and
+     * `null` both mean direct: the environment is never consulted for a
+     * pinned fetch. A string is an explicit proxy URL, used only as a
+     * CONNECT tunnel to the pinned destination IP.
      */
     proxy?: string | null;
     /** Extra CA certificates for the TLS handshake. Test-only. */
@@ -1353,10 +1336,11 @@ export interface VerifyInputs {
    */
   allowPrivateCardHosts?: boolean;
   /**
-   * Proxy for the pinned card transport. `undefined` (default) reads the
-   * environment; `null` disables the proxy; a string is the proxy URL.
-   * Test-only in practice: production leaves it unset so the environment
-   * (e.g. a runtime egress proxy) decides.
+   * Explicit proxy for the pinned card transport. `undefined` (default)
+   * and `null` both mean direct: the environment is never consulted for
+   * a pinned fetch. A string is an explicit proxy URL, used only as a
+   * CONNECT tunnel to the pinned destination IP.
+   * Test-only in practice: production leaves it unset (direct).
    */
   cardProxy?: string | null;
   /** Extra CA certificates for the card TLS handshake. Test-only. */

@@ -212,9 +212,11 @@ What was checked (live, 2026-11-12 ~19:57 WIB):
   placeholder, not a provider.
 - **The Agent Card URL is down.** `https://api.sabokun.my.id/agenttrust/
   .well-known/agent-card.json` returns HTTP 502 consistently (three curl
-  attempts and a Node fetch). The egress proxy works (the registry MCP
-  health endpoint returns 200 through the same proxy), so the 502 is the
-  origin, not the network.
+  attempts and a Node fetch). The egress proxy works for the registry
+  MCP health endpoint (an ordinary, non-pinned fetch, which returns
+  200 through the same proxy), so the 502 is the origin, not the
+  network. That says nothing about the pinned card fetch, which never
+  uses proxy environment variables (see the update below).
 - **The on-chain identity is real.** `agent_of` for token 1004 returns a
   live record: owner `4dWn8miA…`, agent URI as above, metadata hash
   `3f614404…`, status `Active`, registered 2026-11-04. The identity exists;
@@ -227,6 +229,25 @@ What was checked (live, 2026-11-12 ~19:57 WIB):
   host itself returns 502). The result is `unverified`, honestly, not
   `verified`.
 
+**Update (2026-11-15):** the card host no longer returns 502 — a
+proxy-resolved fetch returns HTTP 200 — but the pinned verifier still
+cannot retrieve the card on this VM, so verification stays
+INCONCLUSIVE. The pinned transport (`src/verify/crossAgent.ts`) never
+reads or honours `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`, or
+`https_proxy`; by default it connects directly to the pinned
+destination IP (DNS pinning with prohibited-address checks), and an
+explicit proxy is available only through the `proxy` option as a
+CONNECT tunnel to the pinned destination IP, never the hostname, with
+TLS SNI and certificate verification still using the original
+hostname. On this VM the local resolver can return a CGNAT address
+(`198.18.218.137` for the card host) and the direct path can be
+intercepted, so the pinned fetch cannot reach the real host here; an
+explicit proxy does not fix it on this VM either (CONNECT succeeds
+but the TLS handshake times out). Public verification needs a
+resolver and network path that provide the real destination IP and
+proper TLS connectivity. This is a limitation of this VM's network,
+not of the verifier or of deployments in general.
+
 **Concrete data still needed to activate the first provider:**
 
 1. A **publicly reachable x402 endpoint URL** (the resource server
@@ -235,7 +256,9 @@ What was checked (live, 2026-11-12 ~19:57 WIB):
 2. That endpoint's **price** (amount in microCCD) and **payTo** address.
 3. The provider's **identity**: CIS-8004 token id, owner account, and
    Agent Card URL.
-4. The **Agent Card host must be reachable** (currently 502), so
+4. The **Agent Card host must be reachable by the pinned verifier**
+   (reachable today via a proxy-resolved fetch, HTTP 200, but not by
+   the pinned transport on this VM — see the update above), so
    `verifyAgent` can return TRUSTED and the provider can be listed as
    `verified` rather than `unverified`.
 

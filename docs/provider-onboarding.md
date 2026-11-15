@@ -188,9 +188,25 @@ to verify it.
    (origin deployment + nginx routing) is a separate step, blocked on
    the origin deployment decision and Hermes's review.
 6. **The production verifier needs network egress** (registry MCP +
-   Agent Card fetch). It works on this VM via the egress proxy (after
-   the pinned-transport fix); on the origin it needs the same egress
-   (direct or proxy) to those hosts.
+   Agent Card fetch), but the two legs use different transports. The
+   registry lookup is an ordinary fetch and can use the environment
+   proxy; the pinned card fetch (`src/verify/crossAgent.ts`) cannot.
+   It never reads or honours `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`,
+   or `https_proxy`: by default it connects directly to the pinned
+   destination IP (DNS pinning with prohibited-address checks). An
+   explicit proxy is available only through the `proxy` option, and
+   only as a CONNECT tunnel to the pinned destination IP — never the
+   hostname — while TLS SNI and certificate verification still use the
+   original hostname. **On this VM, public verification can be
+   INCONCLUSIVE:** the local resolver can return a CGNAT address
+   (`198.18.218.137` for the card host) and the direct path can be
+   intercepted, so the pinned fetch cannot reach the real host here;
+   an explicit proxy does not fix it on this VM either (tested
+   2026-11-15: CONNECT succeeds but the TLS handshake times out).
+   Public verification therefore needs a resolver and network path
+   that provide the real destination IP and proper TLS connectivity.
+   This is a limitation of this VM's network, not of the verifier or
+   of deployments in general.
 7. **The code is committed locally but not yet published.** The
    implementation is recorded in local commits `dd02c85` and `6b2a74c`
    on branch `integrate/provider-policy-bundle` (the provider-policy
