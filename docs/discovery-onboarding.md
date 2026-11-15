@@ -68,7 +68,11 @@ No new dependency, no native build, no new service to run.
 **File:** `$AGENTTRUST_DISCOVERY_DB`, default
 `/home/hatch/agenttrust-state/discovery.db` — the durable directory that
 survives VM replacement, next to `facilitator.db`. The resource server and
-the CLI open the same file.
+the CLI open the same file. That default is specific to the reference
+deployment environment; it is not a universal path. On any other host,
+set `--db` or `$AGENTTRUST_DISCOVERY_DB` to a path that fits your
+environment, and make sure the directory exists and is writable by the
+process.
 
 **Durability posture (copied from the facilitator):** WAL +
 `synchronous=FULL`, `BEGIN IMMEDIATE` write transactions, a 5s busy
@@ -139,6 +143,18 @@ The CLI is `agenttrust-discovery` (bin `dist/cli/discovery.js`, source
 database. `--db` overrides the database path for one invocation;
 `$AGENTTRUST_DISCOVERY_DB` overrides it for the process; the default is
 `/home/hatch/agenttrust-state/discovery.db`.
+
+> **Warning — these are AgentTrust's own identity values, not universal
+> defaults.** The example below uses CIS-8004 token ID `1004`, owner
+> `4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d`, Agent URI
+> `https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json`,
+> and payment recipient `3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB`
+> because it registers AgentTrust's own provider. **Do not copy them
+> verbatim for your own provider.** An independent operator must replace
+> all four with their own token ID, owner address, Agent URI, and payment
+> recipient. Listing AgentTrust's identity is only appropriate if you are
+> running the AgentTrust-operated provider yourself, with the
+> corresponding authorization.
 
 ```bash
 # 1. Register a service (validation is the same as the registry's).

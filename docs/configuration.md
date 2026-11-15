@@ -62,7 +62,7 @@ This document covers configuration and environment variables for AgentTrust.
 | `AGENTTRUST_X402_SPONSOR` | unset | Optional: pin the expected sponsor account. |
 | `AGENTTRUST_NODE_HOST` | `grpc.testnet.concordium.com` | Concordium gRPC host. |
 | `AGENTTRUST_NODE_PORT` | `20000` | Concordium gRPC port. |
-| `AGENTTRUST_DISCOVERY_DB` | `/home/hatch/agenttrust-state/discovery.db` | Persistent Discovery registry SQLite file (the same file the `agenttrust-discovery` CLI writes to). |
+| `AGENTTRUST_DISCOVERY_DB` | `/home/hatch/agenttrust-state/discovery.db` | Persistent Discovery registry SQLite file (the same file the `agenttrust-discovery` CLI writes to). This default is specific to the reference deployment environment, not a universal path — on other hosts, set a path that fits your environment and ensure the directory exists and is writable. |
 
 ### Registry verification (`scripts/registry-verify.mjs`)
 

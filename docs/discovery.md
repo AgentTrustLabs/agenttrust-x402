@@ -37,6 +37,18 @@ an agent can discover, price, and pay for — before it pays.
 
 ## Registering a service (operator-side)
 
+> **Warning — these are AgentTrust's own identity values, not universal
+> defaults.** The example below uses CIS-8004 token ID `1004`, owner
+> `4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d`, Agent URI
+> `https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json`,
+> and payment recipient `3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB`
+> because it registers AgentTrust's own provider. **Do not copy them
+> verbatim for your own provider.** An independent operator must replace
+> all four with their own token ID, owner address, Agent URI, and payment
+> recipient. Listing AgentTrust's identity is only appropriate if you are
+> running the AgentTrust-operated provider yourself, with the
+> corresponding authorization.
+
 ```ts
 import { createServiceRegistry } from '../src/discovery/registry.js';
 

@@ -191,10 +191,13 @@ to verify it.
    Agent Card fetch). It works on this VM via the egress proxy (after
    the pinned-transport fix); on the origin it needs the same egress
    (direct or proxy) to those hosts.
-7. **The code is uncommitted, on top of four earlier patches**
-   (Discovery + Public URL, Mock mode, Onboarding, Activation policy).
-   It reaches the origin only via commit/push or a direct copy — a
-   user decision (commit/push is currently not authorized).
+7. **The code is committed locally but not yet published.** The
+   implementation is recorded in local commits `dd02c85` and `6b2a74c`
+   on branch `integrate/provider-policy-bundle` (the provider-policy
+   bundle plus the pinned-transport fix), but the branch has not been
+   pushed to the remote. It reaches the origin only via push (and a
+   PR) or a direct copy — a user decision (push is currently not
+   authorized).
 
 ## Files
 

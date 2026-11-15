@@ -57,7 +57,11 @@
  * Storage: SQLite (`node:sqlite`, no new dependency) at
  * `$AGENTTRUST_DISCOVERY_DB` or `--db`, default
  * `/home/hatch/agenttrust-state/discovery.db` (durable, survives VM
- * replacement, same directory as the facilitator database).
+ * replacement, same directory as the facilitator database). That
+ * default is specific to the reference deployment environment, not a
+ * universal path: on other hosts, set `--db` or
+ * `$AGENTTRUST_DISCOVERY_DB` to a path whose directory exists and is
+ * writable by this process.
  *
  * No signing, no settlement, no broadcast, no transactions. No wallet
  * secret is read, displayed, or stored. The CLI only writes service
