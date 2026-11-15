@@ -30,10 +30,39 @@ This document covers configuration and environment variables for AgentTrust.
 | `AGENTTRUST_NODE_PORT` | `20000` | Concordium gRPC port. |
 | `AGENTTRUST_REGISTRY_URL` | `https://agent-registry-mcp.concordium.com/mcp` | Registry MCP URL. |
 | `AGENTTRUST_WALLET_DB` | `wallets.db` (next to static root) | SQLite path for the agentic wallet store. |
-| `AGENTTRUST_X402_PAY_TO` | `3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8` | Recipient account for x402 payment. |
-| `AGENTTRUST_X402_AMOUNT` | `500` | Payment amount in microCCD. |
+| `AGENTTRUST_X402_PAY_TO` | `3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8` | Recipient account for x402 payment (pairing-server default). |
+| `AGENTTRUST_X402_AMOUNT` | `500` | Payment amount in microCCD (pairing-server default). |
 | `AGENTTRUST_X402_RESOURCE` | `https://example.com/protected` | Protected resource URL. |
 | `AGENTTRUST_X402_MOCK_CHAIN` | unset | Set to `1` to use a mock chain verifier (testing only). |
+
+### x402 resource server (`scripts/x402-resource-server.mts`)
+
+> `AGENTTRUST_X402_PAY_TO` and `AGENTTRUST_X402_AMOUNT` are read by
+> BOTH this script and `scripts/pairing-server.mts`, with DIFFERENT
+> defaults. The values below are the resource-server defaults. Do not
+> use the pairing-server defaults (`3whdieGH…`, `500`) for the resource
+> server: `3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8` is the
+> sponsor account used by the authz scripts, while
+> `3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB` is the x402
+> payment recipient (the verified test recipient). The sponsor address
+> is not the recipient address.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENTTRUST_X402_HOST` | `127.0.0.1` | Bind host. An unset, empty, or whitespace-only value is normalized to `127.0.0.1` (loopback). Never expose publicly without an auth layer in front. |
+| `AGENTTRUST_X402_PORT` | `4590` | Bind port. |
+| `AGENTTRUST_FACILITATOR_URL` | `http://127.0.0.1:8787` | Facilitator URL (real mode only). Note: there is no `X402` in this name. |
+| `AGENTTRUST_X402_PAY_TO` | `3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB` | Recipient account for x402 payment (the verified test recipient). |
+| `AGENTTRUST_X402_AMOUNT` | `1` | Payment amount in microCCD. Amounts are always microCCD (1 microCCD = 10^-6 CCD); the resource-server default is 1 microCCD per access. |
+| `AGENTTRUST_X402_RESOURCE_PATH` | `/protected` | Protected resource route served by this server. |
+| `AGENTTRUST_X402_PUBLIC_URL` | unset | Optional public URL of this resource (absolute `https:`, e.g. `https://api.example.com/agenttrust/protected`). When set, the 402 challenge and the payment binding use it; the server still binds loopback. Never derived from request headers. |
+| `AGENTTRUST_X402_FACILITATOR_MODE` | `real` | Facilitator mode: `real` (production default) or `mock` (testing only — no real facilitator, sponsor, or signing; paid requests can never unlock). Invalid values fail startup. |
+| `AGENTTRUST_X402_ALLOW_MOCK` | unset | Production guard for mock mode: `mock` mode additionally requires this set to `1` (or `true`). Without it, mock mode refuses to start, so a single mistyped or leaked mode variable can never put a production server into mock mode. The guard also refuses mock mode when `NODE_ENV=production` and requires the bind host to be loopback (`127.0.0.1`, `::1`, or `localhost`) — a non-loopback, empty, or ambiguous host is rejected fail-closed, before any probe or network I/O. See `src/x402/mockModeGuard.ts`. |
+| `AGENTTRUST_X402_SENDER` | unset | Optional: pin the expected sender account. |
+| `AGENTTRUST_X402_SPONSOR` | unset | Optional: pin the expected sponsor account. |
+| `AGENTTRUST_NODE_HOST` | `grpc.testnet.concordium.com` | Concordium gRPC host. |
+| `AGENTTRUST_NODE_PORT` | `20000` | Concordium gRPC port. |
+| `AGENTTRUST_DISCOVERY_DB` | `/home/hatch/agenttrust-state/discovery.db` | Persistent Discovery registry SQLite file (the same file the `agenttrust-discovery` CLI writes to). This default is specific to the reference deployment environment, not a universal path — on other hosts, set a path that fits your environment and ensure the directory exists and is writable. |
 
 ### Registry verification (`scripts/registry-verify.mjs`)
 
