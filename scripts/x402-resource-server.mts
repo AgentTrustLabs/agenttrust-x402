@@ -124,6 +124,7 @@ const NODE_HOST = NODE_HOST_RAW.replace(/^https?:\/\//, '');
 const NODE_PORT = Number(process.env.AGENTTRUST_NODE_PORT ?? TESTNET.grpcPort);
 const NETWORK = TESTNET.caip2;
 const DISCOVERY_DB = process.env.AGENTTRUST_DISCOVERY_DB ?? '/home/hatch/agenttrust-state/discovery.db';
+const STATIC_DIR = process.env.AGENTTRUST_STATIC_DIR;
 
 async function main(): Promise<void> {
   // 0. Canonical resource URL + facilitator mode. Both resolved before any
@@ -233,11 +234,12 @@ async function main(): Promise<void> {
   // over unauthenticated HTTP. The Discovery API is read-only:
   // GET /api/services, GET /api/services/:id.
   const discovery = createServiceRegistry(new SqliteServiceStore(DISCOVERY_DB));
-  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery });
+  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
   console.log(`AgentTrust x402 resource server on ${started.url}${RESOURCE_PATH}`);
   console.log(`  resource=${resourceUrl}  payTo=${PAY_TO}  amount=${AMOUNT} microCCD  network=${NETWORK}`);
   console.log(`  facilitator mode=${mode}  facilitator=${mode === 'real' ? FACILITATOR_URL : 'mock'}  feePayer=${feePayerLog}`);
   console.log(`  discovery: GET ${started.url}/api/services (persistent registry: ${DISCOVERY_DB}, ${discovery.size()} service(s))`);
+  if (STATIC_DIR) console.log(`  static website: GET ${started.url}/ (V5.4 prototype, dir: ${STATIC_DIR})`);
   console.log('  Ctrl-C to stop. (Replay store is in-memory: a restart forgets consumed payments.)');
 
   const shutdown = (): void => {

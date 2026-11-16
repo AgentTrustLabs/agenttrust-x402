@@ -32,6 +32,8 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { ChainTransferSummary, ChainVerifier, X402Provider } from './provider.js';
 import { handleDiscoveryRequest } from '../discovery/http.js';
 import type { ServiceRegistry } from '../discovery/registry.js';
@@ -49,6 +51,15 @@ export interface X402ResourceServerOptions {
    * flow: it is a separate read path over a separate store.
    */
   discovery?: ServiceRegistry;
+  /**
+   * Optional static website directory (V5.4 integration spike). When
+   * provided, the server also answers GET / (the V5.4 prototype) and
+   * GET /three.module.js from that directory — and nothing else. Only
+   * the two exact filenames are ever served, so no directory traversal
+   * is possible. The files are served read-only; the payment flow and
+   * the Discovery API are untouched.
+   */
+  staticDir?: string;
 }
 
 /** Base64 JSON of the settlement, in the SDK header convention. */
@@ -220,6 +231,28 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
           json(res, discovered.status, discovered.body, discovered.headers ?? {});
           return;
         }
+      }
+
+      // Static website (V5.4 prototype). Only active when a static
+      // directory was injected. Exactly two files are served, by exact
+      // pathname match; everything else falls through to the 404 below.
+      if (opts.staticDir && method === 'GET' && (url === '/' || url === '/three.module.js')) {
+        const file = url === '/' ? 'prototype-v5-4.html' : 'three.module.js';
+        const contentType = url === '/'
+          ? 'text/html; charset=utf-8'
+          : 'text/javascript; charset=utf-8';
+        try {
+          const body = await readFile(join(opts.staticDir, file));
+          res.writeHead(200, {
+            'content-type': contentType,
+            'cache-control': 'no-store',
+            'content-length': body.length,
+          });
+          res.end(body);
+        } catch {
+          json(res, 404, { error: 'not found' });
+        }
+        return;
       }
 
       if (url !== resourcePath) {
