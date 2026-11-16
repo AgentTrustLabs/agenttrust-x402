@@ -15,11 +15,29 @@
  *   AGENTTRUST_AUDIT_ROOT=/tmp/agenttrust-audit agenttrust-mcp
  */
 
+import { existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
+import { createServiceRegistry, type ServiceRegistry } from '../discovery/registry.js';
+import { SqliteServiceStore } from '../discovery/store.js';
 import { TOOLS, callTool, findTool, type ServerConfig } from './tools.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'agenttrust-gateway', version: '1.0.0' };
+const DEFAULT_DISCOVERY_DB = '/home/hatch/agenttrust-state/discovery.db';
+
+function openConfiguredDiscoveryRegistry(): ServiceRegistry | undefined {
+  const explicitDb = process.env['AGENTTRUST_DISCOVERY_DB'];
+  if (explicitDb !== undefined) {
+    return createServiceRegistry(new SqliteServiceStore(explicitDb));
+  }
+  if (existsSync(dirname(DEFAULT_DISCOVERY_DB))) {
+    return createServiceRegistry(new SqliteServiceStore(DEFAULT_DISCOVERY_DB));
+  }
+  return undefined;
+}
+
+const discovery = openConfiguredDiscoveryRegistry();
 
 /**
  * Registry endpoint is operator configuration (env), never a tool argument.
@@ -32,6 +50,7 @@ const config: ServerConfig = {
   // Off unless the operator says otherwise: a permissionless registry can otherwise point
   // an agent_uri at loopback or cloud metadata. Not reachable from any MCP tool argument.
   allowPrivateCardHosts: process.env['AGENTTRUST_ALLOW_PRIVATE_CARD_HOSTS'] === '1',
+  ...(discovery ? { discovery } : {}),
 };
 
 interface RpcRequest {

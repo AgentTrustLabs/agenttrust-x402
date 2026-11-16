@@ -148,11 +148,11 @@ const test = (name: string, fn: () => unknown) => tests.push([name, fn]);
 
 // ─── 1. tool surface ────────────────────────────────────────────────────
 
-test('01. exactly six tools are exposed, all with closed input schemas', () => {
-  eq(TOOLS.length, 6, 'tool count');
+test('01. exactly eight tools are exposed, all with closed input schemas', () => {
+  eq(TOOLS.length, 8, 'tool count');
   eq(
     TOOL_NAMES.join(','),
-    'registry.search,registry.card,trust.verify,trust.policy,commerce.simulate,audit.verify',
+    'registry.search,registry.card,trust.verify,trust.policy,commerce.simulate,audit.verify,discover_services,get_service_details',
     'tool names',
   );
   for (const t of TOOLS) {
@@ -641,7 +641,7 @@ test('27. the stdio server answers initialize, tools/list, and a bad method', as
   const byId = new Map(responses.map(r => [r.id, r]));
   eq(byId.get(1).result.protocolVersion, '2024-11-05', 'protocol version');
   eq(byId.get(1).result.serverInfo.name, 'agenttrust-gateway', 'server name');
-  eq(byId.get(2).result.tools.length, 6, 'tools listed');
+  eq(byId.get(2).result.tools.length, 8, 'tools listed');
   eq(byId.get(3).error.code, -32601, 'unknown method');
   eq(byId.get(null).error.code, -32700, 'parse error');
 });

@@ -48,6 +48,13 @@ import { mockFacilitator, structuralPayload, SIMULATION_DISCLAIMER } from '../co
 import { AgentRegistryMcp } from '../registry/mcpClient.js';
 import { AuditTrail } from '../audit/trail.js';
 import { CCD_TESTNET_CAIP2 } from '../payments/x402.js';
+import {
+  DISCOVERY_NETWORK,
+  SERVICE_CATEGORIES,
+  SERVICE_ID_PATTERN,
+  toServiceView,
+  type ServiceRegistry,
+} from '../discovery/registry.js';
 
 // ─── limits ──────────────────────────────────────────────────────────────
 
@@ -104,6 +111,7 @@ export const REJECTED_FIELDS = [
   'api_key',
   'token',
   'bearer',
+  'db',
   'path',
   'file',
   'filepath',
@@ -129,6 +137,7 @@ export type McpErrorCode =
   | 'AUTHORIZATION_NOT_ACCEPTED'
   | 'FORBIDDEN_FIELD'
   | 'AUDIT_READ_DENIED'
+  | 'STORE_UNAVAILABLE'
   | 'TIMEOUT'
   | 'UPSTREAM_ERROR'
   | 'INTERNAL_ERROR';
@@ -275,6 +284,9 @@ export interface ServerConfig {
   allowPrivateCardHosts?: boolean;
   /** Bound on a single card fetch, in ms. */
   cardTimeoutMs?: number;
+  /** Operator-configured Discovery service registry. Never client-supplied. */
+  discovery?: ServiceRegistry;
+  discoveryRegistry?: ServiceRegistry;
 }
 
 function registry(cfg: ServerConfig, network: string): AgentRegistryMcp {
@@ -750,6 +762,125 @@ export async function toolAuditVerify(cfg: ServerConfig, rawArgs: unknown): Prom
   };
 }
 
+// ─── tool: discover_services & get_service_details ───────────────────────
+
+const DISCOVER_ALLOWED_KEYS = new Set(['query', 'category', 'network', 'status', 'limit']);
+const DETAILS_ALLOWED_KEYS = new Set(['service_id']);
+
+function requireDiscoveryRegistry(cfg: ServerConfig): ServiceRegistry {
+  const reg = cfg.discovery ?? cfg.discoveryRegistry;
+  if (!reg) {
+    throw new McpToolError(
+      'STORE_UNAVAILABLE',
+      'discovery service store is not configured',
+    );
+  }
+  return reg;
+}
+
+function assertObjectArgs(rawArgs: unknown, allowedKeys: ReadonlySet<string>): Record<string, unknown> {
+  if (rawArgs === undefined || rawArgs === null) return {};
+  if (typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+    throw new McpToolError('INVALID_INPUT', 'tool arguments must be an object');
+  }
+  const args = rawArgs as Record<string, unknown>;
+  for (const k of Object.keys(args)) {
+    if (!allowedKeys.has(k)) {
+      throw new McpToolError('INVALID_INPUT', `unknown field '${k}'`);
+    }
+  }
+  return args;
+}
+
+export interface DiscoverServicesResult {
+  services: Record<string, unknown>[];
+  total: number;
+  filters: {
+    category?: string;
+    network?: string;
+    q?: string;
+    status: string;
+    limit: number;
+  };
+}
+
+export async function toolDiscoverServices(
+  cfg: ServerConfig,
+  rawArgs: unknown,
+): Promise<DiscoverServicesResult> {
+  assertInputSize(rawArgs);
+  assertNoForbiddenFields(rawArgs);
+  const args = assertObjectArgs(rawArgs, DISCOVER_ALLOWED_KEYS);
+  const reg = requireDiscoveryRegistry(cfg);
+
+  const query = str(args, 'query', { max: LIMITS.maxStringLength });
+  const category = str(args, 'category', { max: 64 });
+  if (category !== undefined && !(SERVICE_CATEGORIES as readonly string[]).includes(category)) {
+    throw new McpToolError(
+      'INVALID_INPUT',
+      `category must be one of ${SERVICE_CATEGORIES.join(', ')}`,
+    );
+  }
+  if (args['network'] !== undefined) {
+    if (args['network'] !== 'testnet') {
+      throw new McpToolError('UNSUPPORTED_NETWORK', "network must be 'testnet'");
+    }
+  }
+  const status = args['status'] === undefined ? 'active' : str(args, 'status', { max: 16 })!;
+  if (status !== 'active' && status !== 'inactive' && status !== 'all') {
+    throw new McpToolError('INVALID_INPUT', "status must be 'active', 'inactive', or 'all'");
+  }
+  const rawLimit = args['limit'];
+  const limit = rawLimit === undefined ? 10 : typeof rawLimit === 'number' ? rawLimit : NaN;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > LIMITS.maxSearchLimit) {
+    throw new McpToolError('INVALID_INPUT', `limit must be an integer 1..${LIMITS.maxSearchLimit}`);
+  }
+
+  const listResult = reg.list({
+    ...(category !== undefined ? { category } : {}),
+    ...(args['network'] !== undefined ? { network: DISCOVERY_NETWORK } : {}),
+    ...(query !== undefined ? { q: query } : {}),
+    status,
+    limit,
+  });
+
+  return {
+    services: listResult.services.map(toServiceView),
+    total: listResult.total,
+    filters: {
+      ...(category !== undefined ? { category } : {}),
+      ...(args['network'] !== undefined ? { network: DISCOVERY_NETWORK } : {}),
+      ...(query !== undefined ? { q: query } : {}),
+      status,
+      limit,
+    },
+  };
+}
+
+export async function toolGetServiceDetails(
+  cfg: ServerConfig,
+  rawArgs: unknown,
+): Promise<Record<string, unknown>> {
+  assertInputSize(rawArgs);
+  assertNoForbiddenFields(rawArgs);
+  const args = assertObjectArgs(rawArgs, DETAILS_ALLOWED_KEYS);
+  const reg = requireDiscoveryRegistry(cfg);
+
+  const serviceId = str(args, 'service_id', { required: true, max: 64 })!;
+  if (!SERVICE_ID_PATTERN.test(serviceId)) {
+    throw new McpToolError(
+      'INVALID_INPUT',
+      "service_id must match 'svc_<slug>' (letters, digits, '_' and '-', max 64 characters)",
+    );
+  }
+
+  const service = reg.get(serviceId);
+  if (!service) {
+    throw new McpToolError('INVALID_INPUT', 'service not found');
+  }
+  return toServiceView(service);
+}
+
 // ─── tool catalogue ──────────────────────────────────────────────────────
 
 export interface ToolDef {
@@ -853,6 +984,38 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     handler: (cfg, a) => toolAuditVerify(cfg, a),
+  },
+  {
+    name: 'discover_services',
+    description:
+      'Find API services on Concordium Testnet: name, description, category, endpoint, provider identity, network, pricing, and x402 payment requirements. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', minLength: 1, maxLength: LIMITS.maxStringLength },
+        category: { type: 'string', enum: [...SERVICE_CATEGORIES] },
+        network: { type: 'string', enum: ['testnet'] },
+        status: { type: 'string', enum: ['active', 'inactive', 'all'] },
+        limit: { type: 'integer', minimum: 1, maximum: LIMITS.maxSearchLimit },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    handler: (cfg, a) => toolDiscoverServices(cfg, a),
+  },
+  {
+    name: 'get_service_details',
+    description:
+      'Fetch one API service by id: full metadata, pricing, provider verification status, and x402 payment requirements when active. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        service_id: { type: 'string', minLength: 1, maxLength: 64 },
+      },
+      required: ['service_id'],
+      additionalProperties: false,
+    },
+    handler: (cfg, a) => toolGetServiceDetails(cfg, a),
   },
 ];
 

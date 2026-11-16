@@ -8,9 +8,18 @@
  */
 
 import { IpcAccountSigner } from '../services/facilitator/src/signingService.js';
+import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 
 const [socketPath, sponsor, network, expectedUidRaw, digestHex] = process.argv.slice(2);
 if (!socketPath || !sponsor || !network || !expectedUidRaw || !digestHex) {
+  console.error('usage: signing-ipc-client.mts <socket-path> <sponsor> <network> <expected-uid> <hex-digest>');
+  process.exit(2);
+}
+
+let digestBuffer: ArrayBuffer;
+try {
+  digestBuffer = digestHexToArrayBuffer(digestHex);
+} catch {
   console.error('usage: signing-ipc-client.mts <socket-path> <sponsor> <network> <expected-uid> <hex-digest>');
   process.exit(2);
 }
@@ -24,7 +33,7 @@ const client = new IpcAccountSigner({
 });
 
 try {
-  const sig = await client.sign(Buffer.from(digestHex, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+  const sig = await client.sign(digestBuffer);
   console.log(JSON.stringify({ ok: true, signature: sig[0]?.[0], pid: process.pid, uid: process.getuid?.() ?? null }));
   process.exit(0);
 } catch (e) {
