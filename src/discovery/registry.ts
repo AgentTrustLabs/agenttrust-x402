@@ -659,6 +659,7 @@ export function createServiceRegistry(store: ServiceStore = createMemoryServiceS
 export function buildServicePaymentRequirements(
   service: ServiceRecord,
   resourceUrl?: string,
+  opts: { feePayer?: string } = {},
 ): PaymentRequirements {
   return buildPaymentRequirements({
     payTo: service.pricing.payTo,
@@ -667,6 +668,11 @@ export function buildServicePaymentRequirements(
     ...(service.pricing.description ? { description: service.pricing.description } : {}),
     resourceUrl: resourceUrl ?? service.endpoint,
     network: service.network,
+    // The sponsor is a property of the facilitator, announced via its
+    // /supported — never invented by the service. Callers pass the
+    // facilitator-probed feePayer here; when omitted the requirement
+    // names no fee payer.
+    ...(opts.feePayer !== undefined ? { feePayer: opts.feePayer } : {}),
   });
 }
 

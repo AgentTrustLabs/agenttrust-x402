@@ -110,8 +110,9 @@ import { startX402ResourceServer, resolveResourceUrl, resolveFacilitatorMode, re
 import { assertMockModeAllowed } from '../src/x402/mockModeGuard.js';
 import { mockFacilitator } from '../src/commerce/simulation.js';
 import type { PaymentRequirements } from '@x402/core/types';
-import { createServiceRegistry } from '../src/discovery/registry.js';
+import { createServiceRegistry, buildServicePaymentRequirements, isDiscoverable } from '../src/discovery/registry.js';
 import { SqliteServiceStore } from '../src/discovery/store.js';
+import { AGENTTRUST_SERVICE_ID, agenttrustServiceResource } from '../src/discovery/firstProvider.js';
 
 const HOST = resolveBindHost(process.env.AGENTTRUST_X402_HOST);
 const PORT = Number(process.env.AGENTTRUST_X402_PORT ?? 4590);
@@ -154,6 +155,20 @@ async function main(): Promise<void> {
     nodeEnv: process.env.NODE_ENV,
   });
 
+  // 0b. Discovery registry (persistent SQLite, same file the operator CLI
+  // writes to). Opened before the provider is built so the provider's
+  // requirements and resource can come from the registered first-provider
+  // service when it is discoverable. When the service is absent or not
+  // discoverable, the server falls back to the env-based requirements
+  // and the placeholder resource below — the server still serves, it
+  // just does not claim to be the registered service.
+  const discovery = createServiceRegistry(new SqliteServiceStore(DISCOVERY_DB));
+  const firstService = discovery.get(AGENTTRUST_SERVICE_ID);
+  const firstDiscoverable = firstService !== undefined && isDiscoverable(firstService);
+  if (firstService !== undefined && !firstDiscoverable) {
+    console.log(`first-provider service ${AGENTTRUST_SERVICE_ID} is registered but not discoverable (status=${firstService.status}, verification=${firstService.providerVerification.status}) — using env-based requirements`);
+  }
+
   // 1–2. Facilitator + chain, by mode. Real mode is the existing behavior,
   // verbatim: probe the facilitator, require a sponsor feePayer, verify the
   // chain node. Mock mode skips both — there is no real facilitator to
@@ -182,14 +197,19 @@ async function main(): Promise<void> {
     console.log(`chain verifier: node ${NODE_HOST}:${NODE_PORT} genesis matches ${NETWORK}`);
 
     // Requirement with the feePayer the facilitator itself announced.
-    requirements = buildPaymentRequirements({
-      payTo: PAY_TO,
-      amountMicroCcd: AMOUNT,
-      resourceUrl,
-      network: NETWORK,
-      maxTimeoutSeconds: 300,
-      feePayer: compat.feePayer,
-    });
+    // When the first-provider service is discoverable, the requirement
+    // comes from its registry record (same amount, payTo and network the
+    // service advertises in Discovery); otherwise the env-based values.
+    requirements = firstDiscoverable
+      ? buildServicePaymentRequirements(firstService!, resourceUrl, { feePayer: compat.feePayer })
+      : buildPaymentRequirements({
+          payTo: PAY_TO,
+          amountMicroCcd: AMOUNT,
+          resourceUrl,
+          network: NETWORK,
+          maxTimeoutSeconds: 300,
+          feePayer: compat.feePayer,
+        });
     facilitator = createHttpFacilitator({ url: FACILITATOR_URL });
     feePayerLog = compat.feePayer;
   } else {
@@ -200,13 +220,18 @@ async function main(): Promise<void> {
     // reports a finalization, so the provider fails closed (503) for
     // every paid request and the resource can never unlock.
     console.log('facilitator mode=mock: no real facilitator, no sponsor, no signing — paid requests can never unlock');
-    requirements = buildPaymentRequirements({
-      payTo: PAY_TO,
-      amountMicroCcd: AMOUNT,
-      resourceUrl,
-      network: NETWORK,
-      maxTimeoutSeconds: 300,
-    });
+    // Same registry-first rule as real mode, minus the feePayer: the
+    // requirement names NO fee payer in mock mode — a fake sponsor
+    // address is never invented as a workaround.
+    requirements = firstDiscoverable
+      ? buildServicePaymentRequirements(firstService!, resourceUrl)
+      : buildPaymentRequirements({
+          payTo: PAY_TO,
+          amountMicroCcd: AMOUNT,
+          resourceUrl,
+          network: NETWORK,
+          maxTimeoutSeconds: 300,
+        });
     facilitator = mockFacilitator('ok');
     chain = createMockChainVerifier();
     feePayerLog = '(none — mock mode)';
@@ -216,8 +241,13 @@ async function main(): Promise<void> {
   // announcement, never from local configuration. `resourceUrl` was resolved
   // in step 0 (public URL when configured, loopback otherwise) and is the
   // canonical URL for both the 402 challenge and the payment binding.
+  // The resource is the first-provider service descriptor when the service
+  // is discoverable; otherwise the placeholder the server always served.
+  const resource = firstDiscoverable
+    ? agenttrustServiceResource(firstService!)
+    : { body: 'PROTECTED-CONTENT', url: resourceUrl };
   const provider = createX402Provider(
-    { requirements, resourceUrl, resource: { body: 'PROTECTED-CONTENT', url: resourceUrl } },
+    { requirements, resourceUrl, resource },
     { facilitator, chain },
     {
       preflight: preflightPaymentPayload,
@@ -233,11 +263,13 @@ async function main(): Promise<void> {
   // Registration is operator-side only (agenttrust-discovery CLI), never
   // over unauthenticated HTTP. The Discovery API is read-only:
   // GET /api/services, GET /api/services/:id.
-  const discovery = createServiceRegistry(new SqliteServiceStore(DISCOVERY_DB));
   const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
   console.log(`AgentTrust x402 resource server on ${started.url}${RESOURCE_PATH}`);
-  console.log(`  resource=${resourceUrl}  payTo=${PAY_TO}  amount=${AMOUNT} microCCD  network=${NETWORK}`);
+  console.log(`  resource=${resourceUrl}  payTo=${requirements.payTo}  amount=${requirements.amount} microCCD  network=${NETWORK}`);
   console.log(`  facilitator mode=${mode}  facilitator=${mode === 'real' ? FACILITATOR_URL : 'mock'}  feePayer=${feePayerLog}`);
+  if (firstDiscoverable) {
+    console.log(`  first-provider service: ${AGENTTRUST_SERVICE_ID} (verified, active) — requirements + resource from the registry record`);
+  }
   console.log(`  discovery: GET ${started.url}/api/services (persistent registry: ${DISCOVERY_DB}, ${discovery.size()} service(s))`);
   if (STATIC_DIR) console.log(`  static website: GET ${started.url}/ (V5.4 prototype, dir: ${STATIC_DIR})`);
   console.log('  Ctrl-C to stop. (Replay store is in-memory: a restart forgets consumed payments.)');
