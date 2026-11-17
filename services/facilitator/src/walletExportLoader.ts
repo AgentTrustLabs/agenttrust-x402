@@ -12,11 +12,14 @@
  *     returned in errors, or echoed. Error messages are generic.
  *   - A missing path, missing file, malformed export, or construction failure
  *     throws a generic `WalletExportError`. There is no fallback signer.
+ *   - `loadSponsorExportSigner` refuses to build a signer when the export's
+ *     address does not match the configured sponsor — checked BEFORE the signer
+ *     is built, so a mismatched export never yields a usable signer.
  *   - The facilitator / IPC client / gateway are never involved.
  */
 
 import { readFileSync } from 'node:fs';
-import { parseWallet, buildAccountSigner } from '@concordium/web-sdk';
+import { AccountAddress, parseWallet, buildAccountSigner } from '@concordium/web-sdk';
 import type { AccountSigner, WalletExportFormat } from '@concordium/web-sdk';
 
 export class WalletExportError extends Error {
@@ -37,19 +40,29 @@ export interface WalletExportLoaderDeps {
   requireThresholdOne?: boolean;
 }
 
+/** Canonical base58 of an address string, or null if malformed. */
+function canonicalAddress(value: unknown): string | null {
+  try {
+    if (typeof value !== 'string') return null;
+    return AccountAddress.toBase58(AccountAddress.fromBase58(value));
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Load a wallet export from `path` and return an `AccountSigner`.
- *
- * Throws `WalletExportError` on any failure. Never returns a partial signer.
+ * Parse + structurally validate a wallet export. Shared by the signer loader
+ * and the address reader so both see the same validated export. Throws a
+ * generic `WalletExportError` on any failure; nothing from the file is logged
+ * or echoed.
  */
-export function loadWalletExportSigner(path: string, deps: WalletExportLoaderDeps = {}): AccountSigner {
+function parseWalletExport(path: string, deps: WalletExportLoaderDeps): WalletExportFormat {
   if (typeof path !== 'string' || path.trim() === '') {
     throw new WalletExportError('wallet export path is required');
   }
 
   const readFile = deps.readFile ?? ((p: string) => readFileSync(p, 'utf8'));
   const parse = deps.parseWallet ?? ((raw: string) => parseWallet(raw));
-  const build = deps.buildAccountSigner ?? ((exported: WalletExportFormat) => buildAccountSigner(exported));
   const requireOne = deps.requireThresholdOne !== false;
 
   let raw: string;
@@ -109,6 +122,12 @@ export function loadWalletExportSigner(path: string, deps: WalletExportLoaderDep
     }
   }
 
+  return exported;
+}
+
+/** Build an `AccountSigner` from an already-parsed export. */
+function buildSigner(exported: WalletExportFormat, deps: WalletExportLoaderDeps): AccountSigner {
+  const build = deps.buildAccountSigner ?? ((e: WalletExportFormat) => buildAccountSigner(e));
   let signer: AccountSigner;
   try {
     signer = build(exported);
@@ -119,4 +138,63 @@ export function loadWalletExportSigner(path: string, deps: WalletExportLoaderDep
     throw new WalletExportError('signer construction failed');
   }
   return signer;
+}
+
+/**
+ * Load a wallet export from `path` and return an `AccountSigner`.
+ *
+ * Throws `WalletExportError` on any failure. Never returns a partial signer.
+ */
+export function loadWalletExportSigner(path: string, deps: WalletExportLoaderDeps = {}): AccountSigner {
+  return buildSigner(parseWalletExport(path, deps), deps);
+}
+
+/**
+ * Read a wallet export and return its account address.
+ *
+ * The address is validated for shape (non-empty string) but NOT canonicalized
+ * here — callers that compare addresses must canonicalize both sides. Never
+ * logs the address.
+ */
+export function getWalletExportAddress(path: string, deps: WalletExportLoaderDeps = {}): string {
+  const exported = parseWalletExport(path, deps);
+  const address = (exported as { value?: { address?: unknown } }).value?.address;
+  if (typeof address !== 'string' || address.length === 0) {
+    throw new WalletExportError('wallet export has no address');
+  }
+  return address;
+}
+
+/**
+ * Load a wallet export as the sponsor signer, refusing to build a signer when
+ * the export's address does not match the configured sponsor.
+ *
+ * The check runs BEFORE the signer is built, so a mismatched export never
+ * yields a usable signer. Comparison is canonical (base58 round-trip on both
+ * sides). Error messages are generic and contain no address.
+ *
+ * Throws `WalletExportError` with one of:
+ * - 'configured sponsor address is not a valid account address'
+ * - 'wallet export address is not a valid account address'
+ * - 'wallet export address does not match configured sponsor address'
+ */
+export function loadSponsorExportSigner(
+  path: string,
+  sponsorAddress: string,
+  deps: WalletExportLoaderDeps = {},
+): AccountSigner {
+  const configured = canonicalAddress(sponsorAddress);
+  if (configured === null) {
+    throw new WalletExportError('configured sponsor address is not a valid account address');
+  }
+  const exported = parseWalletExport(path, deps);
+  const rawAddress = (exported as { value?: { address?: unknown } }).value?.address;
+  const exportAddr = canonicalAddress(rawAddress);
+  if (exportAddr === null) {
+    throw new WalletExportError('wallet export address is not a valid account address');
+  }
+  if (exportAddr !== configured) {
+    throw new WalletExportError('wallet export address does not match configured sponsor address');
+  }
+  return buildSigner(exported, deps);
 }

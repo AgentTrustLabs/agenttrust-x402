@@ -9,16 +9,32 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, chmodSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
+const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
+const RECIPIENT = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const DIGEST = 'a'.repeat(64);
 const FACILITATOR_UID = 1001;
 const FACILITATOR_GID = 1002;
 const OWNER_USER = 'authowner';
+
+/** Signable fixture transaction (protocol v2: the client sends this, not a bare digest). */
+const fixtureTx = {
+  version: 1,
+  header: {
+    sender: SENDER,
+    nonce: 7,
+    expiry: Math.floor(Date.now() / 1000) + 600,
+    executionEnergyAmount: 300,
+    numSignatures: 1,
+    sponsor: { account: SPONSOR, numSignatures: 1 },
+  },
+  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '250000' },
+  signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
+};
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -36,8 +52,10 @@ if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
 const mkBase = () => {
   const base = mkdtempSync(join(tmpdir(), 't44-'));
   const sock = join(base, 'sign.sock');
+  const txFile = join(base, 'tx.json');
   mkdirSync(base, { recursive: true });
-  return { base, sock };
+  writeFileSync(txFile, JSON.stringify(fixtureTx));
+  return { base, sock, txFile };
 };
 
 const chownGroup = async (path: string) => {
@@ -72,9 +90,9 @@ const stopProc = async (proc: ReturnType<typeof spawn>) => {
   if (!proc.killed) proc.kill('SIGKILL');
 };
 
-const runClient = (sock: string, expectedUid: number, digest: string): Promise<{ ok: boolean; signature?: string; error?: string; pid?: number; uid?: number }> => {
+const runClient = (sock: string, expectedUid: number, txFile: string): Promise<{ ok: boolean; signature?: string; error?: string; pid?: number; uid?: number }> => {
   return new Promise((resolve) => {
-    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, NETWORK, String(expectedUid), digest], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, NETWORK, String(expectedUid), txFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     p.on('close', () => {
@@ -90,10 +108,10 @@ const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
 // ── 1. valid request → fake signature ──────────────────────────────────────
 
 test('01. valid request returns fake signature (cross-process)', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const { proc, ready } = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, DIGEST);
+    const r = await runClient(sock, FACILITATOR_UID, txFile);
     check('01. client ok', r.ok === true, r.error ?? r.signature?.slice(0, 12));
     check('01. signature returned', typeof r.signature === 'string' && r.signature.length === 128, r.signature?.slice(0, 12));
     // distinct PIDs prove process separation
@@ -107,11 +125,11 @@ test('01. valid request returns fake signature (cross-process)', async () => {
 // ── 2. wrong sponsor ────────────────────────────────────────────────────────
 
 test('02. wrong sponsor → rejected (cross-process)', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
     // client sends a different sponsor; service rejects
-    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', NETWORK, String(FACILITATOR_UID), DIGEST], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', NETWORK, String(FACILITATOR_UID), txFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     await new Promise((r) => p.on('close', r));
@@ -127,10 +145,10 @@ test('02. wrong sponsor → rejected (cross-process)', async () => {
 // ── 3. wrong network ────────────────────────────────────────────────────────
 
 test('03. wrong network → rejected (cross-process)', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
-    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, 'ccd:0000', String(FACILITATOR_UID), DIGEST], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, 'ccd:0000', String(FACILITATOR_UID), txFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     await new Promise((r) => p.on('close', r));
@@ -146,7 +164,7 @@ test('03. wrong network → rejected (cross-process)', async () => {
 // ── 4. malformed protocol → rejected ───────────────────────────────────────
 
 test('04. malformed message rejected (service-side)', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
     // Send a raw malformed line via nc-like approach using node
@@ -163,8 +181,8 @@ test('04. malformed message rejected (service-side)', async () => {
 // ── 5. service unavailable → fail closed ────────────────────────────────────
 
 test('05. service unavailable → client fails closed (no local fallback)', async () => {
-  const { base, sock } = mkBase();
-  const r = await runClient(sock, FACILITATOR_UID, DIGEST);
+  const { base, sock, txFile } = mkBase();
+  const r = await runClient(sock, FACILITATOR_UID, txFile);
   check('05. client fails closed', r.ok === false, r.error);
   check('05. unavailable error', /unavailable/i.test(r.error ?? ''), r.error);
   rmSync(base, { recursive: true, force: true });
@@ -173,11 +191,11 @@ test('05. service unavailable → client fails closed (no local fallback)', asyn
 // ── 6. timeout → no local fallback ─────────────────────────────────────────
 
 test('06. timeout enforced (client-side)', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
     // Normal request succeeds within timeout
-    const r = await runClient(sock, FACILITATOR_UID, DIGEST);
+    const r = await runClient(sock, FACILITATOR_UID, txFile);
     check('06. valid request still works', r.ok === true, r.error);
   } finally {
     await stopProc(proc);
@@ -188,13 +206,13 @@ test('06. timeout enforced (client-side)', async () => {
 // ── 7. service restart → new request accepted ──────────────────────────────
 
 test('07. service restart accepts a new request', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const s1 = await startService(sock, FACILITATOR_UID);
   await stopProc(s1.proc);
   await sleep(500);
   const s2 = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, DIGEST);
+    const r = await runClient(sock, FACILITATOR_UID, txFile);
     check('07. post-restart request succeeds', r.ok === true, r.error);
   } finally {
     await stopProc(s2.proc);
@@ -205,7 +223,7 @@ test('07. service restart accepts a new request', async () => {
 // ── 8. stale socket recovery ────────────────────────────────────────────────
 
 test('08. stale socket replaced on restart', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const s1 = await startService(sock, FACILITATOR_UID);
   // kill without cleanup
   s1.proc.kill('SIGKILL');
@@ -213,7 +231,7 @@ test('08. stale socket replaced on restart', async () => {
   // socket file may linger; service should handle it
   const s2 = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, DIGEST);
+    const r = await runClient(sock, FACILITATOR_UID, txFile);
     check('08. post-crash request succeeds', r.ok === true, r.error);
   } finally {
     await stopProc(s2.proc);
@@ -224,10 +242,10 @@ test('08. stale socket replaced on restart', async () => {
 // ── 9. distinct PIDs prove process separation ───────────────────────────────
 
 test('09. distinct PIDs prove process separation', async () => {
-  const { base, sock } = mkBase();
+  const { base, sock, txFile } = mkBase();
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, DIGEST);
+    const r = await runClient(sock, FACILITATOR_UID, txFile);
     check('09. distinct PIDs', r.pid !== proc.pid && r.pid !== undefined, `client=${r.pid} service=${proc.pid}`);
   } finally {
     await stopProc(proc);

@@ -106,8 +106,16 @@ export interface SponsorSigner {
     txHash: string;
     status: 'pending' | 'committed' | 'finalized' | 'failed';
     sender: string;
-    simulated: true;
+    simulated: boolean;
   }>;
+  /**
+   * Whether this signer's outcomes are simulated. `true` for the mock and the
+   * ledger (which wraps the mock); `false` for the IPC signer, which settles
+   * through the real signing service and a real submitter. FacilitatorCore reads
+   * this for `extra.simulated` in its responses. A signer that omits it is
+   * treated as simulated — the burden is on a real signer to declare itself real.
+   */
+  simulated?: boolean;
   getAccountInfo(address: string): Promise<Record<string, unknown>>;
   getTokenBalance(address: string, tokenId: string): Promise<bigint | undefined>;
   getTokenDecimals(tokenId: string): Promise<number>;
@@ -138,6 +146,10 @@ export function createMockSigner(opts: MockSignerOptions): SponsorSigner {
 
   return {
     info: () => ({ address: placeholder, network: opts.network, canSign: false }),
+
+    // Mock outcomes are simulated, never real. Declared explicitly so
+    // FacilitatorCore reports `extra.simulated: true` for mock settlements.
+    simulated: true,
 
     async addSponsorSignature(txJson) {
       // The mock cannot sign. It returns the input marked as simulated/mocked, but it
@@ -235,6 +247,8 @@ export function createLedgerSigner(opts: LedgerSignerOptions): SponsorSigner {
 
   return {
     info: () => inner.info(),
+    // Wraps the mock: outcomes are simulated, never real.
+    simulated: true,
     addSponsorSignature: tx => inner.addSponsorSignature(tx),
     async submitTransaction(txJson) {
       // Recorded BEFORE the attempt: even a throwing submission is an attempt, and the count

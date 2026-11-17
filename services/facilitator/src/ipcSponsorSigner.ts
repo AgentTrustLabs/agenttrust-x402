@@ -6,7 +6,12 @@
  * holding key material.
  *
  * What this DOES:
- *   - addSponsorSignature() → SDK `Transaction.sponsor()` → IPC `sign(digest)` → signature
+ *   - addSponsorSignature() → SDK `Transaction.sponsor()` → IPC `sign(digest)` → signature.
+ *     Each call constructs a FRESH `IpcAccountSigner` bound to THAT transaction
+ *     (protocol v2): the digest the SDK computes is checked against the bound
+ *     transaction client-side, and the service re-verifies it from the parsed
+ *     transaction before signing. A shared signer with a mutable bound transaction
+ *     would be racy across concurrent settles, so there is none.
  *   - with an injected `ConcordiumTransactionSubmitter`, `submitTransaction()` and
  *     `waitForFinalization()` delegate to the adapter (V1 `finalize` + `sendTransaction`).
  *
@@ -22,7 +27,7 @@
  */
 
 import { ConfigurationError } from './config.js';
-import { createSdkSponsorSigner } from './sdkSponsorSigner.js';
+import { createSdkSponsorSigner, isSignedTransactionWrapper } from './sdkSponsorSigner.js';
 import { IpcAccountSigner } from './signingService.js';
 import type { SponsorSigner } from './signer.js';
 import { ConcordiumTransactionSubmitter } from './concordiumTransactionSubmitter.js';
@@ -67,6 +72,10 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
     throw new ConfigurationError('signing service UID must be an integer between 1 and 65533');
   }
 
+  // The shared adapter is used ONLY for `validateContext`, which never signs.
+  // Its IpcAccountSigner has no transaction bound, so any signing attempt
+  // through it fails closed client-side ("no transaction bound"). Signing goes
+  // through a fresh per-call bound signer in `addSponsorSignature` below.
   const ipcSigner = new IpcAccountSigner({
     socketPath: opts.socketPath,
     expectedUid: opts.expectedUid,
@@ -120,7 +129,7 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
     txHash: string;
     status: 'pending' | 'committed' | 'finalized' | 'failed';
     sender: string;
-    simulated: true;
+    simulated: boolean;
   }> => {
     if (!submitter) return noSubmit('waitForFinalization');
     const observed = await submitter.awaitFinalization(
@@ -129,16 +138,18 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
     );
     // Outcome → SponsorSigner status. Lossy by necessity: the shared signer
     // contract has four values. Mapping is documented in docs/architecture.md.
+    // `simulated: false`: this signer settles through the real IPC service and a
+    // real submitter — a finalized outcome here is a chain outcome, not a mock.
     switch (observed.status) {
       case 'finalized':
-        return { txHash, status: 'finalized', sender: opts.sponsorAddress, simulated: true };
+        return { txHash, status: 'finalized', sender: opts.sponsorAddress, simulated: false };
       case 'rejected':
         // A finalized rejection is terminal and is reported as `failed`, which
         // FacilitatorCore reconciles as `transaction_failed`.
-        return { txHash, status: 'failed', sender: opts.sponsorAddress, simulated: true };
+        return { txHash, status: 'failed', sender: opts.sponsorAddress, simulated: false };
       case 'timeout':
         // Includes `cancelled`. Not final; the caller must treat it as pending.
-        return { txHash, status: 'pending', sender: opts.sponsorAddress, simulated: true };
+        return { txHash, status: 'pending', sender: opts.sponsorAddress, simulated: false };
       case 'transport_error':
         // Ambiguous: the outcome is genuinely unknown. Throwing keeps it distinguishable
         // from a bounded timeout; FacilitatorCore marks the payment pending, never success.
@@ -158,10 +169,42 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
       // itself still holds no key material.
       canSign: true,
     }),
-    addSponsorSignature: (txJson: unknown) => sdkSigner.addSponsorSignature(txJson),
+    addSponsorSignature: (txJson: unknown) => {
+      // Per-call binding (protocol v2): a FRESH IpcAccountSigner bound to THIS
+      // transaction, and a FRESH sdk adapter wrapping it. The SDK computes the
+      // digest from this transaction; the bound signer checks it client-side and
+      // the service re-verifies it from the parsed transaction. No shared mutable
+      // binding exists, so concurrent settles can never cross-bind.
+      //
+      // Bind the BARE transaction, not the x402 `{ signedTransaction }` wrapper:
+      // the SDK adapter unwraps the wrapper before calling Transaction.sponsor,
+      // so the digest is computed from the bare form. Binding the wrapper would
+      // make the client-side digest check fail on every call.
+      const bare = isSignedTransactionWrapper(txJson) ? txJson.signedTransaction : txJson;
+      const bound = new IpcAccountSigner({
+        socketPath: opts.socketPath,
+        expectedUid: opts.expectedUid,
+        sponsorAddress: opts.sponsorAddress,
+        network: opts.network,
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+        transaction: bare,
+      });
+      const boundSdk = createSdkSponsorSigner({
+        sponsorAddress: opts.sponsorAddress,
+        network: opts.network,
+        accountSigner: bound,
+        maxEnergy: opts.maxEnergy,
+        maxFeeMicroCcd: opts.maxFeeMicroCcd,
+        ...(opts.now !== undefined ? { now: opts.now } : {}),
+      });
+      return boundSdk.addSponsorSignature(txJson);
+    },
     validateContext: (ctx) => sdkSigner.validateContext(ctx),
     submitTransaction,
     waitForFinalization,
+    // This signer settles through the real IPC service: its outcomes are real,
+    // never simulated. FacilitatorCore reads this flag for `extra.simulated`.
+    simulated: false,
     getAccountInfo: () => noSubmit('getAccountInfo'),
     getTokenBalance: () => noSubmit('getTokenBalance'),
     getTokenDecimals: () => noSubmit('getTokenDecimals'),

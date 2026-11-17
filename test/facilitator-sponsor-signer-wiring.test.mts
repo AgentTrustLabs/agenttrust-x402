@@ -20,7 +20,8 @@ import { join } from 'node:path';
 import { eq, notOk, ok } from './helpers.mjs';
 import { ConfigurationError, loadConfig } from '../services/facilitator/src/config.js';
 import { createIpcSponsorSigner } from '../services/facilitator/src/ipcSponsorSigner.js';
-import { IpcAccountSigner, probeSigningService } from '../services/facilitator/src/signingService.js';
+import { IpcAccountSigner, probeSigningService, signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 import { startFacilitator } from '../services/facilitator/src/server.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
@@ -105,9 +106,28 @@ const rawServer = async (sock: string, handler: (conn: Socket) => void) => {
   };
 };
 
-const digestBytes = (): ArrayBuffer => {
-  const b = Buffer.from('11'.repeat(32), 'hex');
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
+/** The digest of the envelope's signed transaction (protocol v2 binding). */
+const envelopeDigest = (): ArrayBuffer =>
+  digestHexToArrayBuffer(signingDigestOf(envelope().paymentPayload.payload.signedTransaction));
+
+const ipcSignerFor = (sock: string, timeoutMs = 600) =>
+  new IpcAccountSigner({
+    socketPath: sock,
+    expectedUid: SVC_UID,
+    sponsorAddress: SPONSOR,
+    network: NETWORK,
+    timeoutMs,
+    transaction: envelope().paymentPayload.payload.signedTransaction,
+  });
+
+const expectSignError = async (sock: string, re: RegExp, label: string, timeoutMs = 600) => {
+  let message = '';
+  try {
+    await ipcSignerFor(sock, timeoutMs).sign(envelopeDigest());
+  } catch (e) {
+    message = (e as Error).message;
+  }
+  ok(re.test(message), `${label}: got "${message}"`);
 };
 
 /** x402 V2 envelope in the SDK signable shape, sponsor slot pre-declared. */
@@ -141,25 +161,6 @@ const envelope = () => {
     },
   };
   return { x402Version: 2, paymentPayload: payload, paymentRequirements: payload.accepted };
-};
-
-const ipcSignerFor = (sock: string, timeoutMs = 600) =>
-  new IpcAccountSigner({
-    socketPath: sock,
-    expectedUid: SVC_UID,
-    sponsorAddress: SPONSOR,
-    network: NETWORK,
-    timeoutMs,
-  });
-
-const expectSignError = async (sock: string, re: RegExp, label: string, timeoutMs = 600) => {
-  let message = '';
-  try {
-    await ipcSignerFor(sock, timeoutMs).sign(digestBytes());
-  } catch (e) {
-    message = (e as Error).message;
-  }
-  ok(re.test(message), `${label}: got "${message}"`);
 };
 
 // ═══ A. configuration contract ══════════════════════════════════════════════

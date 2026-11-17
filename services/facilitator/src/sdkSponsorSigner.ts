@@ -68,6 +68,10 @@ export function validateSponsorAddress(address: string): string | null {
 /**
  * Validate sponsor context before signing. Returns null on success, an error message
  * on failure. Pure function — no I/O, no signing.
+ *
+ * `ctx.feeMicroCcd` is an ESTIMATE (recomputed energy x the fixed estimate rate —
+ * see `energy.ts`), not a guaranteed maximum actual chain fee; the cap check here
+ * is therefore an estimate-based policy, and the energy cap is the hard bound.
  */
 export function validateSponsorContext(
   opts: Pick<SdkSponsorSignerOptions, 'sponsorAddress' | 'network' | 'maxEnergy' | 'maxFeeMicroCcd'>,
@@ -93,7 +97,7 @@ export function validateSponsorContext(
     return `energy ${ctx.energy} exceeds cap ${opts.maxEnergy}`;
   }
   if (ctx.feeMicroCcd > opts.maxFeeMicroCcd) {
-    return `fee ${ctx.feeMicroCcd} exceeds cap ${opts.maxFeeMicroCcd}`;
+    return `estimated fee ${ctx.feeMicroCcd} exceeds cap ${opts.maxFeeMicroCcd}`;
   }
   const addrErr = validateSponsorAddress(ctx.sponsor);
   if (addrErr) return addrErr;
@@ -103,8 +107,12 @@ export function validateSponsorContext(
 
 /**
  * True when the value is an x402 payment payload wrapping a signed transaction.
+ *
+ * Exported so the IPC signer can bind the BARE transaction (the shape the SDK
+ * actually signs) rather than the wrapper: the digest is computed from the bare
+ * form, so binding the wrapper would make every client-side digest check fail.
  */
-function isSignedTransactionWrapper(value: unknown): value is { signedTransaction: unknown } {
+export function isSignedTransactionWrapper(value: unknown): value is { signedTransaction: unknown } {
   return (
     typeof value === 'object' &&
     value !== null &&

@@ -1,45 +1,114 @@
 /**
- * Sponsor signing service (mock-only foundation).
+ * Signing service — IPC server + client for the Ed25519 sponsor signer.
  *
  * A separate service that holds an injected `AccountSigner` and exposes signing over a
  * narrow IPC contract. The facilitator never sees the signer or its key material; it
  * talks to this service through `IpcAccountSigner`, which implements the SDK's
  * `AccountSigner` interface.
  *
- * Invariants:
- *   - No private key, wallet, or credential material crosses the IPC boundary.
- *   - Only the digest (32 bytes) is sent; the full transaction is NOT transmitted.
- *   - The service validates the digest, sponsor, network, and context before signing.
- *   - SO_PEERCRED authenticates the peer UID.
- *   - Replay protection via request ID (in-memory for the process lifecycle).
- *   - Fake deterministic signer for tests (no real signing).
+ * Security invariant (protocol v2): **the digest is never trusted on its own.**
+ * Every sign request carries the full signable V1 transaction, and the service
+ * recomputes the digest from that transaction (`Transaction.signableFromJSON` →
+ * `Transaction.preFinalized` → `AccountTransactionV1.signDigest`) and compares it
+ * with the requested digest before signing anything. Every field the service
+ * validates — sponsor, sender, recipient, amount, energy, fee, expiry — is read
+ * from the PARSED transaction, so the validated properties are, by construction,
+ * properties of the transaction whose digest gets signed. The service signs the
+ * RECOMPUTED digest, never the caller-supplied one.
+ *
+ * Transfer-family validation covers BOTH transfer kinds the SDK can parse:
+ * `Transfer` and `TransferWithMemo` (same recipient + amount checks; the memo
+ * itself is opaque bytes committed by the digest). Every other transfer-family
+ * kind the protocol defines (`TransferWithSchedule`, `EncryptedAmountTransfer`,
+ * `TransferToEncrypted`, `TransferToPublic`, `EncryptedAmountTransferWithMemo`,
+ * `TransferWithScheduleAndMemo`) is NOT parseable by the installed SDK's
+ * `Payload.fromJSON` — `signableFromJSON` throws for them — so they are
+ * rejected as `invalid_transaction`, never silently accepted. Non-transfer
+ * payloads (DeployModule, InitContract, Update, UpdateCredentials, RegisterData,
+ * ConfigureDelegation, ConfigureBaker, TokenUpdate) carry no recipient/amount
+ * and pass this block by design; they still face the sponsor/sender/energy/
+ * fee/expiry checks.
+ *
+ * Fee check is an ESTIMATE-based policy, not a guaranteed maximum actual fee:
+ * the fee estimate is recomputed energy x `ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG`
+ * (see `energy.ts` for why no actual-fee guarantee is provable at this boundary).
+ * Energy caps are NOT weakened by this: the energy cap binds the recomputed
+ * energy directly, independent of the fee estimate.
+ *
+ * Replay handling is concurrency-safe: a requestId/fingerprint is RESERVED in the
+ * replay map (as a pending entry holding the in-flight promise) synchronously,
+ * before any asynchronous signing begins. A concurrent duplicate with the same
+ * fingerprint awaits the original result instead of signing twice; a concurrent
+ * duplicate with a different fingerprint is rejected with `request_id_reuse`
+ * without waiting. Completed entries return the original result; a signing
+ * failure is stored as a deterministic rejection, so a retry returns the same
+ * rejection and never re-signs. The pending promise is never rejected (every
+ * failure path resolves to a `SigningResponse`), so there are no unhandled
+ * rejections and no lock to deadlock on — the map entry is the only shared
+ * state, and it transitions pending → done exactly once.
+ *
+ * What this does NOT prove (honest residual, inherent to the architecture):
+ * - It does not prove "this is the transaction the Owner authorized" — the owner's
+ *   approval lives in the facilitator's durable payment store, keyed by payment
+ *   digest, and this service has no access to it. A facilitator that asks the
+ *   service to sign a transaction the Owner never approved is a facilitator bug,
+ *   not a signing-service bug; the service's job is to make sure the digest it
+ *   signs is the hash of the transaction it validated.
+ * - The network is a config-equality check (`req.network === opts.network`), NOT
+ *   cryptographically bound: the sponsor digest commits to expiry, sender, nonce,
+ *   payload size, recomputed energy, sponsor, and the full payload, but NOT to the
+ *   network/genesis. A wrong-network transaction would be rejected by the node at
+ *   submission, not by this service.
+ *
+ * Protocol v1 (digest-only, with an untrusted `context` field) is GONE. A v1
+ * request is rejected as `unsupported_protocol`, and a request carrying a `context`
+ * key is rejected as `malformed_request`: metadata the signer cannot verify must
+ * not travel with the request at all.
+ *
+ * Process boundary: the facilitator (uid 1001, gid 1002 `authclients`) connects
+ * over a Unix socket; the service enforces the peer uid via `SO_PEERCRED`
+ * (`scripts/authz-peercred`). The service does NOT re-check the client's uid —
+ * the kernel does that at connect time.
+ *
+ * Test-only: `createFakeSigner` generates an ephemeral keypair in-process.
+ * No sponsor key, no wallet, no funding, no broadcast, no settlement.
  */
-
-import { createServer, type Socket } from 'node:net';
+import { createHash, randomUUID } from 'node:crypto';
+import { createServer, type Server, type Socket } from 'node:net';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { sign as edSign, generateKeyPairSync } from 'node:crypto';
+import { AccountAddress, AccountTransactionType, Transaction } from '@concordium/web-sdk';
+import { AccountTransactionV1 } from '@concordium/web-sdk/transactions';
 import type { AccountSigner, AccountTransactionSignature } from '@concordium/web-sdk';
+import { ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
 
 // ─── protocol ─────────────────────────────────────────────────────────────
 
-export const SIGNING_PROTOCOL_VERSION = 1;
+export const SIGNING_PROTOCOL_VERSION = 2;
 export const SIGNING_MAX_MSG = 64 * 1024;
+
+/**
+ * Default caps, mirroring the facilitator config defaults (`config.ts`:
+ * `FACILITATOR_MAX_ENERGY` / `FACILITATOR_MAX_FEE_MICROCCD`). The production
+ * launcher passes explicit values; these defaults keep standalone harnesses and
+ * tests safe when no caps are given.
+ */
+export const DEFAULT_SIGNING_MAX_ENERGY = 1000n;
+export const DEFAULT_SIGNING_MAX_FEE_MICROCCD = 10_000_000n;
 
 export interface SigningRequest {
   protocolVersion: number;
   requestId: string;
   operation: 'sign';
   digest: string; // 64-char hex (32 bytes)
+  /**
+   * The signable V1 transaction whose digest MUST equal `digest`. REQUIRED.
+   * The service parses it, recomputes the digest from it, and validates every
+   * field from the parsed form. A request without a transaction is rejected.
+   */
+  transaction: unknown;
   sponsor: string; // base58check sponsor address
   network: string; // CAIP-2
-  context?: {
-    sender?: string;
-    recipient?: string;
-    amount?: string;
-    asset?: string;
-    expiry?: number;
-    energy?: string;
-  };
 }
 
 export interface SigningResponse {
@@ -54,8 +123,7 @@ export interface SigningResponse {
 // ─── validation ────────────────────────────────────────────────────────────
 
 const FORBIDDEN = new Set(['decision', 'approved', 'outcome', 'reason', 'result', 'signature']);
-const REQ_ALLOWED = new Set(['protocolVersion', 'requestId', 'operation', 'digest', 'sponsor', 'network', 'context']);
-const CTX_ALLOWED = new Set(['sender', 'recipient', 'amount', 'asset', 'expiry', 'energy']);
+const REQ_ALLOWED = new Set(['protocolVersion', 'requestId', 'operation', 'digest', 'sponsor', 'network', 'transaction']);
 
 export function validateSigningRequest(req: unknown): { ok: true; value: SigningRequest } | { ok: false; reason: string } {
   if (typeof req !== 'object' || req === null || Array.isArray(req)) {
@@ -76,23 +144,268 @@ export function validateSigningRequest(req: unknown): { ok: true; value: Signing
   if (typeof r.digest !== 'string' || !/^[0-9a-fA-F]{64}$/.test(r.digest)) {
     return { ok: false, reason: 'invalid_digest' };
   }
+  if (r.transaction === undefined) {
+    return { ok: false, reason: 'missing_transaction' };
+  }
+  if (
+    typeof r.transaction !== 'object' ||
+    r.transaction === null ||
+    Array.isArray(r.transaction)
+  ) {
+    return { ok: false, reason: 'invalid_transaction' };
+  }
   if (typeof r.sponsor !== 'string' || r.sponsor.length === 0) {
     return { ok: false, reason: 'invalid_sponsor' };
   }
   if (typeof r.network !== 'string' || r.network.length === 0) {
     return { ok: false, reason: 'invalid_network' };
   }
-  if (r.context !== undefined) {
-    if (typeof r.context !== 'object' || r.context === null || Array.isArray(r.context)) {
-      return { ok: false, reason: 'malformed_request' };
+  return { ok: true, value: r as unknown as SigningRequest };
+}
+
+// ─── digest ↔ transaction binding ──────────────────────────────────────────
+
+/**
+ * Recompute the sponsor sign digest of a signable V1 transaction JSON.
+ * Throws on malformed input. This is the digest the service MUST sign: the
+ * caller-supplied digest is compared against it and rejected on mismatch.
+ * The digest commits to expiry, sender, nonce, payload size, RECOMPUTED energy
+ * (the header's claimed energy is ignored by `preFinalized`), sponsor, and the
+ * full payload (recipient + amount for transfers).
+ */
+export function signingDigestOf(transaction: unknown): string {
+  const signable = Transaction.signableFromJSON(transaction);
+  if (signable.version !== 1) {
+    throw new Error('only V1 transactions can be sponsor-signed');
+  }
+  const unsigned = Transaction.preFinalized(signable);
+  const digest = AccountTransactionV1.signDigest(unsigned);
+  return Buffer.from(digest).toString('hex');
+}
+
+/** Canonical base58 of an address string or an AccountAddress object, or null if invalid. */
+function canonicalAddress(value: unknown): string | null {
+  try {
+    if (typeof value === 'string') {
+      return AccountAddress.toBase58(AccountAddress.fromBase58(value));
     }
-    const c = r.context as Record<string, unknown>;
-    for (const k of Object.keys(c)) {
-      if (FORBIDDEN.has(k)) return { ok: false, reason: 'forbidden_field' };
-      if (!CTX_ALLOWED.has(k)) return { ok: false, reason: 'malformed_request' };
+    if (value && typeof value === 'object' && AccountAddress.instanceOf(value)) {
+      return AccountAddress.toBase58(value);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract a bigint amount from a parsed transfer payload, or null if absent/unparseable. */
+function amountOf(payload: unknown): bigint | null {
+  const p = payload as { amount?: unknown } | null;
+  if (!p || typeof p !== 'object') return null;
+  const a = p.amount;
+  if (a === undefined) return null;
+  if (typeof a === 'bigint') return a;
+  if (typeof a === 'string' || typeof a === 'number') {
+    try {
+      return BigInt(a);
+    } catch {
+      return null;
     }
   }
-  return { ok: true, value: r as unknown as SigningRequest };
+  if (typeof a === 'object' && a !== null) {
+    const m = (a as { microCcdAmount?: unknown }).microCcdAmount;
+    if (typeof m === 'bigint') return m;
+    if (typeof m === 'string' || typeof m === 'number') {
+      try {
+        return BigInt(m);
+      } catch {
+        return null;
+      }
+    }
+    const toJson = (a as { toJSON?: unknown }).toJSON;
+    if (typeof toJson === 'function') {
+      try {
+        const j = (toJson as () => unknown).call(a);
+        if (typeof j === 'string' || typeof j === 'number') return BigInt(j);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Extract the recomputed energy (bigint NRG) from an unsigned header, or null. */
+function energyOf(value: unknown): bigint | null {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') {
+    try {
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  }
+  if (value && typeof value === 'object') {
+    const v = (value as { value?: unknown }).value;
+    if (typeof v === 'bigint') return v;
+    if (typeof v === 'string' || typeof v === 'number') {
+      try {
+        return BigInt(v);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Extract the expiry epoch (seconds) from an unsigned header, or null. */
+function expiryOf(value: unknown): bigint | null {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' || typeof value === 'string') {
+    try {
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  }
+  if (value && typeof value === 'object') {
+    const s = (value as { expiryEpochSeconds?: unknown }).expiryEpochSeconds;
+    if (typeof s === 'bigint') return s;
+    if (typeof s === 'string' || typeof s === 'number') {
+      try {
+        return BigInt(s);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+type BindingCheck =
+  | { ok: true; digest: string; energy: bigint; estimatedFeeMicroCcd: bigint }
+  | { ok: false; reason: string; detail: string };
+
+/**
+ * Transfer-family payload kinds, as parsed by the SDK. Both carry a
+ * `toAddress` recipient and a CCD `amount`, so both get the same signing-
+ * boundary validation. Any other transfer-family kind cannot be parsed by
+ * `Transaction.signableFromJSON` at all (the SDK's `Payload.fromJSON` switch
+ * has no case for it) and therefore fails earlier, as `invalid_transaction`.
+ */
+const TRANSFER_FAMILY_TYPES: ReadonlySet<AccountTransactionType> = new Set([
+  AccountTransactionType.Transfer,
+  AccountTransactionType.TransferWithMemo,
+]);
+
+/**
+ * Validate that the requested digest is the hash of the given transaction, and
+ * that the transaction's own fields satisfy the signing policy. Every field is
+ * read from the PARSED transaction — never from request metadata — so the
+ * validated properties are, by construction, properties of the transaction
+ * whose digest gets signed.
+ */
+function checkTransactionBinding(
+  req: SigningRequest,
+  opts: SigningServiceOptions,
+  nowMs: number,
+): BindingCheck {
+  let signable: ReturnType<typeof Transaction.signableFromJSON>;
+  try {
+    signable = Transaction.signableFromJSON(req.transaction);
+  } catch {
+    return { ok: false, reason: 'invalid_transaction', detail: 'transaction is not a valid signable V1 transaction' };
+  }
+  if (signable.version !== 1) {
+    return { ok: false, reason: 'invalid_transaction', detail: 'only V1 transactions can be sponsor-signed' };
+  }
+  let unsigned: ReturnType<typeof Transaction.preFinalized>;
+  let digest: string;
+  try {
+    unsigned = Transaction.preFinalized(signable);
+    digest = Buffer.from(AccountTransactionV1.signDigest(unsigned)).toString('hex');
+  } catch {
+    return { ok: false, reason: 'invalid_transaction', detail: 'transaction cannot be finalized for signing' };
+  }
+  if (digest !== req.digest.toLowerCase()) {
+    return { ok: false, reason: 'digest_mismatch', detail: 'digest does not match the transaction' };
+  }
+  // Sponsor — from the transaction itself, never from the request metadata.
+  const sponsorAddr = canonicalAddress(unsigned.header.sponsor);
+  if (sponsorAddr === null) {
+    return { ok: false, reason: 'wrong_sponsor', detail: 'transaction has no sponsor' };
+  }
+  if (sponsorAddr !== canonicalAddress(opts.sponsorAddress)) {
+    return { ok: false, reason: 'wrong_sponsor', detail: 'transaction sponsor does not match the configured sponsor' };
+  }
+  // Sender — present, and never the sponsor (the sponsor pays for someone else's tx).
+  const senderAddr = canonicalAddress(unsigned.header.sender);
+  if (senderAddr === null) {
+    return { ok: false, reason: 'sender_missing', detail: 'transaction has no sender' };
+  }
+  if (senderAddr === sponsorAddr) {
+    return { ok: false, reason: 'sender_equals_sponsor', detail: 'sender must not be the sponsor' };
+  }
+  // Transfer-family payloads: recipient + amount are committed by the digest;
+  // validate them. Covers Transfer AND TransferWithMemo — the memo is opaque
+  // bytes already committed by the digest, so it needs no separate check.
+  // Non-transfer payloads have no recipient/amount and skip this block.
+  if (TRANSFER_FAMILY_TYPES.has(signable.payload.type)) {
+    const to = (signable.payload as { toAddress?: unknown }).toAddress;
+    if (to === undefined) {
+      return { ok: false, reason: 'recipient_missing', detail: 'transfer has no recipient' };
+    }
+    const recipientAddr = canonicalAddress(to);
+    if (recipientAddr === null) {
+      return { ok: false, reason: 'recipient_malformed', detail: 'recipient is not a valid account address' };
+    }
+    if (recipientAddr === sponsorAddr) {
+      return { ok: false, reason: 'recipient_equals_sponsor', detail: 'recipient must not be the sponsor' };
+    }
+    const amount = amountOf(signable.payload);
+    if (amount === null) {
+      return { ok: false, reason: 'amount_missing', detail: 'transfer has no amount' };
+    }
+    if (amount <= 0n) {
+      return { ok: false, reason: 'amount_invalid', detail: 'amount must be greater than zero' };
+    }
+  }
+  // Energy — the RECOMPUTED value from the transaction, never the header claim.
+  const energy = energyOf(unsigned.header.energyAmount);
+  if (energy === null) {
+    return { ok: false, reason: 'energy_missing', detail: 'transaction has no energy amount' };
+  }
+  if (energy <= 0n) {
+    return { ok: false, reason: 'energy_invalid', detail: 'energy must be greater than zero' };
+  }
+  const maxEnergy = opts.maxEnergy ?? DEFAULT_SIGNING_MAX_ENERGY;
+  if (energy > maxEnergy) {
+    return { ok: false, reason: 'energy_exceeds_cap', detail: `energy ${energy} exceeds cap ${maxEnergy}` };
+  }
+  // Fee — ESTIMATE-based policy only (see `energy.ts`): recomputed energy x the
+  // fixed estimate rate. This bounds the estimate, not the actual on-chain fee,
+  // which the service cannot know at signing time. The energy cap above binds
+  // the recomputed energy directly and is unaffected by the fee estimate.
+  const estimatedFeeMicroCcd = energy * ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG;
+  const maxFee = opts.maxFeeMicroCcd ?? DEFAULT_SIGNING_MAX_FEE_MICROCCD;
+  if (estimatedFeeMicroCcd > maxFee) {
+    return { ok: false, reason: 'fee_exceeds_cap', detail: `estimated fee ${estimatedFeeMicroCcd} exceeds cap ${maxFee}` };
+  }
+  // Expiry — the transaction must still be alive when the service signs it.
+  const expiry = expiryOf(unsigned.header.expiry);
+  if (expiry === null || expiry * 1000n <= BigInt(nowMs)) {
+    return { ok: false, reason: 'transaction_expired', detail: 'transaction expiry is in the past' };
+  }
+  return { ok: true, digest, energy, estimatedFeeMicroCcd };
+}
+
+/** Fingerprint of a request's signable content, for replay detection. */
+function requestFingerprint(req: SigningRequest): string {
+  return createHash('sha256')
+    .update(req.digest)
+    .update(JSON.stringify(req.transaction))
+    .digest('hex');
 }
 
 // ─── fake signer ────────────────────────────────────────────────────────────
@@ -134,6 +447,16 @@ export interface SigningServiceOptions {
   peerCredBin?: string;
   /** Clock. */
   now?: () => number;
+  /** Maximum energy (NRG) a signed transaction may carry. Default 1000. */
+  maxEnergy?: bigint;
+  /**
+   * Maximum sponsor fee (microCCD) a signed transaction may cost, as an
+   * ESTIMATE-based policy (recomputed energy x the fixed estimate rate — see
+   * `energy.ts`). Default 10_000_000 (10 CCD). This is NOT a guaranteed maximum
+   * actual chain fee: passing the estimate does not prove the on-chain fee
+   * stays under the cap. The energy cap above is the hard bound.
+   */
+  maxFeeMicroCcd?: bigint;
 }
 
 export interface SigningService {
@@ -147,7 +470,21 @@ export interface SigningService {
 
 export function createSigningService(opts: SigningServiceOptions): SigningService {
   const now = opts.now ?? (() => Date.now());
-  const replay = new Map<string, SigningResponse>();
+  /**
+   * Replay store. A `pending` entry is the concurrency reservation: it is
+   * written synchronously, before any `await`, so a second concurrent request
+   * with the same requestId can never slip past the check and reach the
+   * signer. It holds the in-flight promise so a same-content duplicate awaits
+   * the original result instead of signing twice. It transitions to `done`
+   * exactly once, holding the original response (including rejections — a
+   * retry after a failure returns the same deterministic rejection and never
+   * re-signs). Entries are never evicted in this service's lifetime; that is
+   * pre-existing behavior, not a new retention policy.
+   */
+  type ReplayEntry =
+    | { status: 'pending'; fingerprint: string; promise: Promise<SigningResponse> }
+    | { status: 'done'; fingerprint: string; response: SigningResponse };
+  const replay = new Map<string, ReplayEntry>();
 
   const peerCredOf = (conn: Socket): { uid: number; gid: number; pid: number } | null => {
     const handle = (conn as any)._handle;
@@ -164,34 +501,81 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
     }
   };
 
-  const doSign = async (req: SigningRequest): Promise<SigningResponse> => {
-    // sponsor identity check
-    if (req.sponsor !== opts.sponsorAddress) {
-      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: req.requestId, outcome: 'rejected', signature: null, reason: 'wrong_sponsor', detail: `sponsor ${req.sponsor} != configured ${opts.sponsorAddress}` };
+  /**
+   * Binding + signing for one request. Pure work: validates the digest ↔
+   * transaction binding from the parsed transaction and signs the recomputed
+   * digest. NEVER touches the replay map — the caller (`doSign`) owns
+   * reservation and storage. Always resolves to a `SigningResponse`; it must
+   * never throw, so the pending reservation always transitions to `done`.
+   */
+  const runSign = async (req: SigningRequest): Promise<SigningResponse> => {
+    const rid = req.requestId;
+    // Digest ↔ transaction binding + field validation, from the parsed transaction.
+    const bound = checkTransactionBinding(req, opts, now());
+    if (!bound.ok) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: bound.reason, detail: bound.detail };
     }
-    // network check
-    if (req.network !== opts.network) {
-      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: req.requestId, outcome: 'rejected', signature: null, reason: 'wrong_network', detail: `network ${req.network} != configured ${opts.network}` };
-    }
-    // replay protection
-    const prior = replay.get(req.requestId);
-    if (prior) {
-      // Replayed request must return the original result.
-      return { ...prior, requestId: req.requestId };
-    }
-    // sign
+    // Sign the RECOMPUTED digest, never the caller-supplied one. The Buffer view
+    // (not `.buffer.slice`) is passed, so the signer reads exactly these 32 bytes.
     let signature: AccountTransactionSignature;
     try {
-      const digestBuffer = Buffer.from(req.digest, 'hex');
-      signature = await opts.accountSigner.sign(digestBuffer);
+      signature = await opts.accountSigner.sign(Buffer.from(bound.digest, 'hex'));
     } catch (e) {
-      const r: SigningResponse = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: req.requestId, outcome: 'rejected', signature: null, reason: 'signer_error', detail: (e as Error).message };
-      replay.set(req.requestId, r);
-      return r;
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'signer_error', detail: (e as Error).message };
     }
-    const r: SigningResponse = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: req.requestId, outcome: 'signed', signature, reason: null, detail: null };
-    replay.set(req.requestId, r);
-    return r;
+    return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'signed', signature, reason: null, detail: null };
+  };
+
+  const doSign = async (req: SigningRequest): Promise<SigningResponse> => {
+    const rid = req.requestId;
+    // Sponsor identity check (request metadata — the transaction's own sponsor
+    // is checked again in the binding step below, from the parsed transaction).
+    if (req.sponsor !== opts.sponsorAddress) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'wrong_sponsor', detail: `sponsor ${req.sponsor} != configured ${opts.sponsorAddress}` };
+    }
+    // Network check. Config equality only — NOT cryptographically bound by the
+    // digest (see the header comment). A wrong-network transaction would be
+    // rejected by the node at submission, not here.
+    if (req.network !== opts.network) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'wrong_network', detail: `network ${req.network} != configured ${opts.network}` };
+    }
+    // Replay protection: the same requestId must carry the same signable content.
+    // A reused requestId with DIFFERENT content is a protocol violation, not a replay.
+    // The reservation below is synchronous — everything up to `replay.set` runs
+    // without yielding — so two concurrent calls cannot both pass this check.
+    const fingerprint = requestFingerprint(req);
+    const prior = replay.get(rid);
+    if (prior) {
+      if (prior.fingerprint !== fingerprint) {
+        return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'protocol_error', signature: null, reason: 'request_id_reuse', detail: 'requestId already used with different content' };
+      }
+      if (prior.status === 'done') {
+        // Replayed request must return the original result.
+        return { ...prior.response, requestId: rid };
+      }
+      // Same requestId + same fingerprint while the original is still in flight:
+      // await the original result. Do not sign twice.
+      return prior.promise;
+    }
+    // Reserve BEFORE any asynchronous signing begins. The entry is written
+    // synchronously, so any concurrent duplicate sees it immediately.
+    let resolvePending!: (r: SigningResponse) => void;
+    const pending = new Promise<SigningResponse>((resolve) => {
+      resolvePending = resolve;
+    });
+    replay.set(rid, { status: 'pending', fingerprint, promise: pending });
+    let result: SigningResponse;
+    try {
+      result = await runSign(req);
+    } catch (e) {
+      // `runSign` is specified never to throw; this is defense-in-depth so a
+      // surprise throw (e.g. a throwing clock) still transitions the entry to
+      // `done` with a deterministic rejection instead of stranding waiters.
+      result = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'signer_error', detail: (e as Error).message ?? 'signing failed' };
+    }
+    replay.set(rid, { status: 'done', fingerprint, response: result });
+    resolvePending(result);
+    return result;
   };
 
   let server: ReturnType<typeof createServer> | null = null;
@@ -276,6 +660,13 @@ export interface IpcAccountSignerOptions {
   timeoutMs?: number;
   /** Clock. */
   now?: () => number;
+  /**
+   * The signable V1 transaction this signer is bound to. REQUIRED to sign: a bare
+   * digest is never sent. The digest passed to `sign()` must equal the recomputed
+   * digest of this transaction, checked client-side before anything crosses the
+   * socket; the service re-verifies it independently (the client is not trusted).
+   */
+  transaction?: unknown;
 }
 
 /**
@@ -289,6 +680,7 @@ export class IpcAccountSigner {
   private readonly sponsorAddress: string;
   private readonly network: string;
   private readonly timeoutMs: number;
+  private readonly transaction: unknown;
 
   constructor(opts: IpcAccountSignerOptions) {
     this.socketPath = opts.socketPath;
@@ -296,6 +688,7 @@ export class IpcAccountSigner {
     this.sponsorAddress = opts.sponsorAddress;
     this.network = opts.network;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+    this.transaction = opts.transaction;
   }
 
   getSignatureCount(): bigint {
@@ -303,14 +696,24 @@ export class IpcAccountSigner {
   }
 
   async sign(digest: ArrayBuffer): Promise<AccountTransactionSignature> {
-    const net = await import('node:net');
+    if (this.transaction === undefined) {
+      throw new Error('IpcAccountSigner: no transaction bound — refusing to sign a bare digest');
+    }
+    // Client-side binding: the digest must be the hash of the bound transaction.
+    // The service re-verifies this independently; the client is not trusted.
+    const boundDigest = signingDigestOf(this.transaction);
     const digestHex = Buffer.from(digest).toString('hex');
+    if (digestHex.toLowerCase() !== boundDigest) {
+      throw new Error('IpcAccountSigner: digest does not match the bound transaction');
+    }
+    const net = await import('node:net');
     const requestId = randomUUID();
     const request: SigningRequest = {
       protocolVersion: SIGNING_PROTOCOL_VERSION,
       requestId,
       operation: 'sign',
       digest: digestHex,
+      transaction: this.transaction,
       sponsor: this.sponsorAddress,
       network: this.network,
     };

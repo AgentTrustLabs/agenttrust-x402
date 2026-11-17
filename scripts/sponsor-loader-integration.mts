@@ -7,15 +7,17 @@
  *                 mechanics for that exact address. No real wallet material.
  *   <export-path> Load a maintainer-supplied wallet export from a local path.
  *
- * In both modes: no transaction construction, no signing of transactions, no broadcast.
- * Only a 32-byte dummy digest is signed (non-broadcast, non-transactional).
+ * In both modes: no broadcast, no settlement. A signable fixture transaction
+ * (never submitted) is signed over IPC so the service's digest↔transaction
+ * binding is exercised end to end. No real wallet material in synthetic mode.
  */
 
 import { mkdtempSync, rmSync, writeFileSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadWalletExportSigner } from '../services/facilitator/src/walletExportLoader.js';
-import { createSigningService, IpcAccountSigner } from '../services/facilitator/src/signingService.js';
+import { loadSponsorExportSigner } from '../services/facilitator/src/walletExportLoader.js';
+import { createSigningService, IpcAccountSigner, signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 
 const SPONSOR = '3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK';
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
@@ -78,18 +80,30 @@ try {
   check('01. export file exists', false, 'file not found at the given path');
 }
 
-// ── 2. load through the loader ───────────────────────────────────────
+// ── 2. load through the loader (with sponsor cross-check) ─────────────────
 let signer;
 try {
-  signer = loadWalletExportSigner(exportPath);
-  check('04. loadWalletExportSigner constructs a signer', typeof signer.sign === 'function');
+  // The export's address is cross-checked against the configured sponsor BEFORE
+  // the signer is built: a mismatched export refuses startup here.
+  signer = loadSponsorExportSigner(exportPath, SPONSOR);
+  check('04. loadSponsorExportSigner constructs a signer', typeof signer.sign === 'function');
 } catch (e) {
-  check('04. loadWalletExportSigner constructs a signer', false, (e as Error).message);
+  check('04. loadSponsorExportSigner constructs a signer', false, (e as Error).message);
   // Fail closed: do not continue with a partial signer.
   const failed = results.filter(([, p]) => !p).length;
   console.log(`\nsponsor-loader-integration: ${results.length - failed}/${results.length} passed, ${failed} failed`);
   cleanup();
   process.exit(2);
+}
+
+// ── 2b. a mismatched sponsor refuses load ───────────────────────────────────
+{
+  try {
+    loadSponsorExportSigner(exportPath, '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d');
+    check('04b. mismatched sponsor refuses load', false, 'unexpectedly loaded');
+  } catch (e) {
+    check('04b. mismatched sponsor refuses load', /does not match/.test((e as Error).message), (e as Error).message);
+  }
 }
 
 // ── 3. signature count ──────────────────────────────────────────────────────
@@ -126,7 +140,23 @@ await svc.listen(sock);
   check('09. signing service bound the configured Unix socket', st.isSocket());
 }
 
-// ── 6. non-broadcast digest self-test over IPC ──────────────────────────────
+// ── 6. non-broadcast transaction self-test over IPC ────────────────────────
+// Signable fixture transaction (never broadcast, never settled). The sponsor is
+// the export's account; sender and recipient are distinct test accounts.
+const fixtureTx = {
+  version: 1,
+  header: {
+    sender: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d',
+    nonce: 7,
+    expiry: Math.floor(Date.now() / 1000) + 600,
+    executionEnergyAmount: 300,
+    numSignatures: 1,
+    sponsor: { account: SPONSOR, numSignatures: 1 },
+  },
+  payload: { type: 'transfer', toAddress: '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8', amount: '250000' },
+  signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
+};
+const fixtureDigest = signingDigestOf(fixtureTx);
 try {
   const ipc = new IpcAccountSigner({
     socketPath: sock,
@@ -134,13 +164,13 @@ try {
     sponsorAddress: SPONSOR,
     network: CAIP2,
     timeoutMs: 5000,
+    transaction: fixtureTx,
   });
-  const digest = new Uint8Array(32).buffer; // all-zero dummy digest, not a transaction
-  const sig = await ipc.sign(digest);
+  const sig = await ipc.sign(digestHexToArrayBuffer(fixtureDigest));
   const credKeys = Object.keys(sig ?? {});
-  check('10. IPC digest signing returns a signature', credKeys.length === 1, `credentials=[${credKeys.join(',')}]`);
+  check('10. IPC transaction signing returns a signature', credKeys.length === 1, `credentials=[${credKeys.join(',')}]`);
 } catch (e) {
-  check('10. IPC digest signing returns a signature', false, (e as Error).message);
+  check('10. IPC transaction signing returns a signature', false, (e as Error).message);
 }
 
 // ── 7. wrong-sponsor refusal (fail-closed) ──────────────────────────────────
@@ -152,8 +182,9 @@ try {
       sponsorAddress: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d',
       network: CAIP2,
       timeoutMs: 5000,
+      transaction: fixtureTx,
     });
-    await bad.sign(new Uint8Array(32).buffer);
+    await bad.sign(digestHexToArrayBuffer(fixtureDigest));
     check('11. wrong sponsor is refused', false, 'unexpectedly signed');
   } catch (e) {
     check('11. wrong sponsor is refused', /wrong_sponsor/.test((e as Error).message), (e as Error).message);

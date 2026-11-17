@@ -77,7 +77,8 @@ export interface FacilitatorConfig {
   signingServiceTimeoutMs: number;
   /**
    * Maximum sponsor fee (microCCD) accepted per settlement. Validated as a
-   * non-negative integer. Default 10_000_000 (10 CCD).
+   * non-negative integer. Default 10_000_000 (10 CCD). This is an ESTIMATE-based
+   * policy (see `energy.ts`), NOT a guaranteed maximum actual chain fee.
    *
    * Evidence (live Testnet, protocol 10, `getBlockChainParameters`):
    *   exchange rate = euroPerEnergy(1/50000) × microGTUPerEuro(1316758697067716096/3671577513)
@@ -85,6 +86,13 @@ export interface FacilitatorConfig {
    *   Sponsored simple transfer energy = 603 NRG → 4.325 CCD at the live rate.
    *   The 10 CCD cap therefore covers up to ~1394 NRG with real headroom, and the
    *   conservative in-code estimate (8000 microCCD/NRG, see `core.ts`) covers ~1250 NRG.
+   *
+   * A protocol rate source EXISTS (chain parameters, above), but it does not make
+   * the signing boundary able to guarantee an actual fee: the signing service has
+   * no node transport and cannot fetch or validate a current rate at signing time,
+   * and a rate fetched at signing time can go stale before execution (the fee is
+   * settled at the execution-time rate). An actual fee guarantee therefore needs
+   * a separate design and remains UNRESOLVED; the energy cap is the hard bound.
    */
   maxFeeMicroCcd: bigint;
   /**

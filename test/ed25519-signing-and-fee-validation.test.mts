@@ -17,7 +17,8 @@ import { join } from 'node:path';
 import { eq, ok } from './helpers.mjs';
 import { AccountAddress, Transaction, buildBasicAccountSigner } from '@concordium/web-sdk';
 import { createIpcSponsorSigner } from '../services/facilitator/src/ipcSponsorSigner.js';
-import { IpcAccountSigner, probeSigningService } from '../services/facilitator/src/signingService.js';
+import { IpcAccountSigner, probeSigningService, signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 import { createSdkSponsorSigner, validateSponsorContext } from '../services/facilitator/src/sdkSponsorSigner.js';
 import { GrpcAccountInfoProvider } from '../services/facilitator/src/grpcAccountInfoProvider.js';
 import { makeFakeAccountInfo } from '../services/facilitator/src/senderVerifier.js';
@@ -80,13 +81,14 @@ const tmpsock = (tag: string) => {
   return { dir, sock: join(dir, 's.sock'), rm: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
-const ipcSignerFor = (sock: string, timeoutMs = 600) =>
+const ipcSignerFor = (sock: string, timeoutMs = 600, transaction: unknown = sponsoredTx()) =>
   new IpcAccountSigner({
     socketPath: sock,
     expectedUid: FACILITATOR_UID,
     sponsorAddress: SPONSOR,
     network: NETWORK,
     timeoutMs,
+    transaction,
   });
 
 /** A minimal, deterministic V1 sponsored transaction in the SDK signable shape. */
@@ -104,10 +106,8 @@ const sponsoredTx = (sponsorNumSigs = 1) => ({
   signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
 });
 
-const digest32 = (): ArrayBuffer => {
-  const b = Buffer.from('11'.repeat(32), 'hex');
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
-};
+/** The digest of the fixture transaction, as an ArrayBuffer (protocol v2 binding). */
+const fixtureDigest = (): ArrayBuffer => digestHexToArrayBuffer(signingDigestOf(sponsoredTx()));
 
 /** A server that accepts connections and hands each to `handler`; close() destroys all. */
 const rawServer = async (sock: string, handler: (conn: Socket) => void) => {
@@ -144,7 +144,7 @@ test('A02. two generated keypairs differ (no fixed test key)', () => {
   ok(a.publicKeyHex !== b.publicKeyHex, 'distinct public keys');
 });
 
-test('A03. the private seed never appears in any IPC request (digest only)', async () => {
+test('A03. the private seed never appears in any IPC request', async () => {
   const key = generateTestKey();
   const { sock, rm } = tmpsock('a03');
   let seen = '';
@@ -155,12 +155,13 @@ test('A03. the private seed never appears in any IPC request (digest only)', asy
     });
   });
   try {
-    try { await ipcSignerFor(sock, 300).sign(digest32()); } catch { /* expected */ }
+    try { await ipcSignerFor(sock, 300).sign(fixtureDigest()); } catch { /* expected */ }
     ok(!seen.includes(key.privateKeyHex), 'private seed absent from wire');
     ok(!seen.includes(key.publicKeyHex), 'public key absent from wire');
-    // The request carries a 64-hex digest, nothing else key-shaped.
+    // The request carries a 64-hex digest and the transaction it binds to.
     const m = seen.match(/"digest":"([0-9a-f]{64})"/);
     ok(m !== null, 'digest present');
+    ok(seen.includes('"transaction"'), 'transaction present');
   } finally {
     await srv.close();
     rm();
@@ -182,7 +183,7 @@ test('B02. validateContext rejects fee above cap', () => {
     { sponsorAddress: SPONSOR, network: NETWORK, maxEnergy: 100_000n, maxFeeMicroCcd: 1_000n },
     { network: NETWORK, sponsor: SPONSOR, recipient: RECIPIENT, energy: 300n, feeMicroCcd: 1_001n },
   );
-  ok(msg !== null && /fee .* exceeds cap/.test(msg), `rejected: ${String(msg)}`);
+  ok(msg !== null && /estimated fee .* exceeds cap/.test(msg), `rejected: ${String(msg)}`);
 });
 
 test('B03. validateContext rejects malformed/negative/unsafe values', () => {
@@ -227,7 +228,7 @@ test('B05. the pipeline invokes validateContext and fails closed on a fee breach
     getAccountInfo: inner.getAccountInfo,
     getTokenBalance: inner.getTokenBalance,
     getTokenDecimals: inner.getTokenDecimals,
-    validateContext: () => 'fee 99999999 exceeds cap 1000000',
+    validateContext: () => 'estimated fee 99999999 exceeds cap 1000000',
   };
   const core = new FacilitatorCore({
     network: NETWORK,
@@ -511,9 +512,10 @@ if (!hasIpc) {
       const wrongNetwork = new IpcAccountSigner({
         socketPath: esock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR,
         network: 'ccd:00000000000000000000000000000000', timeoutMs: 3_000,
+        transaction: sponsoredTx(1),
       });
       msg = '';
-      try { await wrongNetwork.sign(digest32()); } catch (e) { msg = (e as Error).message; }
+      try { await wrongNetwork.sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
       ok(/wrong_network/.test(msg), `wrong network refused: "${msg}"`);
     } finally {
       await stop(proc, esock);
@@ -547,7 +549,7 @@ if (!hasIpc) {
     const asrv = await rawServer(a.sock, () => {});
     try {
       let msg = '';
-      try { await ipcSignerFor(a.sock, 300).sign(digest32()); } catch (e) { msg = (e as Error).message; }
+      try { await ipcSignerFor(a.sock, 300).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
       ok(/signing service timeout/i.test(msg), `timeout: "${msg}"`);
     } finally { await asrv.close(); a.rm(); }
     // (b) crash: the peer exits mid-request
@@ -555,13 +557,13 @@ if (!hasIpc) {
     const bsrv = await rawServer(b.sock, (conn) => conn.once('data', () => conn.destroy()));
     try {
       let msg = '';
-      try { await ipcSignerFor(b.sock, 5_000).sign(digest32()); } catch (e) { msg = (e as Error).message; }
+      try { await ipcSignerFor(b.sock, 5_000).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
       ok(/closed the connection before responding/i.test(msg), `crash: "${msg}"`);
     } finally { await bsrv.close(); b.rm(); }
     // (c) connection refused
     const c = tmpsock('e06c');
     let msg = '';
-    try { await ipcSignerFor(c.sock, 300).sign(digest32()); } catch (e) { msg = (e as Error).message; }
+    try { await ipcSignerFor(c.sock, 300).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
     ok(/unavailable/i.test(msg), `refused: "${msg}"`);
     c.rm();
     // (d) real service: no local fallback
@@ -577,7 +579,7 @@ if (!hasIpc) {
     ok(/unavailable|timeout|closed the connection/i.test(msg), `no local fallback: "${msg}"`);
   });
 
-  test('E07. only the 32-byte digest crosses the socket (no transaction)', async () => {
+  test('E07. the transaction crosses the socket and the digest matches it', async () => {
     const key = generateTestKey();
     const { sock: esock, rm: erm } = tmpsock('e07');
     const proc = await startService(esock, FACILITATOR_UID, key);
@@ -589,23 +591,30 @@ if (!hasIpc) {
         conn.on('data', (chunk) => {
           wire += chunk.toString();
           conn.write(JSON.stringify({
-            protocolVersion: 1, requestId: JSON.parse(chunk.toString()).requestId,
+            protocolVersion: 2, requestId: JSON.parse(chunk.toString()).requestId,
             outcome: 'signed', signature: { 0: { 0: 'ff'.repeat(64) } }, reason: null, detail: null,
           }) + '\n');
         });
       });
       try {
+        const tx = sponsoredTx(1);
         await new IpcAccountSigner({
           socketPath: rsock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR,
-          network: NETWORK, timeoutMs: 1_000,
-        }).sign(digest32());
+          network: NETWORK, timeoutMs: 1_000, transaction: tx,
+        }).sign(digestHexToArrayBuffer(signingDigestOf(tx)));
       } finally {
         await rsrv.close();
         rrm();
       }
-      ok(wire.includes('"digest"'), 'digest present');
-      ok(!wire.includes('"signedTransaction"'), 'no transaction payload');
-      ok(!wire.includes('"payload"'), 'no transaction payload field');
+      // New invariant (protocol v2): the request carries the transaction, and the
+      // digest in the wire equals the transaction's recomputed digest — the
+      // property the signing service verifies before signing.
+      const req = JSON.parse(wire.trim());
+      eq(req.protocolVersion, 2, 'protocol v2');
+      ok(req.transaction !== undefined, 'transaction present');
+      eq(req.digest, signingDigestOf(req.transaction), 'digest equals the transaction recompute');
+      eq(req.transaction.payload.toAddress, RECIPIENT, 'recipient in the wire is the transaction recipient');
+      ok(!wire.includes(key.privateKeyHex), 'private seed absent from wire');
     } finally {
       await stop(proc, esock);
       erm();

@@ -23,6 +23,33 @@ export const CONSTANT_B = 1n;
 export const V1_SPONSORED_HEADER_SIZE = 94n;
 /** Base cost of a simple CCD transfer, from Concordium's `Cost.hs`. */
 export const SIMPLE_TRANSFER_BASE_COST = 300n;
+/**
+ * ESTIMATED sponsor fee, microCCD per NRG. Slightly above the measured
+ * Testnet rate (7939.534 microCCD/NRG). Shared by the facilitator core and the
+ * signing service so both enforce the SAME fee model: the core estimates the fee
+ * before signing, the service re-derives it from the transaction it hashed.
+ *
+ * ESTIMATE ONLY — this is NOT a guaranteed maximum actual chain fee (Option B,
+ * Task 10.1). Evidence:
+ * - The installed SDK exposes no energy-rate / fee-calculation API: there is no
+ *   `getEnergyRate` or fee-from-energy helper anywhere in `@concordium/web-sdk`
+ *   (only unrelated baker-commission fields). Nothing in the repo can query a
+ *   current protocol rate.
+ * - The rate is a MEASURED observation, not a protocol constant: the actual CCD
+ *   fee is energy x the chain's energy price, which is EUR-denominated and moves
+ *   with the CCD/EUR exchange rate set by chain updates. The codebase itself
+ *   records two different measured live rates (7939.534 here vs 7172.71 in
+ *   `config.ts`), i.e. the rate drifts between measurements.
+ * - The signing service has no node transport (no gRPC client, no rate source in
+ *   config, no freshness check), so it cannot obtain or validate a current rate
+ *   at signing time. A fixed-rate "guarantee" would be false.
+ * The `FACILITATOR_MAX_FEE_MICROCCD` cap therefore binds an ESTIMATE-based
+ * policy only: a transaction whose estimated fee exceeds the cap is refused,
+ * but passing the estimate does not prove the actual on-chain fee will stay
+ * under the cap. An actual fee guarantee needs a separate design (a trusted,
+ * fresh energy-rate source at settle time) and remains UNRESOLVED.
+ */
+export const ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG = 8000n;
 
 export function deriveEnergyExposure(
   signedTransaction: unknown,

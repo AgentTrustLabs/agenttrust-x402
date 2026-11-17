@@ -4,16 +4,37 @@
  * Proves the service contract: validation, SO_PEERCRED, replay, wrong sponsor/network,
  * signer failure, and that only valid requests reach the fake signer.
  *
+ * Protocol v2: every request carries the signable transaction and the service
+ * recomputes the digest from it — a request whose digest does not match its
+ * transaction is rejected before any signing happens.
+ *
  * Run: npx tsx test/signing-service.test.mts
  */
 
 import { eq, ok } from './helpers.mjs';
-import { createSigningService, createFakeSigner, validateSigningRequest } from '../services/facilitator/src/signingService.js';
+import { createSigningService, createFakeSigner, signingDigestOf, validateSigningRequest } from '../services/facilitator/src/signingService.js';
 import type { SigningRequest } from '../services/facilitator/src/signingService.js';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
+const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
+const RECIPIENT = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const DIGEST = 'a'.repeat(64);
+
+/** Signable fixture transaction: sponsor pays the fee for a sender→recipient transfer. */
+const fixtureTx = {
+  version: 1,
+  header: {
+    sender: SENDER,
+    nonce: 7,
+    expiry: Math.floor(Date.now() / 1000) + 600,
+    executionEnergyAmount: 300,
+    numSignatures: 1,
+    sponsor: { account: SPONSOR, numSignatures: 1 },
+  },
+  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '250000' },
+  signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
+};
+const DIGEST = signingDigestOf(fixtureTx);
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -30,10 +51,11 @@ const makeService = (over: { fakeSig?: string; behaviour?: 'sign-ok' | 'sign-thr
 };
 
 const validReq = (over: Partial<SigningRequest> = {}): SigningRequest => ({
-  protocolVersion: 1,
+  protocolVersion: 2,
   requestId: crypto.randomUUID(),
   operation: 'sign',
   digest: DIGEST,
+  transaction: fixtureTx,
   sponsor: SPONSOR,
   network: NETWORK,
   ...over,
@@ -84,7 +106,7 @@ test('04. wrong network → rejected', async () => {
 
 test('05. unsupported protocol → protocol_error', async () => {
   const svc = makeService();
-  const req = validReq({ protocolVersion: 2 });
+  const req = validReq({ protocolVersion: 1 });
   const res = await svc.sign(req);
   check('05. protocol_error', res.outcome === 'protocol_error', res.reason ?? '');
   eq(res.reason, 'unsupported_protocol', 'reason');
@@ -148,13 +170,13 @@ test('10. signer throws → rejected / signer_error', async () => {
 // ── 11. validateSigningRequest unit checks ──────────────────────────────────
 
 test('11. validateSigningRequest rejects unknown operation', () => {
-  const r = validateSigningRequest({ protocolVersion: 1, requestId: 'r', operation: 'exec', digest: DIGEST, sponsor: SPONSOR, network: NETWORK });
+  const r = validateSigningRequest({ protocolVersion: 2, requestId: 'r', operation: 'exec', digest: DIGEST, transaction: fixtureTx, sponsor: SPONSOR, network: NETWORK });
   ok(!r.ok, 'rejected');
   if (!r.ok) eq(r.reason, 'unknown_operation', 'reason');
 });
 
 test('12. validateSigningRequest rejects forbidden field', () => {
-  const r = validateSigningRequest({ protocolVersion: 1, requestId: 'r', operation: 'sign', digest: DIGEST, sponsor: SPONSOR, network: NETWORK, decision: 'approved' });
+  const r = validateSigningRequest({ protocolVersion: 2, requestId: 'r', operation: 'sign', digest: DIGEST, transaction: fixtureTx, sponsor: SPONSOR, network: NETWORK, decision: 'approved' });
   ok(!r.ok, 'rejected');
   if (!r.ok) eq(r.reason, 'forbidden_field', 'reason');
 });

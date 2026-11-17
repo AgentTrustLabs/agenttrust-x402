@@ -400,7 +400,7 @@ console.log('\n── D09-D14. cap enforcement at the signer boundary ──');
     'D10. one NRG above the cap is refused',
   );
   ok(
-    /fee .* exceeds cap/.test(String(validateSponsorContext(base, ctx({ feeMicroCcd: 10_000_001n })))),
+    /estimated fee .* exceeds cap/.test(String(validateSponsorContext(base, ctx({ feeMicroCcd: 10_000_001n })))),
     'D11. one microCCD above the fee cap is refused',
   );
   ok(
