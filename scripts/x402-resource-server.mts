@@ -87,6 +87,18 @@
  *                                   the loopback URL is used, as before.
  *   AGENTTRUST_X402_SENDER          optional: pin the expected sender
  *   AGENTTRUST_X402_SPONSOR         optional: pin the expected sponsor
+ *   AGENTTRUST_CORS_ORIGINS         optional: comma-separated exact origins
+ *                                   allowed to call the API cross-origin
+ *                                   (the Vercel frontend), e.g.
+ *                                   https://agenttrust.vercel.app,
+ *                                   https://agenttrust-git-preview-xyz.vercel.app
+ *                                   No `*`, no `*.vercel.app` wildcard: a
+ *                                   wildcard or malformed entry fails
+ *                                   startup. Unset = CORS disabled (the
+ *                                   server behaves exactly as before).
+ *                                   Applies to GET /api/services (+ detail)
+ *                                   and GET /protected (+ OPTIONS preflight
+ *                                   for both). No credentials are shared.
  *   AGENTTRUST_NODE_HOST            default grpc.testnet.concordium.com
  *   AGENTTRUST_NODE_PORT            default 20000
  *   AGENTTRUST_DISCOVERY_DB         default /home/hatch/agenttrust-state/discovery.db
@@ -113,6 +125,7 @@ import type { PaymentRequirements } from '@x402/core/types';
 import { createServiceRegistry, buildServicePaymentRequirements, isDiscoverable } from '../src/discovery/registry.js';
 import { SqliteServiceStore } from '../src/discovery/store.js';
 import { AGENTTRUST_SERVICE_ID, agenttrustServiceResource } from '../src/discovery/firstProvider.js';
+import { parseCorsOrigins } from '../src/x402/cors.js';
 
 const HOST = resolveBindHost(process.env.AGENTTRUST_X402_HOST);
 const PORT = Number(process.env.AGENTTRUST_X402_PORT ?? 4590);
@@ -143,6 +156,10 @@ async function main(): Promise<void> {
     resourcePath: RESOURCE_PATH,
   });
   const mode = resolveFacilitatorMode(process.env.AGENTTRUST_X402_FACILITATOR_MODE);
+  // CORS allowlist, resolved before any network I/O: a wildcard or
+  // malformed AGENTTRUST_CORS_ORIGINS fails startup here with a clear
+  // error instead of silently opening (or silently never matching).
+  const corsOrigins = parseCorsOrigins(process.env.AGENTTRUST_CORS_ORIGINS);
   // Mock production guard: mock mode additionally requires the explicit
   // opt-in AGENTTRUST_X402_ALLOW_MOCK=1, a non-production NODE_ENV, and
   // a loopback bind host — so a single mistyped or leaked mode variable
@@ -263,9 +280,10 @@ async function main(): Promise<void> {
   // Registration is operator-side only (agenttrust-discovery CLI), never
   // over unauthenticated HTTP. The Discovery API is read-only:
   // GET /api/services, GET /api/services/:id.
-  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
+  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, corsOrigins, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
   console.log(`AgentTrust x402 resource server on ${started.url}${RESOURCE_PATH}`);
   console.log(`  resource=${resourceUrl}  payTo=${requirements.payTo}  amount=${requirements.amount} microCCD  network=${NETWORK}`);
+  console.log(`  cors: ${corsOrigins.length > 0 ? `enabled for ${corsOrigins.join(', ')}` : 'disabled (AGENTTRUST_CORS_ORIGINS unset)'}`);
   console.log(`  facilitator mode=${mode}  facilitator=${mode === 'real' ? FACILITATOR_URL : 'mock'}  feePayer=${feePayerLog}`);
   if (firstDiscoverable) {
     console.log(`  first-provider service: ${AGENTTRUST_SERVICE_ID} (verified, active) — requirements + resource from the registry record`);

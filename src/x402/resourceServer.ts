@@ -37,6 +37,7 @@ import { join } from 'node:path';
 import type { ChainTransferSummary, ChainVerifier, X402Provider } from './provider.js';
 import { handleDiscoveryRequest } from '../discovery/http.js';
 import type { ServiceRegistry } from '../discovery/registry.js';
+import { corsHeadersFor, corsPreflight } from './cors.js';
 
 export interface X402ResourceServerOptions {
   /** Decides access. Constructed by the caller (facilitator + chain wired in). */
@@ -51,6 +52,16 @@ export interface X402ResourceServerOptions {
    * flow: it is a separate read path over a separate store.
    */
   discovery?: ServiceRegistry;
+  /**
+   * Optional exact-origin CORS allowlist (see src/x402/cors.ts). When
+   * provided and non-empty, the server answers CORS preflight (OPTIONS
+   * with an Origin header) on the resource path and the Discovery API,
+   * and adds Access-Control-Allow-Origin to normal responses for listed
+   * origins only. When omitted or empty, CORS is disabled and every
+   * response is byte-identical to before (no behavior change at all).
+   * No wildcard, no credentials: see cors.ts.
+   */
+  corsOrigins?: readonly string[];
   /**
    * Optional static website directory (V5.4 integration spike). When
    * provided, the server also answers GET / (the V5.4 prototype) and
@@ -215,11 +226,42 @@ function json(res: ServerResponse, status: number, body: unknown, extraHeaders: 
 export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req: IncomingMessage, res: ServerResponse) => void {
   const resourcePath = opts.resourcePath ?? '/protected';
   const provider = opts.provider;
+  const corsOrigins = opts.corsOrigins ?? [];
+  const corsActive = corsOrigins.length > 0;
+  // CORS applies to the two browser-facing endpoints: the protected
+  // resource (the configured path — behind a reverse proxy the proxy
+  // strips its prefix and forwards this bare path) and the Discovery
+  // API (list + detail — the same route family). Nothing else gets
+  // CORS headers: the static website is same-origin by design.
+  const isCorsPath = (path: string): boolean =>
+    path === resourcePath || path === '/api/services' || path.startsWith('/api/services/');
 
   return (req, res) => {
     void (async () => {
       const url = (req.url ?? '/').split('?')[0]!;
       const method = req.method ?? 'GET';
+      const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+      const corsPath = isCorsPath(url);
+      const cors = corsActive && corsPath ? corsHeadersFor(origin, corsOrigins) : {};
+
+      // CORS preflight, before any routing: an OPTIONS carrying an
+      // Origin header on a CORS path is answered here (204 for a listed
+      // origin, 403 for an unlisted one) and never reaches the 405
+      // branches below. An OPTIONS without Origin is not a preflight —
+      // it falls through to the existing routing (405), preserving the
+      // pre-CORS behavior for non-browser clients.
+      if (corsActive && corsPath && method === 'OPTIONS') {
+        const preflight = corsPreflight(origin, corsOrigins);
+        if (preflight !== null) {
+          if (preflight.status === 204) {
+            res.writeHead(204, preflight.headers);
+            res.end();
+          } else {
+            json(res, preflight.status, preflight.body, preflight.headers);
+          }
+          return;
+        }
+      }
 
       // Discovery API (read-only). Only active when a registry was injected.
       // Checked before the /protected routing so /api/services never hits
@@ -228,7 +270,7 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
       if (opts.discovery) {
         const discovered = handleDiscoveryRequest(opts.discovery, req);
         if (discovered !== null) {
-          json(res, discovered.status, discovered.body, discovered.headers ?? {});
+          json(res, discovered.status, discovered.body, { ...cors, ...(discovered.headers ?? {}) });
           return;
         }
       }
@@ -256,11 +298,11 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
       }
 
       if (url !== resourcePath) {
-        json(res, 404, { error: 'not found' });
+        json(res, 404, { error: 'not found' }, cors);
         return;
       }
       if (method !== 'GET') {
-        json(res, 405, { error: 'method not allowed' }, { allow: 'GET' });
+        json(res, 405, { error: 'method not allowed' }, { allow: 'GET', ...cors });
         return;
       }
 
@@ -269,11 +311,11 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
         // Unpaid: the 402 challenge. This is the only path that returns 402
         // without a payment attempt.
         const unpaid = provider.handleUnpaid();
-        json(res, 402, unpaid.body);
+        json(res, 402, unpaid.body, cors);
         return;
       }
       if (Array.isArray(header) || header.trim() === '') {
-        json(res, 400, { error: 'X-PAYMENT header must be a single non-empty value' });
+        json(res, 400, { error: 'X-PAYMENT header must be a single non-empty value' }, cors);
         return;
       }
 
@@ -284,10 +326,11 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
         json(res, 200, outcome.body, {
           'payment-response': settlement,
           'x-payment-response': settlement,
+          ...cors,
         });
         return;
       }
-      json(res, outcome.status, outcome.body);
+      json(res, outcome.status, outcome.body, cors);
     })().catch(() => {
       if (!res.headersSent) json(res, 500, { error: 'internal_error' });
     });
