@@ -361,6 +361,13 @@ export async function startFacilitator(
   // `passthrough` (mock only): senderVerifier stays undefined and FacilitatorCore uses its
   // pass-through default. `real` mode cannot reach this state — loadConfig rejects it.
 
+  // The wire converter's cap is a JS number (executionEnergyAmount is numeric in the
+  // SDK wire shape). A configured cap above the safe-integer range cannot be
+  // represented exactly; fail closed rather than silently round it.
+  if (config.maxEnergy > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new ConfigurationError('FACILITATOR_MAX_ENERGY exceeds the wire converter numeric range');
+  }
+
   const core = new FacilitatorCore({
     network: config.network,
     signer,
@@ -368,6 +375,14 @@ export async function startFacilitator(
     ...(authorization ? { authorization } : {}),
     ...(senderVerifier ? { senderVerifier } : {}),
     busyTimeoutMs: config.busyTimeoutMs,
+    // Configured caps, propagated into the core's own validation path. Before this
+    // change the core silently used its hardcoded defaults (1_000 NRG / 1_000 / 10 CCD)
+    // no matter what the operator configured: lowering FACILITATOR_MAX_ENERGY or
+    // FACILITATOR_MAX_FEE_MICROCCD had no effect on the authorization client, the
+    // wire converter, or the core-level fee check.
+    maxAuthorizationEnergy: config.maxEnergy,
+    maxWireEnergy: Number(config.maxEnergy),
+    maxFeeMicroCcd: config.maxFeeMicroCcd,
     ...(opts.now ? { now: opts.now } : {}),
     ...(process.env['FACILITATOR_DIE_AT'] as CoreOptions['dieAt']
       ? { dieAt: process.env['FACILITATOR_DIE_AT'] as CoreOptions['dieAt'] }
