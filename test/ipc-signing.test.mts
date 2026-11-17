@@ -9,14 +9,33 @@
  */
 
 import { eq, ok } from './helpers.mjs';
-import { createSigningService, createFakeSigner, IpcAccountSigner } from '../services/facilitator/src/signingService.js';
+import { createSigningService, createFakeSigner, IpcAccountSigner, signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
+const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
+const RECIPIENT = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const DIGEST = 'a'.repeat(64);
+
+/** Signable fixture transaction (protocol v2: the digest is bound to this transaction). */
+const fixtureTx = {
+  version: 1,
+  header: {
+    sender: SENDER,
+    nonce: 7,
+    expiry: Math.floor(Date.now() / 1000) + 600,
+    executionEnergyAmount: 300,
+    numSignatures: 1,
+    sponsor: { account: SPONSOR, numSignatures: 1 },
+  },
+  payload: { type: 'transfer', toAddress: RECIPIENT, amount: '250000' },
+  signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
+};
+const DIGEST = signingDigestOf(fixtureTx);
+const digestBuf = () => digestHexToArrayBuffer(DIGEST);
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -58,8 +77,8 @@ test('01. IpcAccountSigner signs through the IPC service', async () => {
   const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK });
-    const sig = await client.sign(Buffer.from(DIGEST, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, transaction: fixtureTx });
+    const sig = await client.sign(digestBuf());
     eq(sig[0]?.[0], 'ee'.repeat(64), 'signature from fake signer');
   } finally {
     await svc.close();
@@ -71,10 +90,10 @@ test('02. wrong sponsor rejected by the service', async () => {
   const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', network: NETWORK });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', network: NETWORK, transaction: fixtureTx });
     let threw = false;
     try {
-      await client.sign(Buffer.from(DIGEST, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+      await client.sign(digestBuf());
     } catch (e) {
       threw = /wrong_sponsor/i.test((e as Error).message);
     }
@@ -89,10 +108,10 @@ test('03. wrong network rejected by the service', async () => {
   const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: 'ccd:0000' });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: 'ccd:0000', transaction: fixtureTx });
     let threw = false;
     try {
-      await client.sign(Buffer.from(DIGEST, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+      await client.sign(digestBuf());
     } catch (e) {
       threw = /wrong_network/i.test((e as Error).message);
     }
@@ -107,10 +126,10 @@ test('04. signer failure propagates as a rejection', async () => {
   const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, transaction: fixtureTx });
     let threw = false;
     try {
-      await client.sign(Buffer.from(DIGEST, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+      await client.sign(digestBuf());
     } catch (e) {
       threw = /signer_error|refused/i.test((e as Error).message);
     }
@@ -121,10 +140,10 @@ test('04. signer failure propagates as a rejection', async () => {
 });
 
 test('05. service unavailable → error (no local fallback)', async () => {
-  const client = new IpcAccountSigner({ socketPath: join(base, 'missing.sock'), expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 1000 });
+  const client = new IpcAccountSigner({ socketPath: join(base, 'missing.sock'), expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 1000, transaction: fixtureTx });
   let threw = false;
   try {
-    await client.sign(Buffer.from(DIGEST, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+    await client.sign(digestBuf());
   } catch (e) {
     threw = /unavailable/i.test((e as Error).message);
   }
@@ -136,10 +155,10 @@ test('06. timeout → error', async () => {
   const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 200 });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 200, transaction: fixtureTx });
     let threw = false;
     try {
-      await client.sign(Buffer.from(DIGEST, 'hex').buffer.slice(0, 32) as ArrayBuffer);
+      await client.sign(digestBuf());
     } catch (e) {
       threw = /timeout/i.test((e as Error).message);
     }

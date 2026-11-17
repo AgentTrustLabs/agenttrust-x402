@@ -21,7 +21,7 @@ import { paymentDigest, requirementsKey } from './store.js';
 import { SqliteSettlementRepository, evidenceDigestOf, type SettlementRepository } from './repository.js';
 import type { AuthorizationClient, AuthorizationRequest } from './authorization.js';
 import { LocalAuthorizationClient } from './authorization.js';
-import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST } from './energy.js';
+import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST, SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
 import { convertV2ToSdkV1 } from './wireConverter.js';
 import type { SenderVerificationResult } from './senderVerifier.js';
 import type { WireConversionPolicy, SdkV1SignableTransaction } from './wireConverter.js';
@@ -119,6 +119,16 @@ export class FacilitatorCore {
   getSigner(): SponsorSigner {
     return this.signer;
   }
+
+  /**
+   * Whether this core's settlements are simulated. Read from the signer's
+   * `simulated` flag; a signer that omits it is treated as simulated — the
+   * burden is on a real signer to declare itself real. Mock and ledger signers
+   * declare `true`; the IPC signer declares `false`.
+   */
+  private simulatedFlag(): boolean {
+    return this.signer.simulated ?? true;
+  }
   private readonly network: string;
   private readonly signer: SponsorSigner;
   private readonly now: () => number;
@@ -208,7 +218,7 @@ export class FacilitatorCore {
     return {
       isValid: true,
       payer: this.payerOf(payload),
-      extra: { digest, simulated: true, canSign: this.signer.info().canSign === false ? false : true },
+      extra: { digest, simulated: this.simulatedFlag(), canSign: this.signer.info().canSign === false ? false : true },
     };
   }
 
@@ -258,7 +268,7 @@ export class FacilitatorCore {
               'This is not a success. Reconcile by transaction hash before retrying.',
             transaction: guard.transaction ?? 'unknown',
             network: this.network,
-            extra: { digest, nonTerminal: true },
+            extra: { digest, nonTerminal: true, simulated: this.simulatedFlag() },
           };
         case 'in_progress':
           return this.fail('settle_in_progress', 'a settlement for this payment is already in flight', { digest });
@@ -276,7 +286,7 @@ export class FacilitatorCore {
         transaction: guard.transaction,
         network: this.network,
         payer: this.payerOf(payload),
-        extra: { digest, idempotentReplay: true, simulated: true },
+        extra: { digest, idempotentReplay: true, simulated: this.simulatedFlag() },
       };
     }
 
@@ -370,7 +380,7 @@ export class FacilitatorCore {
                 errorMessage: `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'} — reconcile before retrying`,
                 transaction: 'unknown',
                 network: this.network,
-                extra: { digest, nonTerminal: true, authorizationOutcome: recovered.outcome },
+                extra: { digest, nonTerminal: true, authorizationOutcome: recovered.outcome, simulated: this.simulatedFlag() },
               };
             }
             return this.fail('authorization_rejected', `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'}`, {
@@ -400,7 +410,7 @@ export class FacilitatorCore {
               errorMessage: `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'} — reconcile before retrying`,
               transaction: 'unknown',
               network: this.network,
-              extra: { digest, nonTerminal: true, authorizationOutcome: auth.outcome },
+              extra: { digest, nonTerminal: true, authorizationOutcome: auth.outcome, simulated: this.simulatedFlag() },
             };
           }
           return this.fail(errorReason, `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'}`, {
@@ -481,9 +491,11 @@ export class FacilitatorCore {
     // The signer's own validateContext (real/IPC signers) then re-checks the same
     // estimate against the same configured cap — the two can never disagree.
     if (!resumableHash && derivedEnergy !== null) {
-      // Conservative fee estimate: energy * 8000 microCCD/NRG, slightly above the current
-      // measured Testnet rate (7939.534 microCCD/NRG). Integer-safe (bigint).
-      const feeEstimate = derivedEnergy * 8000n;
+      // Conservative fee estimate: energy * SPONSOR_FEE_MICROCCD_PER_NRG microCCD/NRG,
+      // slightly above the current measured Testnet rate (7939.534 microCCD/NRG).
+      // Integer-safe (bigint). The signing service re-derives the same estimate from the
+      // transaction it hashes, so the two can never disagree about the fee model.
+      const feeEstimate = derivedEnergy * SPONSOR_FEE_MICROCCD_PER_NRG;
       if (feeEstimate > this.maxFeeMicroCcd) {
         this.store.markFailed(digest, `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`);
         return this.fail('fee_validation_failed', `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`, { digest });
@@ -583,7 +595,7 @@ export class FacilitatorCore {
         errorMessage: `submission outcome unknown: ${(e as Error).message}`,
         transaction: persistedHash,
         network: this.network,
-        extra: { digest, nonTerminal: true },
+        extra: { digest, nonTerminal: true, simulated: this.simulatedFlag() },
       };
     }
     if (this.dieAt === 'after-submit') {
@@ -602,7 +614,7 @@ export class FacilitatorCore {
         errorMessage: `returned hash ${txHash} does not match persisted hash ${persistedHash}`,
         transaction: persistedHash,
         network: this.network,
-        extra: { digest, nonTerminal: true, hashMismatch: true },
+        extra: { digest, nonTerminal: true, hashMismatch: true, simulated: this.simulatedFlag() },
       };
     }
 
@@ -622,7 +634,7 @@ export class FacilitatorCore {
         errorMessage: `broadcast but not confirmed: ${(e as Error).message}`,
         transaction: txHash,
         network: this.network,
-        extra: { digest, nonTerminal: true },
+        extra: { digest, nonTerminal: true, simulated: this.simulatedFlag() },
       };
     }
 
@@ -640,7 +652,7 @@ export class FacilitatorCore {
         transaction: txHash,
         network: this.network,
         payer: this.payerOf(payload),
-        extra: { digest, simulated: true, finality: 'finalized' },
+        extra: { digest, simulated: this.simulatedFlag(), finality: 'finalized' },
       };
     }
 
@@ -663,7 +675,7 @@ export class FacilitatorCore {
       errorMessage: `transaction ${txHash} is ${status.status}, not finalized`,
       transaction: txHash,
       network: this.network,
-      extra: { digest, nonTerminal: true },
+      extra: { digest, nonTerminal: true, simulated: this.simulatedFlag() },
     };
   }
 
@@ -712,8 +724,8 @@ export class FacilitatorCore {
       }
 
       let observed:
-        | { txHash: string; status: 'pending' | 'committed' | 'finalized' | 'failed'; sender: string; simulated: true }
-        | { txHash: string; status: 'finalized' | 'failed'; sender: string; simulated: true };
+        | { txHash: string; status: 'pending' | 'committed' | 'finalized' | 'failed'; sender: string; simulated: boolean }
+        | { txHash: string; status: 'finalized' | 'failed'; sender: string; simulated: boolean };
       try {
         observed = await this.signer.waitForFinalization(hash, this.finalizationTimeoutMs);
       } catch (e) {
@@ -923,7 +935,7 @@ export class FacilitatorCore {
   }
 
   private fail(errorReason: string, errorMessage: string, extra: Record<string, unknown> = {}): SettleBody {
-    return { success: false, errorReason, errorMessage, transaction: '', network: this.network, extra: { simulated: true, ...extra } };
+    return { success: false, errorReason, errorMessage, transaction: '', network: this.network, extra: { simulated: this.simulatedFlag(), ...extra } };
   }
 }
 

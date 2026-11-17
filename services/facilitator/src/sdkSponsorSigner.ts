@@ -103,8 +103,12 @@ export function validateSponsorContext(
 
 /**
  * True when the value is an x402 payment payload wrapping a signed transaction.
+ *
+ * Exported so the IPC signer can bind the BARE transaction (the shape the SDK
+ * actually signs) rather than the wrapper: the digest is computed from the bare
+ * form, so binding the wrapper would make every client-side digest check fail.
  */
-function isSignedTransactionWrapper(value: unknown): value is { signedTransaction: unknown } {
+export function isSignedTransactionWrapper(value: unknown): value is { signedTransaction: unknown } {
   return (
     typeof value === 'object' &&
     value !== null &&

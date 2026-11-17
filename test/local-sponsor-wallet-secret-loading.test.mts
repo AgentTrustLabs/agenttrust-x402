@@ -10,9 +10,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { loadWalletExportSigner, WalletExportError } from '../services/facilitator/src/walletExportLoader.js';
+import { loadWalletExportSigner, loadSponsorExportSigner, getWalletExportAddress, WalletExportError } from '../services/facilitator/src/walletExportLoader.js';
 import { createSigningService } from '../services/facilitator/src/signingService.js';
-import { createFakeSigner } from '../services/facilitator/src/signingService.js';
+import { createFakeSigner, signingDigestOf } from '../services/facilitator/src/signingService.js';
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -246,11 +246,27 @@ console.log('\n── 8. integration with the signing service (test double) ─�
     network: CAIP2,
     allowedUid: 1001,
   });
+  // Protocol v2: the service validates the digest against the transaction it
+  // parses. The fixture's sponsor is the synthetic export's address.
+  const fixtureTx = {
+    version: 1,
+    header: {
+      sender: '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5',
+      nonce: 7,
+      expiry: Math.floor(Date.now() / 1000) + 600,
+      executionEnergyAmount: 300,
+      numSignatures: 1,
+      sponsor: { account: syntheticExport.value.address, numSignatures: 1 },
+    },
+    payload: { type: 'transfer', toAddress: '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8', amount: '250000' },
+    signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
+  };
   const res = await svc.sign({
-    protocolVersion: 1,
+    protocolVersion: 2,
     requestId: 'r1',
     operation: 'sign',
-    digest: 'a'.repeat(64),
+    digest: signingDigestOf(fixtureTx),
+    transaction: fixtureTx,
     sponsor: syntheticExport.value.address,
     network: CAIP2,
   });
@@ -273,6 +289,72 @@ console.log('\n── 9. signing service does not start with a failed load ─�
   }
   ok(threw, '24. load fails closed');
   ok(signer === undefined, '25. no signer object is produced on failure');
+  w.rm();
+}
+
+console.log('\n── 10. sponsor cross-check: export address must match configuration ──');
+
+{
+  const w = tmp('xcheck');
+  writeFileSync(w.file, JSON.stringify(syntheticExport));
+  const stubs = {
+    parseWallet: () => syntheticExport as never,
+    buildAccountSigner: () => doubleSigner() as never,
+  };
+
+  // 26. Address match → signer built.
+  {
+    let built = 0;
+    const signer = loadSponsorExportSigner(w.file, syntheticExport.value.address, {
+      ...stubs,
+      buildAccountSigner: () => { built++; return doubleSigner() as never; },
+    });
+    ok(typeof signer.sign === 'function', '26. matching export builds a signer');
+    eq(built, 1, '26b. builder called exactly once on match');
+  }
+
+  // 27. Address mismatch → throws, and the builder is NEVER invoked.
+  {
+    let built = 0;
+    let msg = '';
+    try {
+      loadSponsorExportSigner(w.file, '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5', {
+        ...stubs,
+        buildAccountSigner: () => { built++; return doubleSigner() as never; },
+      });
+    } catch (e) { msg = (e as Error).message; }
+    ok(/does not match/i.test(msg), `27. mismatched export refused: "${msg}"`);
+    eq(built, 0, '27b. builder NOT called on mismatch (check runs before build)');
+    ok(!msg.includes(syntheticExport.value.address), '27c. mismatch error contains no address');
+  }
+
+  // 28. Malformed configured sponsor → fail closed.
+  {
+    let msg = '';
+    try {
+      loadSponsorExportSigner(w.file, 'not-an-address', stubs);
+    } catch (e) { msg = (e as Error).message; }
+    ok(/configured sponsor address is not a valid account address/i.test(msg), `28. malformed configured sponsor refused: "${msg}"`);
+  }
+
+  // 29. Malformed export address → fail closed.
+  {
+    const badExport = { ...syntheticExport, value: { ...syntheticExport.value, address: 'not-a-valid-address' } };
+    let msg = '';
+    try {
+      loadSponsorExportSigner(w.file, syntheticExport.value.address, {
+        parseWallet: () => badExport as never,
+        buildAccountSigner: () => doubleSigner() as never,
+      });
+    } catch (e) { msg = (e as Error).message; }
+    ok(/wallet export address is not a valid account address/i.test(msg), `29. malformed export address refused: "${msg}"`);
+  }
+
+  // 30. getWalletExportAddress returns the export address without building a signer.
+  {
+    const addr = getWalletExportAddress(w.file, { parseWallet: () => syntheticExport as never });
+    eq(addr, syntheticExport.value.address, '30. export address read back');
+  }
   w.rm();
 }
 

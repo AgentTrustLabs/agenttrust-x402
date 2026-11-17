@@ -23,6 +23,13 @@ export const CONSTANT_B = 1n;
 export const V1_SPONSORED_HEADER_SIZE = 94n;
 /** Base cost of a simple CCD transfer, from Concordium's `Cost.hs`. */
 export const SIMPLE_TRANSFER_BASE_COST = 300n;
+/**
+ * Conservative sponsor fee estimate, microCCD per NRG. Slightly above the measured
+ * Testnet rate (7939.534 microCCD/NRG). Shared by the facilitator core and the
+ * signing service so both enforce the SAME fee model: the core estimates the fee
+ * before signing, the service re-derives it from the transaction it hashed.
+ */
+export const SPONSOR_FEE_MICROCCD_PER_NRG = 8000n;
 
 export function deriveEnergyExposure(
   signedTransaction: unknown,

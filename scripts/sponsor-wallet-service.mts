@@ -7,17 +7,21 @@
  *   FACILITATOR_SPONSOR_ADDRESS       sponsor base58check address
  *   FACILITATOR_NETWORK               CAIP-2 network
  *   FACILITATOR_SIGNING_SERVICE_UID   allowed peer UID
+ *   FACILITATOR_MAX_ENERGY            optional: max energy (NRG) per signed tx (default 1000)
+ *   FACILITATOR_MAX_FEE_MICROCCD      optional: max sponsor fee (microCCD) per signed tx (default 10000000)
  *
  * Legacy positional form is still accepted for the tests:
  *   npx tsx scripts/sponsor-wallet-service.mts <socket> <sponsor> <network> <uid> <export-path>
  *
  * The export is read BEFORE the socket is bound. Its contents are never logged or printed.
  * The file must be owned by the service user and must not be world-readable; otherwise the
- * service refuses to start.
+ * service refuses to start. The export's address is cross-checked against
+ * FACILITATOR_SPONSOR_ADDRESS before the signer is built: a mismatched export refuses
+ * startup, so the service can never sign for an account it was not configured for.
  */
 
 import { chmodSync, statSync } from 'node:fs';
-import { loadWalletExportSigner } from '../services/facilitator/src/walletExportLoader.js';
+import { loadSponsorExportSigner } from '../services/facilitator/src/walletExportLoader.js';
 import { createSigningService } from '../services/facilitator/src/signingService.js';
 
 interface Resolved {
@@ -91,12 +95,28 @@ if (fileProblem !== null) {
 
 // Load before binding: a failure must prevent the service from starting.
 // The loader only ever emits a generic message; neither the path nor the contents are logged.
+// The export's address is cross-checked against the configured sponsor BEFORE the signer
+// is built: a mismatched export refuses startup (exit 1).
 let accountSigner;
 try {
-  accountSigner = loadWalletExportSigner(resolved.exportPath);
+  accountSigner = loadSponsorExportSigner(resolved.exportPath, resolved.sponsor);
 } catch (e) {
   console.error(`failed to load wallet export: ${(e as Error).message}`);
   process.exit(1);
+}
+
+// Optional caps for the signing service, mirroring the facilitator config defaults.
+// Unset or empty means the default; a malformed value refuses startup (exit 2).
+function parseCap(raw: string | undefined, name: string, fallback: bigint): bigint {
+  if (raw === undefined || raw === '') return fallback;
+  try {
+    const v = BigInt(raw);
+    if (v < 0n) throw new Error('negative');
+    return v;
+  } catch {
+    console.error(`${name} must be a non-negative integer`);
+    process.exit(2);
+  }
 }
 
 const svc = createSigningService({
@@ -104,6 +124,8 @@ const svc = createSigningService({
   sponsorAddress: resolved.sponsor,
   network: resolved.network,
   allowedUid: resolved.allowedUid,
+  maxEnergy: parseCap(process.env['FACILITATOR_MAX_ENERGY'], 'FACILITATOR_MAX_ENERGY', 1000n),
+  maxFeeMicroCcd: parseCap(process.env['FACILITATOR_MAX_FEE_MICROCCD'], 'FACILITATOR_MAX_FEE_MICROCCD', 10_000_000n),
 });
 await svc.listen(resolved.socketPath);
 try {
