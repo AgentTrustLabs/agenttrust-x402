@@ -1,0 +1,18 @@
+{
+  // Targeted typecheck for the production signing launcher and its focused
+  // regression test. The root tsconfig covers only src/**/*.ts, so scripts
+  // were never typechecked — which is how the production launcher shipped
+  // without ownerAuthorization and the construction throw went unnoticed.
+  // This config does NOT replace or extend the root typecheck/build: it is a
+  // separate, narrow program (launcher + its test) run by
+  // `npm run typecheck:launcher`. CI wiring is a separate decision.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Files live outside src/ (scripts/, test/), so the root's rootDir: src
+    // must not apply here.
+    "rootDir": "."
+  },
+  "include": ["scripts/sponsor-wallet-service.mts", "test/sponsor-wallet-service-owner.test.mts"],
+  "exclude": ["node_modules", "dist"]
+}

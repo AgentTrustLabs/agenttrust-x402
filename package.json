@@ -28,6 +28,7 @@
     "commerce": "tsc && node dist/cli/commerce.js",
     "mcp": "tsc && node dist/mcp/server.js",
     "typecheck": "tsc --noEmit",
+    "typecheck:launcher": "tsc -p tsconfig.launcher.json",
     "lint": "tsc --noEmit",
     "cli": "node --import tsx --experimental-vm-modules dist/cli/index.js",
     "build:peercred": "sh scripts/build-peercred.sh",

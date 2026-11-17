@@ -19,6 +19,7 @@ import { loadConfig, ConfigurationError } from '../services/facilitator/src/conf
 import { startFacilitator, inspectWalletFile } from '../services/facilitator/src/server.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { requirementsKey } from '../services/facilitator/src/store.js';
+import { generateOwnerAuthorizationKeyPair, ownerAuthorizationPublicKeyHex } from '../services/facilitator/src/ownerAuthorization.js';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const SPONSOR = '3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK';
@@ -425,6 +426,9 @@ console.log('\n── C17-C19. launcher env-driven configuration ──');
 
 {
   const script = new URL('../scripts/sponsor-wallet-service.mts', import.meta.url).pathname;
+  // Ephemeral test Owner keypair (never persisted, never logged); only its
+  // public hex is passed to the launcher.
+  const testOwnerKeyHex = ownerAuthorizationPublicKeyHex(generateOwnerAuthorizationKeyPair().publicKey);
   const run = (env: Record<string, string>, args: string[] = []): Promise<{ code: number; out: string }> =>
     new Promise((resolve) => {
       const child = spawn('npx', ['tsx', script, ...args], {
@@ -450,6 +454,13 @@ console.log('\n── C17-C19. launcher env-driven configuration ──');
     FACILITATOR_SPONSOR_ADDRESS: SPONSOR,
     FACILITATOR_NETWORK: CAIP2,
     FACILITATOR_SIGNING_SERVICE_UID: '1001',
+    // Owner configuration is required before the wallet is touched; supply it
+    // so this case still refuses on the missing wallet file, not on the
+    // Owner configuration. The socket is never connected (the wallet check
+    // fires first) and the key is an ephemeral test keypair.
+    SIGNING_OWNER_PUBLIC_KEY: testOwnerKeyHex,
+    SIGNING_OWNER_SOCKET: '/tmp/t64-owner.sock',
+    SIGNING_OWNER_UID: '1102',
   });
   ok(/refusing to start/.test(badPath.out), 'C18. launcher refuses a missing wallet file');
   ok(!badPath.out.includes('aa'.repeat(32)), 'C19. launcher output contains no key material');
