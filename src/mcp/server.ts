@@ -18,26 +18,53 @@
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
-import { createServiceRegistry, type ServiceRegistry } from '../discovery/registry.js';
-import { SqliteServiceStore } from '../discovery/store.js';
 import { TOOLS, callTool, findTool, type ServerConfig } from './tools.js';
+import type { ServiceRegistry } from '../discovery/registry.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'agenttrust-gateway', version: '1.0.0' };
 const DEFAULT_DISCOVERY_DB = '/home/hatch/agenttrust-state/discovery.db';
 
-function openConfiguredDiscoveryRegistry(): ServiceRegistry | undefined {
-  const explicitDb = process.env['AGENTTRUST_DISCOVERY_DB'];
-  if (explicitDb !== undefined) {
-    return createServiceRegistry(new SqliteServiceStore(explicitDb));
+/**
+ * Lazily open the SQLite-backed discovery registry on first use — never at
+ * module load.
+ *
+ * Why: `node:sqlite` is experimental on Node 22 and its import prints an
+ * `ExperimentalWarning` to stderr. The MCP handshake asserts empty stderr, so
+ * the SQLite dependency must not load until a discovery tool actually needs
+ * it. The import graph is kept clean for the same reason: the in-memory store
+ * lives in `../discovery/memoryStore.js` (no SQLite), and this module only
+ * ever touches `../discovery/store.js` through the dynamic import below.
+ *
+ * A single shared promise: concurrent discovery requests awaiting the first
+ * open all resolve to the same registry instance; a failed open fails closed
+ * to "unconfigured" (the tools answer STORE_UNAVAILABLE) instead of serving
+ * an empty or fabricated registry. The outcome — registry or undefined — is
+ * cached for the process lifetime.
+ */
+let discoveryPromise: Promise<ServiceRegistry | undefined> | undefined;
+async function getDiscoveryRegistry(): Promise<ServiceRegistry | undefined> {
+  if (discoveryPromise === undefined) {
+    discoveryPromise = loadDiscoveryRegistry().catch(() => undefined);
   }
-  if (existsSync(dirname(DEFAULT_DISCOVERY_DB))) {
-    return createServiceRegistry(new SqliteServiceStore(DEFAULT_DISCOVERY_DB));
-  }
-  return undefined;
+  return discoveryPromise;
 }
 
-const discovery = openConfiguredDiscoveryRegistry();
+async function loadDiscoveryRegistry(): Promise<ServiceRegistry | undefined> {
+  const explicitDb = process.env['AGENTTRUST_DISCOVERY_DB'];
+  let dbPath: string | undefined;
+  if (explicitDb !== undefined) {
+    dbPath = explicitDb;
+  } else if (existsSync(dirname(DEFAULT_DISCOVERY_DB))) {
+    dbPath = DEFAULT_DISCOVERY_DB;
+  }
+  if (dbPath === undefined) return undefined;
+  const [{ createServiceRegistry }, { SqliteServiceStore }] = await Promise.all([
+    import('../discovery/registry.js'),
+    import('../discovery/store.js'),
+  ]);
+  return createServiceRegistry(new SqliteServiceStore(dbPath));
+}
 
 /**
  * Registry endpoint is operator configuration (env), never a tool argument.
@@ -50,7 +77,7 @@ const config: ServerConfig = {
   // Off unless the operator says otherwise: a permissionless registry can otherwise point
   // an agent_uri at loopback or cloud metadata. Not reachable from any MCP tool argument.
   allowPrivateCardHosts: process.env['AGENTTRUST_ALLOW_PRIVATE_CARD_HOSTS'] === '1',
-  ...(discovery ? { discovery } : {}),
+  getDiscoveryRegistry,
 };
 
 interface RpcRequest {

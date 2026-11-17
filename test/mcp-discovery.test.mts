@@ -16,7 +16,8 @@ import {
   type ServiceRecord,
   type ServiceRegistrationInput,
 } from '../src/discovery/registry.js';
-import { createMemoryServiceStore, SqliteServiceStore } from '../src/discovery/store.js';
+import { SqliteServiceStore } from '../src/discovery/store.js';
+import { createMemoryServiceStore } from '../src/discovery/memoryStore.js';
 import { TOOLS, callTool, type ServerConfig } from '../src/mcp/tools.js';
 
 console.log('── mcp-discovery ──');

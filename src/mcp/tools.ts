@@ -287,6 +287,14 @@ export interface ServerConfig {
   /** Operator-configured Discovery service registry. Never client-supplied. */
   discovery?: ServiceRegistry;
   discoveryRegistry?: ServiceRegistry;
+  /**
+   * Lazily resolve the Discovery service registry (async, cached by the
+   * provider). Preferred over a pre-opened `discovery` when the registry
+   * backend must not load at module import time — e.g. the SQLite store,
+   * whose import prints an ExperimentalWarning on Node 22. `discovery` /
+   * `discoveryRegistry`, when present, still win.
+   */
+  getDiscoveryRegistry?: () => Promise<ServiceRegistry | undefined>;
 }
 
 function registry(cfg: ServerConfig, network: string): AgentRegistryMcp {
@@ -767,8 +775,11 @@ export async function toolAuditVerify(cfg: ServerConfig, rawArgs: unknown): Prom
 const DISCOVER_ALLOWED_KEYS = new Set(['query', 'category', 'network', 'status', 'limit']);
 const DETAILS_ALLOWED_KEYS = new Set(['service_id']);
 
-function requireDiscoveryRegistry(cfg: ServerConfig): ServiceRegistry {
-  const reg = cfg.discovery ?? cfg.discoveryRegistry;
+async function requireDiscoveryRegistry(cfg: ServerConfig): Promise<ServiceRegistry> {
+  const reg =
+    cfg.discovery ??
+    cfg.discoveryRegistry ??
+    (cfg.getDiscoveryRegistry ? await cfg.getDiscoveryRegistry() : undefined);
   if (!reg) {
     throw new McpToolError(
       'STORE_UNAVAILABLE',
@@ -811,7 +822,7 @@ export async function toolDiscoverServices(
   assertInputSize(rawArgs);
   assertNoForbiddenFields(rawArgs);
   const args = assertObjectArgs(rawArgs, DISCOVER_ALLOWED_KEYS);
-  const reg = requireDiscoveryRegistry(cfg);
+  const reg = await requireDiscoveryRegistry(cfg);
 
   const query = str(args, 'query', { max: LIMITS.maxStringLength });
   const category = str(args, 'category', { max: 64 });
@@ -864,7 +875,7 @@ export async function toolGetServiceDetails(
   assertInputSize(rawArgs);
   assertNoForbiddenFields(rawArgs);
   const args = assertObjectArgs(rawArgs, DETAILS_ALLOWED_KEYS);
-  const reg = requireDiscoveryRegistry(cfg);
+  const reg = await requireDiscoveryRegistry(cfg);
 
   const serviceId = str(args, 'service_id', { required: true, max: 64 })!;
   if (!SERVICE_ID_PATTERN.test(serviceId)) {
