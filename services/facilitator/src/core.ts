@@ -87,6 +87,14 @@ export interface CoreOptions {
    */
   maxWireEnergy?: number;
   /**
+   * Maximum sponsor fee (microCCD) accepted per settlement. Defaults to 10_000_000n
+   * (10 CCD). Enforced by the core itself, in the facilitator's own validation path,
+   * against the same conservative fee estimate handed to the signer — so the cap
+   * binds even when the signer omits validateContext (mock signers). Aligned with
+   * FACILITATOR_MAX_FEE_MICROCCD default (see config.ts).
+   */
+  maxFeeMicroCcd?: bigint;
+  /**
    * Wire converter seam. Defaults to the real `convertV2ToSdkV1`. Tests may
    * inject an instrumented converter to prove ordering (convert-before-sign, and
    * zero conversions when authorization is refused).
@@ -117,6 +125,7 @@ export class FacilitatorCore {
   private readonly finalizationTimeoutMs: number;
   private readonly dieAt: CoreOptions['dieAt'];
   private readonly maxWireEnergy: number;
+  private readonly maxFeeMicroCcd: bigint;
   private readonly wireConverter: (input: unknown, policy: WireConversionPolicy) => ReturnType<typeof convertV2ToSdkV1>;
   private readonly senderVerifier: (txJson: unknown) => Promise<SenderVerificationResult>;
   private readonly authorization: AuthorizationClient;
@@ -154,6 +163,9 @@ export class FacilitatorCore {
     // Wire conversion policy. The energy cap mirrors the authorization cap; the
     // authoritative energy VALUE comes from deriveEnergyExposure(), never from the client.
     this.maxWireEnergy = opts.maxWireEnergy ?? 1_000;
+    // Fee cap. Same default as FACILITATOR_MAX_FEE_MICROCCD (10 CCD); the server
+    // passes the configured value. Enforced in settle() before signing.
+    this.maxFeeMicroCcd = opts.maxFeeMicroCcd ?? 10_000_000n;
     this.wireConverter = opts.wireConverter ?? convertV2ToSdkV1;
     // Default pass-through (mock-only). A real verifier must be injected.
     this.senderVerifier = opts.senderVerifier ?? (async () => ({ ok: true }));
@@ -315,7 +327,13 @@ export class FacilitatorCore {
         version: 1,
         sender: String(header['sender']),
         sponsor: String((requirementsAny['extra'] as Record<string, unknown> | undefined)?.['feePayer'] ?? this.signer.info().address),
-        recipient: String(acceptedAny['payTo']),
+        // The authorization must name the recipient the signed transaction actually
+        // pays — not merely the claimed one. checkAgreement already binds the two for
+        // transfer-family payloads; using the signed recipient here keeps the durable
+        // authorization record bound to the ground truth even if the agreement check
+        // is ever bypassed. Non-transfer payloads have no signed recipient; fall back
+        // to the accepted payTo (the x402 payee).
+        recipient: String(this.signedRecipientOf(payload) ?? acceptedAny['payTo']),
         asset: String(acceptedAny['asset']),
         amount: String(acceptedAny['amount']),
         expiry: Number(header['expiry']),
@@ -457,23 +475,48 @@ export class FacilitatorCore {
     // there is no session payload to convert, so the persisted pipeline continues with the
     // original payload — the sponsor signature is already bound into the durable hash.
     // Fee/energy context validation, actually invoked before signing.
-    // Runs only when the signer exposes validateContext (real/IPC signers); mock signers
-    // omit it, so mock flows are byte-for-byte unchanged.
-    if (typeof this.signer.validateContext === 'function' && !resumableHash && derivedEnergy !== null) {
-      const recipient = this.payerOf(payload) ?? '';
+    // The core-level fee cap binds here, in the facilitator's own validation path,
+    // whether or not the signer exposes validateContext (mock signers omit it, so
+    // without this check the configured fee cap would be unenforced in mock flows).
+    // The signer's own validateContext (real/IPC signers) then re-checks the same
+    // estimate against the same configured cap — the two can never disagree.
+    if (!resumableHash && derivedEnergy !== null) {
       // Conservative fee estimate: energy * 8000 microCCD/NRG, slightly above the current
       // measured Testnet rate (7939.534 microCCD/NRG). Integer-safe (bigint).
       const feeEstimate = derivedEnergy * 8000n;
-      const vctx = this.signer.validateContext({
-        network: this.network,
-        sponsor: this.signer.info().address,
-        recipient,
-        energy: derivedEnergy,
-        feeMicroCcd: feeEstimate,
-      });
-      if (vctx !== null) {
-        this.store.markFailed(digest, `fee validation failed: ${vctx}`);
-        return this.fail('fee_validation_failed', vctx, { digest });
+      if (feeEstimate > this.maxFeeMicroCcd) {
+        this.store.markFailed(digest, `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`);
+        return this.fail('fee_validation_failed', `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`, { digest });
+      }
+      if (typeof this.signer.validateContext === 'function') {
+        // The recipient validated here is the PAYEE of the signed transaction — the
+        // account that actually receives the funds — never the sender. The sender is
+        // validated separately (sender signature verification above, and the
+        // authorization boundary's sponsor!=sender check). Passing the sender here
+        // made the signer's sponsor!=recipient check compare the wrong pair of
+        // parties: it could pass a payment whose real recipient IS the sponsor, and
+        // it could fail a payment whose sender merely equals the sponsor (already
+        // rejected at authorization). Non-transfer payloads carry no signed
+        // recipient; fall back to the accepted payTo (the x402 payee).
+        const accepted = (payload['accepted'] ?? {}) as Record<string, unknown>;
+        const recipient =
+          this.signedRecipientOf(payload) ??
+          (typeof accepted['payTo'] === 'string' ? accepted['payTo'] : '');
+        if (recipient === '') {
+          this.store.markFailed(digest, 'no usable recipient for fee validation');
+          return this.fail('fee_validation_failed', 'no usable recipient for fee validation', { digest });
+        }
+        const vctx = this.signer.validateContext({
+          network: this.network,
+          sponsor: this.signer.info().address,
+          recipient,
+          energy: derivedEnergy,
+          feeMicroCcd: feeEstimate,
+        });
+        if (vctx !== null) {
+          this.store.markFailed(digest, `fee validation failed: ${vctx}`);
+          return this.fail('fee_validation_failed', vctx, { digest });
+        }
       }
     }
 
@@ -810,6 +853,34 @@ export class FacilitatorCore {
         return { ok: false, reason: `amount mismatch: signed=${signedAmount} accepted=${acceptedAmount}` };
       }
     }
+    // F5b — recipient binding. Same reasoning as the amount binding (F5): `accepted`
+    // and `requirements` are both client-supplied, so their agreement proves nothing
+    // about where the sender's signed transaction actually sends the funds. Bind the
+    // recipient in the signed transaction to the accepted payTo (which the loop above
+    // already bound to the required payTo). Without this, a payload whose signed
+    // `toAddress` differs from `payTo` passes agreement, gets authorized for the
+    // claimed recipient, and settles to the wrong address — the sponsor fee is
+    // burned on a transfer the provider never asked for. Only transfer-family
+    // payloads carry a transfer recipient; other transaction kinds have no recipient
+    // to bind, so the check is skipped for them (same documented limit as F5).
+    // Comparison is exact-string: a Concordium base58check address has one canonical
+    // form, and the provider's published payTo IS that form, so any other string —
+    // including a case/whitespace variant — is a different (or malformed) recipient
+    // and fails closed here.
+    if (signedTx && typeof signedTx === 'object' && signedPayload && typeof signedPayload === 'object'
+        && (kind === 'transfer' || kind === 'transferWithMemo' || kind === 3)) {
+      const toAddress = signedPayload['toAddress'];
+      if (typeof toAddress !== 'string' || toAddress.length === 0) {
+        return { ok: false, reason: 'signed transaction has no usable transfer recipient' };
+      }
+      const acceptedPayTo = accepted['payTo'];
+      if (typeof acceptedPayTo !== 'string' || acceptedPayTo.length === 0) {
+        return { ok: false, reason: 'accepted payTo is not a usable recipient' };
+      }
+      if (toAddress !== acceptedPayTo) {
+        return { ok: false, reason: `recipient mismatch: signed=${toAddress} accepted=${acceptedPayTo}` };
+      }
+    }
     return { ok: true };
   }
 
@@ -832,6 +903,23 @@ export class FacilitatorCore {
   private payerOf(payload: Record<string, any>): string | undefined {
     const sender = payload?.['payload']?.signedTransaction?.header?.sender;
     return typeof sender === 'string' ? sender : undefined;
+  }
+
+  /**
+   * The recipient the signed transaction actually pays, for transfer-family
+   * payloads. Returns undefined when the signed payload is absent, is not an
+   * object, is not transfer-family, or carries no usable string toAddress.
+   * Callers that need a recipient for non-transfer payloads fall back to the
+   * accepted payTo (the x402 payee). This is the ground truth for "who receives
+   * the funds"; the accepted payTo is only the claim.
+   */
+  private signedRecipientOf(payload: Record<string, any>): string | undefined {
+    const signedPayload = payload?.['payload']?.signedTransaction?.['payload'];
+    if (!signedPayload || typeof signedPayload !== 'object') return undefined;
+    const kind = signedPayload['type'];
+    if (kind !== 'transfer' && kind !== 'transferWithMemo' && kind !== 3) return undefined;
+    const toAddress = signedPayload['toAddress'];
+    return typeof toAddress === 'string' && toAddress.length > 0 ? toAddress : undefined;
   }
 
   private fail(errorReason: string, errorMessage: string, extra: Record<string, unknown> = {}): SettleBody {
