@@ -195,15 +195,15 @@ test('03. a newer requested version is answered with the server version, not an 
 
 // ─── 2. tools/list through the SDK ───────────────────────────────────────
 
-test('04. tools/list returns exactly the six existing tools', async () => {
+test('04. tools/list returns exactly the eight tools', async () => {
   const stub = await startStub();
   const { client } = await connect(stub);
   try {
     const { tools } = await client.listTools();
-    eq(tools.length, 6, 'tool count');
+    eq(tools.length, 8, 'tool count');
     eq(
       tools.map(t => t.name).join(','),
-      'registry.search,registry.card,trust.verify,trust.policy,commerce.simulate,audit.verify',
+      'registry.search,registry.card,trust.verify,trust.policy,commerce.simulate,audit.verify,discover_services,get_service_details',
       'tool names and order unchanged',
     );
   } finally {
@@ -220,7 +220,16 @@ test('05. every input schema is a usable JSON Schema object for the official cli
     for (const t of tools) {
       eq(t.inputSchema.type, 'object', `${t.name} schema type`);
       ok(t.inputSchema.properties && typeof t.inputSchema.properties === 'object', `${t.name} has properties`);
-      ok(Array.isArray(t.inputSchema.required) && t.inputSchema.required.length > 0, `${t.name} declares required`);
+      // A tool may legitimately require nothing (discover_services is all-optional
+      // by design: defaults status=active, limit=10). When required is present it
+      // must be an array, and every entry must name a declared property.
+      const req = t.inputSchema.required;
+      ok(req === undefined || Array.isArray(req), `${t.name} required is an array when present`);
+      if (Array.isArray(req)) {
+        for (const r of req) {
+          ok(Object.hasOwn(t.inputSchema.properties, r), `${t.name} required entry ${r} is a declared property`);
+        }
+      }
       eq(t.inputSchema.additionalProperties, false, `${t.name} rejects unknown fields`);
       ok(typeof t.description === 'string' && t.description.length > 20, `${t.name} documents itself`);
     }

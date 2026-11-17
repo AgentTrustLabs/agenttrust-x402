@@ -3,8 +3,10 @@
  *
  * Two implementations of one narrow `ServiceStore` interface:
  *
- *   - `createMemoryServiceStore()` — in-memory (Map + array). The default
- *     for tests and for any caller that does not need durability.
+ *   - `createMemoryServiceStore()` — in-memory (Map + array), in
+ *     `./memoryStore.ts`. The default for tests and for any caller that does
+ *     not need durability. It lives in its own module (no SQLite) so the MCP
+ *     server can load without importing `node:sqlite`.
  *   - `SqliteServiceStore` — durable, backed by `node:sqlite` (built into
  *     Node ≥22.5; no external dependency, no native build). The same
  *     component the facilitator already uses (`services/facilitator/src/
@@ -58,39 +60,6 @@ export interface ServiceStore {
   /** Audit rows, newest first. Filtered by service when an id is given. */
   auditLog(serviceId?: string): AuditEntry[];
   close(): void;
-}
-
-export function createMemoryServiceStore(): ServiceStore {
-  const services = new Map<string, ServiceRecord>();
-  const audit: AuditEntry[] = [];
-  return {
-    insert(service) {
-      if (services.has(service.id)) return { ok: false, reason: 'duplicate_id' };
-      services.set(service.id, structuredClone(service));
-      return { ok: true };
-    },
-    update(service) {
-      if (!services.has(service.id)) return;
-      services.set(service.id, structuredClone(service));
-    },
-    get(id) {
-      const s = services.get(id);
-      return s ? structuredClone(s) : undefined;
-    },
-    listAll() {
-      return [...services.values()].map(s => structuredClone(s));
-    },
-    appendAudit(entry) {
-      audit.push({ ...entry });
-    },
-    auditLog(serviceId) {
-      const rows = serviceId ? audit.filter(a => a.serviceId === serviceId) : [...audit];
-      return rows.reverse();
-    },
-    close() {
-      /* nothing to close */
-    },
-  };
 }
 
 // ─── SQLite ─────────────────────────────────────────────────────────────

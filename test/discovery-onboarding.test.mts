@@ -33,7 +33,8 @@ import {
   DISCOVERY_NETWORK,
   type ServiceRegistrationInput,
 } from '../src/discovery/registry.js';
-import { SqliteServiceStore, createMemoryServiceStore } from '../src/discovery/store.js';
+import { SqliteServiceStore } from '../src/discovery/store.js';
+import { createMemoryServiceStore } from '../src/discovery/memoryStore.js';
 import { createProductionVerifier } from '../src/discovery/verify.js';
 import { handleDiscoveryRequest } from '../src/discovery/http.js';
 import { startX402ResourceServer } from '../src/x402/resourceServer.js';

@@ -59,11 +59,8 @@ import {
   isConcordiumAccount,
   CCD_TESTNET_CAIP2,
 } from '../payments/x402.js';
-import {
-  createMemoryServiceStore,
-  type AuditEntry,
-  type ServiceStore,
-} from './store.js';
+import { createMemoryServiceStore } from './memoryStore.js';
+import type { AuditEntry, ServiceStore } from './store.js';
 
 // ─── constants ────────────────────────────────────────────────────────────
 

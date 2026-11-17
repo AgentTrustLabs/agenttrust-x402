@@ -42,7 +42,8 @@ import { eq, ok, notOk } from './helpers.mjs';
 import { createServiceRegistry, toServiceView } from '../src/discovery/registry.js';
 import { handleDiscoveryRequest } from '../src/discovery/http.js';
 import { onboardProvider } from '../src/discovery/onboarding.js';
-import { createMemoryServiceStore, SqliteServiceStore, type ServiceStore } from '../src/discovery/store.js';
+import { SqliteServiceStore, type ServiceStore } from '../src/discovery/store.js';
+import { createMemoryServiceStore } from '../src/discovery/memoryStore.js';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';

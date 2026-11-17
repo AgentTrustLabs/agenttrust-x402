@@ -37,7 +37,7 @@ import { eq, ok, notOk } from './helpers.mjs';
 import { createServiceRegistry, isDiscoverable, toServiceView } from '../src/discovery/registry.js';
 import { handleDiscoveryRequest } from '../src/discovery/http.js';
 import { onboardProvider } from '../src/discovery/onboarding.js';
-import { createMemoryServiceStore } from '../src/discovery/store.js';
+import { createMemoryServiceStore } from '../src/discovery/memoryStore.js';
 import { createX402Provider, ReplayStore } from '../src/x402/provider.js';
 import { buildPaymentRequirements, buildPaymentRequired, preflightPaymentPayload } from '../src/payments/x402.js';
 import { mockFacilitator } from '../src/commerce/simulation.js';

@@ -11,6 +11,10 @@
     "start": "FACILITATOR_MODE=mock node dist/server.js",
     "test": "npx tsx ../../test/facilitator.test.mts"
   },
+  "dependencies": {
+    "@concordium/web-sdk": "^12.0.2",
+    "@grpc/grpc-js": "^1.12.6"
+  },
   "engines": {
     "node": ">=20"
   }
