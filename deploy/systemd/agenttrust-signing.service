@@ -1,0 +1,28 @@
+[Unit]
+Description=AgentTrust x402 Sponsor Signing Service
+# The signing service verifies Owner authorization certificates and consumes
+# the authorization at the Owner before signing, so it cannot work without
+# the Owner socket. Requires (not just Wants): if the Owner is down, signing
+# is impossible and this service must fail fast instead of running uselessly.
+After=agenttrust-owner.service
+Requires=agenttrust-owner.service
+
+[Service]
+Type=simple
+User=agenttrust-signing
+Group=agenttrust
+# The signing socket must be connectable by the facilitator (different user,
+# same group). See the Owner unit for why the group-write bit matters.
+UMask=0007
+WorkingDirectory=/opt/agenttrust
+EnvironmentFile=/home/agenttrust-signing/.agenttrust/signing.env
+# Direct tsx binary, not npx: the wrapper does not forward SIGTERM to the
+# node process, so a stop through npx would leave the server running.
+ExecStart=/opt/agenttrust/node_modules/.bin/tsx scripts/sponsor-wallet-service.mts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

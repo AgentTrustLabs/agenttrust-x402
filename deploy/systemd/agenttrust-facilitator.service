@@ -1,0 +1,26 @@
+[Unit]
+Description=AgentTrust x402 Facilitator (real mode, Testnet)
+# The facilitator probes the signing service and the Owner socket at startup
+# and verifies the Testnet node identity, so it needs the network and both
+# services. Requires (not just Wants): without either socket, real mode
+# refuses to start.
+After=network-online.target agenttrust-owner.service agenttrust-signing.service
+Wants=network-online.target
+Requires=agenttrust-owner.service agenttrust-signing.service
+
+[Service]
+Type=simple
+User=agenttrust
+Group=agenttrust
+UMask=0007
+WorkingDirectory=/opt/agenttrust
+EnvironmentFile=/home/agenttrust/.agenttrust/facilitator.env
+# Direct tsx binary, not npx (see the signing unit).
+ExecStart=/opt/agenttrust/node_modules/.bin/tsx services/facilitator/src/server.ts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

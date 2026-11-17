@@ -1,0 +1,29 @@
+[Unit]
+Description=AgentTrust x402 Authorization Owner
+# The Owner makes no outbound connections, so it does not wait on the network.
+# It is the root of the dependency chain: the signing service and the
+# facilitator both require it.
+
+[Service]
+Type=simple
+User=agenttrust-owner
+Group=agenttrust
+# Sockets created by this service must be connectable by the facilitator and
+# the signing service (different users, same group). connect() needs write
+# permission on the socket file, so the umask must leave the group-write bit.
+UMask=0007
+WorkingDirectory=/opt/agenttrust
+EnvironmentFile=/home/agenttrust-owner/.agenttrust/owner.env
+# argv: <db-dir> <socket-path> <facilitator-uid> <signing-service-uid>
+# Both UIDs are explicit: argv[4] defaults to the Owner's own UID when omitted
+# (the launcher then refuses to start), and argv[5] defaults to unset, which
+# makes the Owner refuse every `consume` (signing can never complete).
+# These numbers MUST match the UIDs in deploy/recover-deployment.sh.
+ExecStart=/opt/agenttrust/node_modules/.bin/tsx scripts/authz-owner.mts /home/agenttrust-owner/.agenttrust/authz-dir /var/lib/agenttrust/sockets/authz.sock 1101 1103
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

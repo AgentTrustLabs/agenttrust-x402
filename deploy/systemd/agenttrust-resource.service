@@ -1,0 +1,28 @@
+[Unit]
+Description=AgentTrust x402 Resource Server (public API)
+# The resource server probes the facilitator at startup and verifies the
+# Testnet node identity, so it needs the network and the facilitator.
+# It does not talk to the Owner or the signing service directly.
+After=network-online.target agenttrust-facilitator.service
+Wants=network-online.target
+Requires=agenttrust-facilitator.service
+
+[Service]
+Type=simple
+User=agenttrust
+Group=agenttrust
+UMask=0007
+WorkingDirectory=/opt/agenttrust
+EnvironmentFile=/home/agenttrust/.agenttrust/resource.env
+# Direct tsx binary, not npx: the wrapper does not forward SIGTERM to the
+# node process. This server has its own SIGTERM/SIGINT handler that closes
+# the discovery registry and the HTTP server; it only runs when the signal
+# reaches the node process itself.
+ExecStart=/opt/agenttrust/node_modules/.bin/tsx scripts/x402-resource-server.mts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
