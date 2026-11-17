@@ -4,10 +4,18 @@
  * A real separate OS process that owns the Unix socket and holds the fake signer.
  * It never has key material — `createFakeSigner()` returns a deterministic signature.
  *
+ * Task 11: the service verifies an Owner authorization certificate and consumes
+ * the authorization at the Owner before signing. The Owner's public key, socket
+ * and UID are REQUIRED (exit 2 when unset).
+ *
  * Usage: npx tsx scripts/signing-ipc-service.mts <socket-path> <sponsor> <network> <allowed-uid>
+ * Env:   SIGNING_OWNER_PUBLIC_KEY=<SPKI DER hex>  (required)
+ *        SIGNING_OWNER_SOCKET=<owner socket path> (required)
+ *        SIGNING_OWNER_UID=<owner uid>            (required)
  */
 
 import { createSigningService, createFakeSigner } from '../services/facilitator/src/signingService.js';
+import { IpcOwnerConsumeClient } from '../services/facilitator/src/ownerAuthorization.js';
 import { chmodSync } from 'node:fs';
 
 const [socketPath, sponsor, network, allowedUidRaw] = process.argv.slice(2);
@@ -17,8 +25,23 @@ if (!socketPath || !sponsor || !network || !allowedUidRaw) {
 }
 const allowedUid = Number(allowedUidRaw);
 
+const ownerPublicKey = process.env['SIGNING_OWNER_PUBLIC_KEY'];
+const ownerSocket = process.env['SIGNING_OWNER_SOCKET'];
+const ownerUidRaw = process.env['SIGNING_OWNER_UID'];
+if (!ownerPublicKey || !ownerSocket || !ownerUidRaw) {
+  console.error('refusing to start: SIGNING_OWNER_PUBLIC_KEY, SIGNING_OWNER_SOCKET and SIGNING_OWNER_UID are required (Task 11)');
+  process.exit(2);
+}
+const ownerConsume = new IpcOwnerConsumeClient({ socketPath: ownerSocket, ownerUid: Number(ownerUidRaw) });
+
 const signer = createFakeSigner({ signature: 'ee'.repeat(64) });
-const svc = createSigningService({ accountSigner: signer, sponsorAddress: sponsor, network, allowedUid });
+const svc = createSigningService({
+  accountSigner: signer,
+  sponsorAddress: sponsor,
+  network,
+  allowedUid,
+  ownerAuthorization: { publicKey: ownerPublicKey, consume: ownerConsume },
+});
 
 await svc.listen(socketPath);
 try {

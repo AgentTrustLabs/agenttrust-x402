@@ -14,6 +14,8 @@
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, chmodSync, writeFileSync } from 'node:fs';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -52,6 +54,9 @@ const req = (requestId: string, digest: string, over: Record<string, unknown> = 
     amount: '250000',
     expiry: Math.floor(Date.now() / 1000) + 200,
     energy: '3000',
+    transactionDigest: 'cd'.repeat(32),
+    transactionType: 'transfer',
+    maxFeeMicroCcd: '10000000',
     ...over,
   },
 });
@@ -80,6 +85,10 @@ mkdirSync(dbDir, { mode: 0o700 });
 await run('chown', ['-R', `${OWNER_USER}:authclients`, base], 'root');
 await run('chmod', ['770', base], 'root');
 await run('chmod', ['700', dbDir], 'root');
+// Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
+const ownerKeyFile = join(dbDir, 'owner-key.pem');
+writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+await run('chown', [`${OWNER_USER}:authclients`, ownerKeyFile], 'root');
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const clientScript = join(process.cwd(), 'scripts/authz-client.mts');
@@ -94,6 +103,7 @@ const startOwner = async (crashAt = 0): Promise<Owner> => {
     `TASK348_PEERCRED_BIN=${peercredBin}`,
     `CRASH_AT=${crashAt}`,
     'AUTHZ_SEED_FIXTURES=1', // F1: fixtures are opt-in now; these tests authorize the seeded digests a..e.
+    `AUTHZ_AUTHORIZATION_KEY_FILE=${ownerKeyFile}`,
     'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;

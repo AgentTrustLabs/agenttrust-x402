@@ -16,6 +16,10 @@ import { SqliteSettlementRepository } from '../services/facilitator/src/reposito
 import { paymentDigest, requirementsKey } from '../services/facilitator/src/store.js';
 import { toSdkV1Transaction, computeTransactionHash } from '../services/facilitator/src/signer.js';
 import { canTransition, isTerminal } from '../services/facilitator/src/state.js';
+import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
+import { convertV2ToSdkV1 } from '../services/facilitator/src/wireConverter.js';
+import { signingDigestOf, transactionEnergyOf } from '../services/facilitator/src/signingService.js';
+import { SIMPLE_TRANSFER_BASE_COST } from '../services/facilitator/src/energy.js';
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -272,6 +276,56 @@ console.log('\n── W5. crash immediately after durable hash persistence, befo
   try {
     repo.noteVerified(d, k);
     repo.claim(d, k);
+    // Task 11 — a persisted hash implies a prior approval: the first attempt
+    // authorized the exact transaction before signing it. Seed that approval
+    // (unconsumed — the mock signer never consumes) so the recovery process
+    // can recover its certificate; without it the resume fails closed. The
+    // approval binds the exact converted transaction the server will
+    // authorize for, under the server's default authorization policy.
+    {
+      const raw = p.payload.signedTransaction;
+      const withPolicyEnergy = {
+        ...raw,
+        header: { ...raw.header, executionEnergyAmount: Number(SIMPLE_TRANSFER_BASE_COST) },
+      };
+      const conversion = convertV2ToSdkV1(withPolicyEnergy, {
+        network: CAIP2,
+        sponsorAddress: SPONSOR,
+        maxExecutionEnergy: 1_000,
+      });
+      if (!conversion.ok) throw new Error(`W5 seed conversion failed: ${conversion.message}`);
+      const wire = conversion.wire;
+      const energy = transactionEnergyOf(wire);
+      if (energy === null) throw new Error('W5 seed: no recomputed energy');
+      const owner = new LocalAuthorizationClient({
+        policy: {
+          network: CAIP2,
+          sponsor: SPONSOR,
+          maxEnergy: 1_000n,
+          maxExpiryOffsetSeconds: 600,
+          allowedAssets: ['CCD'],
+          policyVersion: 'local-v1',
+        },
+        repository: repo,
+        now: () => Date.now(),
+      });
+      const auth = await owner.authorize({
+        paymentDigest: d,
+        network: CAIP2,
+        version: 1,
+        sender: SENDER,
+        sponsor: SPONSOR,
+        recipient: PAY_TO,
+        asset: 'CCD',
+        amount: '250000',
+        expiry: NOW + 200,
+        energy,
+        transactionDigest: signingDigestOf(wire),
+        transactionType: 'transfer',
+        maxFeeMicroCcd: '10000000',
+      });
+      if (auth.outcome !== 'approved') throw new Error(`W5 seed authorization failed: ${auth.outcome}/${auth.reason}`);
+    }
     const signed = { ...p.payload.signedTransaction, signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: { 0: { 0: 'bb'.repeat(64) } } } };
     txHash = computeTransactionHash(signed);
     repo.prepare(d, txHash);

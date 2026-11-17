@@ -14,7 +14,9 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, ok } from './helpers.mjs';
@@ -28,14 +30,17 @@ const test = (name: string, fn: () => Promise<void> | void) => tests.push([name,
 
 const ws = (tag: string) => {
   const dir = mkdtempSync(join(tmpdir(), `agenttrust-owncfg-${tag}-`));
-  return { dir, db: join(dir, 'auth.db'), sock: join(dir, 'authz.sock'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  // Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
+  const keyFile = join(dir, 'owner-key.pem');
+  writeFileSync(keyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  return { dir, db: join(dir, 'auth.db'), sock: join(dir, 'authz.sock'), keyFile, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
 const startOwner = (w: ReturnType<typeof ws>, extraEnv: Record<string, string> = {}): { proc: ChildProcess; ready: Promise<boolean> } => {
   // Unless the test opts in explicitly, the child must NOT inherit a seeding
   // variable from the ambient environment: the default (unset) is what is
   // under test.
-  const env: Record<string, string | undefined> = { ...process.env, ...extraEnv };
+  const env: Record<string, string | undefined> = { ...process.env, AUTHZ_AUTHORIZATION_KEY_FILE: w.keyFile, ...extraEnv };
   if (!('AUTHZ_SEED_FIXTURES' in extraEnv)) delete env.AUTHZ_SEED_FIXTURES;
   const proc = spawn('npx', ['tsx', ownerScript, w.dir, w.sock, '1001'], {
     env,

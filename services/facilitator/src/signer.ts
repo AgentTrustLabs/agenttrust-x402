@@ -18,6 +18,18 @@ import { createHash } from 'node:crypto';
 import { AccountTransactionV1 } from '@concordium/web-sdk/transactions';
 import { AccountAddress, Energy, AccountTransactionType, Payload, Transaction } from '@concordium/web-sdk';
 import { ConfigurationError } from './config.js';
+import type { OwnerAuthorizationCertificate } from './ownerAuthorization.js';
+
+/**
+ * Per-call signing options (Task 11). The facilitator passes the Owner's
+ * authorization certificate and the payment digest it belongs to; a real
+ * (IPC) signer forwards both to the signing service, which verifies and
+ * consumes the authorization before signing. Mock signers ignore them.
+ */
+export interface AddSponsorSignatureOptions {
+  authorization?: OwnerAuthorizationCertificate;
+  paymentDigest?: string;
+}
 
 export interface SignerInfo {
   /** Sponsor account address (base58check). Public identifier, never a secret. */
@@ -97,8 +109,13 @@ export interface SponsorSigner {
   /**
    * Adds the sponsor signature. The mock does not sign: it returns the input unchanged but
    * marked, so a caller cannot mistake the result for a signed transaction.
+   *
+   * Task 11: `opts` carries the Owner's authorization certificate and the
+   * payment digest it belongs to. A real signer MUST forward both to the
+   * signing service; a signer that signs without them is a gap, not a
+   * feature. Mock signers ignore them.
    */
-  addSponsorSignature(txJson: unknown): Promise<unknown>;
+  addSponsorSignature(txJson: unknown, opts?: AddSponsorSignatureOptions): Promise<unknown>;
   /** Submits the transaction. The mock never contacts a chain. */
   submitTransaction(txJson: unknown): Promise<string>;
   /** Waits for finalization. */
@@ -249,7 +266,7 @@ export function createLedgerSigner(opts: LedgerSignerOptions): SponsorSigner {
     info: () => inner.info(),
     // Wraps the mock: outcomes are simulated, never real.
     simulated: true,
-    addSponsorSignature: tx => inner.addSponsorSignature(tx),
+    addSponsorSignature: (tx, _opts) => inner.addSponsorSignature(tx, _opts),
     async submitTransaction(txJson) {
       // Recorded BEFORE the attempt: even a throwing submission is an attempt, and the count
       // must reflect that, not just the successes.

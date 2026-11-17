@@ -64,6 +64,10 @@ const request = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest
   amount: '250000',
   expiry: NOW + 200,
   energy: 700n,
+  // Task 11 — the authorization binds the exact transaction and fee policy.
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 

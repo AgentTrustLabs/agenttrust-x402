@@ -10,7 +10,9 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IpcAuthorizationClient } from '../services/facilitator/src/authorization.js';
@@ -58,6 +60,10 @@ mkdirSync(dbDir, { mode: 0o700 });
 await run('chown', ['-R', `${OWNER_USER}:authclients`, base], 'root');
 await run('chmod', ['770', base], 'root');
 await run('chmod', ['700', dbDir], 'root');
+// Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
+const ownerKeyFile = join(dbDir, 'owner-key.pem');
+writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+await run('chown', [`${OWNER_USER}:authclients`, ownerKeyFile], 'root');
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const peercredBin = join(process.cwd(), 'scripts/authz-peercred');
@@ -73,11 +79,14 @@ const req = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest => 
   amount: '250000',
   expiry: EXPIRY,
   energy: 3000n,
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 
 try {
-  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, 'AUTHZ_SEED_FIXTURES=1', 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, 'AUTHZ_SEED_FIXTURES=1', `AUTHZ_AUTHORIZATION_KEY_FILE=${ownerKeyFile}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   await new Promise<void>((resolve) => {
     const t = setTimeout(() => resolve(), 40000);

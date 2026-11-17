@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { loadWalletExportSigner, loadSponsorExportSigner, getWalletExportAddress, WalletExportError } from '../services/facilitator/src/walletExportLoader.js';
 import { createSigningService } from '../services/facilitator/src/signingService.js';
 import { createFakeSigner, signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx, fakeConsumedClient } from './owner-authz-helper.mjs';
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -240,14 +241,19 @@ console.log('\n── 8. integration with the signing service (test double) ─�
     parseWallet: () => syntheticExport as never,
     buildAccountSigner: () => doubleSigner() as never,
   });
+  // Task 11: the service cannot sign without Owner authorization evidence.
+  const ownerKey = makeTestOwnerKey();
   const svc = createSigningService({
     accountSigner: signer as never,
     sponsorAddress: syntheticExport.value.address,
     network: CAIP2,
     allowedUid: 1001,
+    ownerAuthorization: { publicKey: ownerKey.publicKeyHex, consume: fakeConsumedClient() },
   });
-  // Protocol v2: the service validates the digest against the transaction it
-  // parses. The fixture's sponsor is the synthetic export's address.
+  // Protocol v3: the service validates the digest against the transaction it
+  // parses, and verifies the Owner authorization certificate for the exact
+  // transaction before signing. The fixture's sponsor is the synthetic
+  // export's address.
   const fixtureTx = {
     version: 1,
     header: {
@@ -262,13 +268,20 @@ console.log('\n── 8. integration with the signing service (test double) ─�
     signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
   };
   const res = await svc.sign({
-    protocolVersion: 2,
+    protocolVersion: 3,
     requestId: 'r1',
     operation: 'sign',
     digest: signingDigestOf(fixtureTx),
     transaction: fixtureTx,
     sponsor: syntheticExport.value.address,
     network: CAIP2,
+    authorization: issueTestCertificate(ownerKey.privateKey, certFieldsForTx(fixtureTx, {
+      paymentDigest: 'ab'.repeat(32),
+      recipient: '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8',
+      amount: '250000',
+      network: CAIP2,
+    })),
+    paymentDigest: 'ab'.repeat(32),
   });
   ok(res.outcome === 'signed', `22. signing service signs with the loaded signer: ${res.outcome}`);
   ok(res.signature !== null, '23. a signature was produced');

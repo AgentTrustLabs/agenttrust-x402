@@ -17,12 +17,13 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, mkdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { IpcAuthorizationClient, type AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
 
 const SPONSOR = '3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -47,6 +48,10 @@ const sharedDb = join(base, 'shared.db');
 const sock = join(base, 'authz.sock');
 const ownerLog = join(ownerDir, 'owner.log');
 mkdirSync(ownerDir, { mode: 0o700 });
+// Task 11: the Owner needs an authorization-signing key. Ephemeral for this
+// harness run: generated here, written 0600, never logged or reused.
+const ownerKeyFile = join(base, 'owner-authz-key.pem');
+writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const nowSec = () => Math.floor(Date.now() / 1000);
 
@@ -60,6 +65,7 @@ const ownerEnv = (maxEnergy: string, crashAt = 0): Record<string, string> => ({
   AUTHZ_POLICY_VERSION: 'authz-prod-v1',
   AUTHZ_DB_FILE: sharedDb,
   AUTHZ_SEED_FIXTURES: '0',
+  AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
   TASK348_LOG: ownerLog,
   CRASH_AT: String(crashAt),
 });
@@ -109,6 +115,7 @@ const startOwnerOn = (dbFile: string, sockPath: string, dirPath: string, envOver
       AUTHZ_ALLOWED_ASSETS: 'CCD',
       AUTHZ_POLICY_VERSION: 'authz-prod-v1',
       AUTHZ_DB_FILE: dbFile,
+      AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
       TASK348_LOG: join(dirPath, 'owner.log'),
       CRASH_AT: '0',
       ...envOver,
@@ -152,6 +159,9 @@ const rawAuthorize = (requestId: string, digest: string, over: Record<string, un
         amount: '250000',
         expiry: nowSec() + 200,
         energy: '300',
+        transactionDigest: 'cd'.repeat(32),
+        transactionType: 'transfer',
+        maxFeeMicroCcd: '10000000',
         ...over,
       },
     };
@@ -187,6 +197,9 @@ const req = (digest: string, over: Partial<AuthorizationRequest> = {}): Authoriz
   amount: '250000',
   expiry: nowSec() + 200,
   energy: 300n,
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 const D = (c: string) => c.repeat(64);
@@ -328,7 +341,7 @@ const recordingSigner = (calls: { sign: number; submit: number }) => ({
   getTokenDecimals: async () => { throw new Error('not used in verification'); },
 });
 
-// Owner cap 500 < derived transfer energy (603) → the owner is the authoritative
+// Owner cap 500 < recomputed transfer energy (635) → the owner is the authoritative
 // gate: settle fails at authorization and the signer is never called.
 await stopOwner(owner);
 owner = await startOwner('500');
@@ -348,7 +361,7 @@ owner = await startOwner('500');
   core.store.close();
 }
 
-// Owner cap 1000 ≥ 603 → approval, then exactly one signer call; the mock
+// Owner cap 1000 ≥ 635 → approval, then exactly one signer call; the mock
 // submitter refuses to broadcast, so the only outcome is settlement_pending.
 await stopOwner(owner);
 owner = await startOwner('1000');

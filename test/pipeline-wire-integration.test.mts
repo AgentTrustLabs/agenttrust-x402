@@ -191,7 +191,9 @@ test('04. wrong sponsor is rejected before the signer', async () => {
   (bad.paymentPayload as any).accepted.extra.feePayer = RECIPIENT;
   const res = await core.settle(bad);
   check('04. settle refused', res.success === false, String(res.errorReason));
-  eq(calls.convert, 0, 'converter not reached');
+  // Task 11: conversion runs before authorization (to bind the request), so
+  // the converter is reached once; the signer is never reached.
+  eq(calls.convert, 1, 'converter called once to bind the authorization request');
   eq(calls.sign, 0, 'signer not reached');
   rm();
 });
@@ -242,7 +244,11 @@ test('07. unsupported transaction version is rejected', async () => {
   rm();
 });
 
-// ── 8. rejected authorization → zero converter/signer ───────────────────────
+// ── 8. rejected authorization → signer never reached ────────────────────────
+// Task 11: wire conversion runs BEFORE authorization (the authorization must
+// bind the exact converted transaction), so a rejected authorization still
+// sees exactly one converter call — to build the binding — but the signer
+// and submitter are never reached.
 
 for (const [label, outcome, reason] of [
   ['rejected', 'rejected', 'wrong_sponsor'],
@@ -250,7 +256,7 @@ for (const [label, outcome, reason] of [
   ['owner_unavailable', 'owner_unavailable', 'owner_unavailable'],
   ['protocol_error', 'protocol_error', 'malformed_request'],
 ] as const) {
-  test(`08. ${label} authorization → zero converter and signer calls`, async () => {
+  test(`08. ${label} authorization → signer never reached`, async () => {
     const { db, rm } = mk();
     const calls = { convert: 0, sign: 0, submit: 0, convertInput: [] as unknown[] };
     const authz: AuthorizationClient = {
@@ -264,7 +270,7 @@ for (const [label, outcome, reason] of [
     const { core } = buildCore({ calls, dbPath: db, now: () => NOW * 1000, authz });
     const res = await core.settle(envelope());
     check(`08. ${label}: refused`, res.success === false, String(res.errorReason));
-    eq(calls.convert, 0, 'converter never called');
+    eq(calls.convert, 1, 'converter called once to bind the authorization request');
     eq(calls.sign, 0, 'signer never called');
     eq(calls.submit, 0, 'submit never called');
     rm();

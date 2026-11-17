@@ -12,10 +12,12 @@ import { eq, ok, notOk } from './helpers.mjs';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
-import type { AuthorizationClient, AuthorizationResponse } from '../services/facilitator/src/authorization.js';
+import type { AuthorizationClient, AuthorizationRequest, AuthorizationResponse } from '../services/facilitator/src/authorization.js';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { issueTestCertificate, makeTestOwnerKey } from './owner-authz-helper.mts';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -109,7 +111,7 @@ const coreWith = (opts: {
 };
 
 /** A client whose response can be driven per call, for mismatch and malformed tests. */
-const scripted = (fn: (req: { paymentDigest: string; sponsor: string; recipient: string; sender: string; energy: bigint }) => AuthorizationResponse | 'malformed' | 'unknown-json'): AuthorizationClient => ({
+const scripted = (fn: (req: AuthorizationRequest) => AuthorizationResponse | 'malformed' | 'unknown-json'): AuthorizationClient => ({
   authorize: async (req) => {
     const r = fn(req);
     if (r === 'malformed') return { outcome: 'protocol_error', reason: 'malformed_request', detail: 'owner returned garbage' };
@@ -118,14 +120,46 @@ const scripted = (fn: (req: { paymentDigest: string; sponsor: string; recipient:
   },
 });
 
-const approved: AuthorizationResponse = { outcome: 'approved', reason: null, detail: null };
+/**
+ * Task 11 — an approval must carry verifiable evidence, not merely a
+ * boolean. The scripted Owner issues a REAL certificate (test key) bound
+ * to the exact request it approves; the core fails closed on an approval
+ * without one. The mock signer never verifies the signature — what this
+ * suite owns is the core's gate, not the signing service's verification
+ * (covered by owner-authorization-binding + the IPC suites).
+ */
+const ownerKey = makeTestOwnerKey();
+const approvedFor = (req: AuthorizationRequest): AuthorizationResponse => ({
+  outcome: 'approved',
+  reason: null,
+  detail: null,
+  certificate: issueTestCertificate(ownerKey.privateKey, {
+    version: 1,
+    authorizationId: randomUUID(),
+    paymentDigest: req.paymentDigest,
+    transactionDigest: req.transactionDigest,
+    transactionType: req.transactionType,
+    network: req.network,
+    sender: req.sender,
+    sponsor: req.sponsor,
+    recipient: req.recipient,
+    asset: req.asset,
+    amount: req.amount,
+    expiry: req.expiry,
+    energy: String(req.energy),
+    maxEnergy: '10000',
+    maxFeeMicroCcd: req.maxFeeMicroCcd,
+    policyVersion: 'test',
+    issuedAt: Date.now(),
+  }),
+});
 const tests: Array<[string, () => Promise<void> | void]> = [];
 const test = (name: string, fn: () => Promise<void> | void) => tests.push([name, fn]);
 
 // ═══ 1. successful authorization ═════════════════════════════════════════════
 
 test('01. successful authorization reaches the signer exactly once', async () => {
-  const { core, calls } = coreWith({ authorization: { authorize: async () => approved } });
+  const { core, calls } = coreWith({ authorization: { authorize: async (req) => approvedFor(req) } });
   const p = payloadFixture();
   const r = await core.settle(envelope(p, p.accepted));
   check('settle succeeded', r.success === true, String(r.errorReason));
@@ -178,11 +212,24 @@ test('07b. owner client throwing never reaches the signer', async () => {
 });
 
 test('07c. an "approved" outcome with no reason field still passes the gate', async () => {
-  const { core, calls } = coreWith({ authorization: { authorize: async () => ({ outcome: 'approved' } as AuthorizationResponse) } });
+  // Task 11 — the reason field is absent, but the approval still carries its
+  // certificate: the gate requires evidence, not a reason string.
+  const { core, calls } = coreWith({ authorization: { authorize: async (req) => ({ outcome: 'approved', certificate: approvedFor(req).certificate } as AuthorizationResponse) } });
   const p = payloadFixture();
   const r = await core.settle(envelope(p, p.accepted));
   check('settle succeeded', r.success === true, String(r.errorReason));
   eq(calls.addSponsorSignature, 1, 'signer reached once');
+});
+
+test('07d. an "approved" outcome WITHOUT a certificate fails closed before the signer', async () => {
+  // Task 11 — a bare boolean is not evidence. The core must refuse an
+  // approval that carries no certificate, even when the outcome is 'approved'.
+  const { core, calls } = coreWith({ authorization: { authorize: async () => ({ outcome: 'approved', reason: null, detail: null }) } });
+  const p = payloadFixture();
+  const r = await core.settle(envelope(p, p.accepted));
+  check('settle refused', r.success === false, String(r.errorReason));
+  eq(r.errorReason, 'authorization_failed', 'authorization_failed');
+  eq(calls.addSponsorSignature, 0, 'signer not reached');
 });
 
 // ═══ 8. digest / context mismatch ═════════════════════════════════════════════
@@ -204,7 +251,7 @@ test('08a. owner approving a DIFFERENT payment digest must not satisfy this paym
 test('08b. sponsor mismatch in the authorization request is rejected by the owner', async () => {
   const { core, calls } = coreWith({
     authorization: scripted((req) => {
-      return req.sponsor === SPONSOR ? approved : { outcome: 'rejected', reason: 'wrong_sponsor', detail: null };
+      return req.sponsor === SPONSOR ? approvedFor(req) : { outcome: 'rejected', reason: 'wrong_sponsor', detail: null };
     }),
   });
   // Tamper the requirements so the request sponsor differs from the policy sponsor.
@@ -217,7 +264,7 @@ test('08b. sponsor mismatch in the authorization request is rejected by the owne
 
 test('08c. recipient mismatch is rejected by the owner', async () => {
   const { core, calls } = coreWith({
-    authorization: scripted((req) => (req.recipient === PAY_TO ? approved : { outcome: 'rejected', reason: 'invalid_recipient', detail: null })),
+    authorization: scripted((req) => (req.recipient === PAY_TO ? approvedFor(req) : { outcome: 'rejected', reason: 'invalid_recipient', detail: null })),
   });
   const p = payloadFixture();
   const tampered = { ...p.accepted, payTo: '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5' };
@@ -228,7 +275,7 @@ test('08c. recipient mismatch is rejected by the owner', async () => {
 
 test('08d. sponsor equal to sender is rejected', async () => {
   const { core, calls } = coreWith({
-    authorization: scripted((req) => (req.sponsor === req.sender ? { outcome: 'rejected', reason: 'sponsor_is_sender', detail: null } : approved)),
+    authorization: scripted((req) => (req.sponsor === req.sender ? { outcome: 'rejected', reason: 'sponsor_is_sender', detail: null } : approvedFor(req))),
   });
   // The authorization request's sponsor is taken from requirements.extra.feePayer.
   // Setting it equal to the sender must be refused by the owner.
@@ -243,7 +290,7 @@ test('08d. sponsor equal to sender is rejected', async () => {
 
 test('09. energy over the owner cap is rejected', async () => {
   const { core, calls } = coreWith({
-    authorization: scripted((req) => (req.energy > 500n ? { outcome: 'rejected', reason: 'energy_exceeds_cap', detail: null } : approved)),
+    authorization: scripted((req) => (req.energy > 500n ? { outcome: 'rejected', reason: 'energy_exceeds_cap', detail: null } : approvedFor(req))),
   });
   const p = payloadFixture();
   const r = await core.settle(envelope(p, p.accepted));
@@ -254,7 +301,7 @@ test('09. energy over the owner cap is rejected', async () => {
 test('09b. energy derived from the transaction is positive and bounded', async () => {
   const seen: bigint[] = [];
   const { core } = coreWith({
-    authorization: { authorize: async (req) => { seen.push(req.energy); return approved; } },
+    authorization: { authorize: async (req) => { seen.push(req.energy); return approvedFor(req); } },
   });
   const p = payloadFixture();
   await core.settle(envelope(p, p.accepted));

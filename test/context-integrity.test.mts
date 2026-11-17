@@ -54,6 +54,10 @@ const request = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest
   amount: '250000',
   expiry: NOW + 200,
   energy: 700n,
+  // Task 11 — the authorization binds the exact transaction and fee policy.
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 
@@ -167,6 +171,16 @@ test('08. digest not matching the canonical context does not recover as approved
   const rec = await client.recover(request({ paymentDigest: 'b'.repeat(64) }));
   eq(rec.outcome, 'unknown', 'unknown digest');
   eq(rec.reason, 'no_durable_decision', 'reason');
+  rm();
+});
+
+// ── 8b. Task 11: transaction binding changed ─────────────────────────────────
+
+test('08b. changed transactionDigest does not recover as approved', async () => {
+  const { rm, client } = setup();
+  await client.authorize(request());
+  const rec = await client.recover(request({ transactionDigest: 'ab'.repeat(32) }));
+  ok(rec.outcome !== 'approved', `transactionDigest changed → ${rec.outcome}/${rec.reason}`);
   rm();
 });
 

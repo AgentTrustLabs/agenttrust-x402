@@ -29,7 +29,7 @@
 import { ConfigurationError } from './config.js';
 import { createSdkSponsorSigner, isSignedTransactionWrapper } from './sdkSponsorSigner.js';
 import { IpcAccountSigner } from './signingService.js';
-import type { SponsorSigner } from './signer.js';
+import type { SponsorSigner, AddSponsorSignatureOptions } from './signer.js';
 import { ConcordiumTransactionSubmitter } from './concordiumTransactionSubmitter.js';
 
 export interface IpcSponsorSignerOptions {
@@ -169,12 +169,13 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
       // itself still holds no key material.
       canSign: true,
     }),
-    addSponsorSignature: (txJson: unknown) => {
-      // Per-call binding (protocol v2): a FRESH IpcAccountSigner bound to THIS
-      // transaction, and a FRESH sdk adapter wrapping it. The SDK computes the
-      // digest from this transaction; the bound signer checks it client-side and
-      // the service re-verifies it from the parsed transaction. No shared mutable
-      // binding exists, so concurrent settles can never cross-bind.
+    addSponsorSignature: (txJson: unknown, callOpts?: AddSponsorSignatureOptions) => {
+      // Per-call binding (protocol v3): a FRESH IpcAccountSigner bound to THIS
+      // transaction AND to the Owner authorization certificate for it. The SDK
+      // computes the digest from this transaction; the bound signer checks it
+      // client-side and the service re-verifies it from the parsed transaction
+      // before signing. No shared mutable binding exists, so concurrent
+      // settles can never cross-bind.
       //
       // Bind the BARE transaction, not the x402 `{ signedTransaction }` wrapper:
       // the SDK adapter unwraps the wrapper before calling Transaction.sponsor,
@@ -188,6 +189,11 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
         network: opts.network,
         ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
         transaction: bare,
+        // Task 11 — the certificate + payment digest ride with the bound
+        // signer. Without them the signer refuses client-side, and the
+        // service would reject the request as `authorization_missing`.
+        ...(callOpts?.authorization !== undefined ? { authorization: callOpts.authorization } : {}),
+        ...(callOpts?.paymentDigest !== undefined ? { paymentDigest: callOpts.paymentDigest } : {}),
       });
       const boundSdk = createSdkSponsorSigner({
         sponsorAddress: opts.sponsorAddress,

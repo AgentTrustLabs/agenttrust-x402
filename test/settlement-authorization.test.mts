@@ -12,10 +12,12 @@ import { eq, ok } from './helpers.mjs';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
-import type { AuthorizationClient, AuthorizationResponse } from '../services/facilitator/src/authorization.js';
+import type { AuthorizationClient, AuthorizationRequest, AuthorizationResponse } from '../services/facilitator/src/authorization.js';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { issueTestCertificate, makeTestOwnerKey } from './owner-authz-helper.mts';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -90,8 +92,39 @@ function countingSigner(behaviour: Parameters<typeof createMockSigner>[0] extend
   };
 }
 
-const stubClient = (response: AuthorizationResponse | (() => Promise<AuthorizationResponse>)): AuthorizationClient => ({
-  authorize: async () => (typeof response === 'function' ? response() : response),
+const stubClient = (response: AuthorizationResponse | ((req: AuthorizationRequest) => Promise<AuthorizationResponse>)): AuthorizationClient => ({
+  authorize: async (req) => (typeof response === 'function' ? response(req) : response),
+});
+
+/**
+ * Task 11 — an approval must carry verifiable evidence. The stub Owner
+ * issues a REAL certificate (test key) bound to the exact request it
+ * approves; the core fails closed on an approval without one.
+ */
+const ownerKey = makeTestOwnerKey();
+const approvedFor = (req: AuthorizationRequest): AuthorizationResponse => ({
+  outcome: 'approved',
+  reason: null,
+  detail: null,
+  certificate: issueTestCertificate(ownerKey.privateKey, {
+    version: 1,
+    authorizationId: randomUUID(),
+    paymentDigest: req.paymentDigest,
+    transactionDigest: req.transactionDigest,
+    transactionType: req.transactionType,
+    network: req.network,
+    sender: req.sender,
+    sponsor: req.sponsor,
+    recipient: req.recipient,
+    asset: req.asset,
+    amount: req.amount,
+    expiry: req.expiry,
+    energy: String(req.energy),
+    maxEnergy: '10000',
+    maxFeeMicroCcd: req.maxFeeMicroCcd,
+    policyVersion: 'test',
+    issuedAt: Date.now(),
+  }),
 });
 
 function mk() {
@@ -118,7 +151,7 @@ const test = (name: string, fn: () => Promise<void> | void) => tests.push([name,
 // ═══ 1. approved → signer reached exactly once ═════════════════════════════════
 
 test('01. approved authorization reaches the signer exactly once', async () => {
-  const { core, calls } = coreWith({ authorization: stubClient({ outcome: 'approved', reason: null, detail: null }) });
+  const { core, calls } = coreWith({ authorization: stubClient(async (req) => approvedFor(req)) });
   const payload = payloadFixture();
   const r = await core.settle(envelope(payload, payload.accepted));
   check('settle succeeded', r.success === true, JSON.stringify(r).slice(0, 120));

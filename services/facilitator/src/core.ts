@@ -21,8 +21,10 @@ import { paymentDigest, requirementsKey } from './store.js';
 import { SqliteSettlementRepository, evidenceDigestOf, type SettlementRepository } from './repository.js';
 import type { AuthorizationClient, AuthorizationRequest } from './authorization.js';
 import { LocalAuthorizationClient } from './authorization.js';
-import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST, ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
+import { SIMPLE_TRANSFER_BASE_COST, ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
 import { convertV2ToSdkV1 } from './wireConverter.js';
+import { signingDigestOf, transactionEnergyOf } from './signingService.js';
+import type { OwnerAuthorizationCertificate } from './ownerAuthorization.js';
 import type { SenderVerificationResult } from './senderVerifier.js';
 import type { WireConversionPolicy, SdkV1SignableTransaction } from './wireConverter.js';
 
@@ -173,7 +175,9 @@ export class FacilitatorCore {
         now: this.now,
       });
     // Wire conversion policy. The energy cap mirrors the authorization cap; the
-    // authoritative energy VALUE comes from deriveEnergyExposure(), never from the client.
+    // authoritative energy VALUE comes from the SDK recomputation
+    // (`transactionEnergyOf`), never from the client — and never from the
+    // JSON-length estimate either (Task 11: it disagrees with the recomputation).
     this.maxWireEnergy = opts.maxWireEnergy ?? 1_000;
     // Fee cap. Same default as FACILITATOR_MAX_FEE_MICROCCD (10 CCD); the server
     // passes the configured value. Enforced in settle() before signing.
@@ -302,7 +306,11 @@ export class FacilitatorCore {
     //
     // A `resumable` payment already has a durable approval (it was authorized before the
     // crash that produced the persisted hash), so re-authorizing would be refused by the
-    // durable gate. It skips the boundary and continues with the persisted hash.
+    // durable gate. It RECOVERS that approval instead (below): recovery re-validates
+    // the approval against the exact transaction context and re-issues its
+    // certificate. A consumed approval cannot be recovered — the payment is
+    // then stuck in `prepared` until an operator intervenes (see the Task 11
+    // report's known limitations).
     // ── Sender signature verification (BEFORE authorization) ────────────────
     // ORDER: validate → claim → SENDER VERIFY → authorize → recover → convert → signer.
     // A resumable payment already passed verification when its hash was durably persisted.
@@ -321,124 +329,20 @@ export class FacilitatorCore {
     // the energy policy. Hoisted so the wire converter can consume the SAME value the
     // authorization boundary priced — a client-supplied energy never becomes the policy
     // decision.
-    let derivedEnergy: bigint | null = null;
-    if (!resumableHash) {
-      const preimage = payload['payload']?.signedTransaction;
-      const energy = deriveEnergyExposure(preimage, { transactionSpecificCost: SIMPLE_TRANSFER_BASE_COST });
-      derivedEnergy = energy;
-      if (energy === null) {
-        this.store.markFailed(digest, 'authorization could not price the transaction');
-        return this.fail('authorization_failed', 'could not derive energy exposure from the transaction', { digest });
-      }
-      const requirementsAny = requirements as Record<string, unknown>;
-      const acceptedAny = (payload['accepted'] ?? {}) as Record<string, unknown>;
-      const header = (preimage as Record<string, unknown>)['header'] as Record<string, unknown>;
-      const authRequest: AuthorizationRequest = {
-        paymentDigest: digest,
-        network: this.network,
-        version: 1,
-        sender: String(header['sender']),
-        sponsor: String((requirementsAny['extra'] as Record<string, unknown> | undefined)?.['feePayer'] ?? this.signer.info().address),
-        // The authorization must name the recipient the signed transaction actually
-        // pays — not merely the claimed one. checkAgreement already binds the two for
-        // transfer-family payloads; using the signed recipient here keeps the durable
-        // authorization record bound to the ground truth even if the agreement check
-        // is ever bypassed. Non-transfer payloads have no signed recipient; fall back
-        // to the accepted payTo (the x402 payee).
-        recipient: String(this.signedRecipientOf(payload) ?? acceptedAny['payTo']),
-        asset: String(acceptedAny['asset']),
-        amount: String(acceptedAny['amount']),
-        expiry: Number(header['expiry']),
-        energy,
-      };
-
-      let auth: Awaited<ReturnType<AuthorizationClient['authorize']>>;
-      try {
-        auth = await this.authorization.authorize(authRequest);
-      } catch (e) {
-        this.store.markFailed(digest, `authorization threw: ${(e as Error).message}`);
-        return this.fail('authorization_failed', `authorization client error: ${(e as Error).message}`, { digest });
-      }
-
-      if (auth.outcome !== 'approved') {
-        // A prior approval was recorded. Do NOT trust the reason code alone.
-        // Ask the owner to verify the durable approval against the current canonical context.
-        // Only continue if the owner independently confirms a matching approval.
-        if (auth.reason === 'authorization_already_recorded') {
-          let recovered: Awaited<ReturnType<AuthorizationClient['recover']>>;
-          try {
-            recovered = await this.authorization.recover(authRequest);
-          } catch (e) {
-            this.store.markFailed(digest, `authorization recovery threw: ${(e as Error).message}`);
-            return this.fail('authorization_failed', `authorization recovery error: ${(e as Error).message}`, { digest });
-          }
-          if (recovered.outcome !== 'approved') {
-            this.store.markFailed(digest, `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'}`);
-            const nonTerminal = recovered.outcome === 'unknown' || recovered.outcome === 'owner_unavailable';
-            if (nonTerminal) {
-              return {
-                success: false,
-                errorReason: 'settlement_pending',
-                errorMessage: `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'} — reconcile before retrying`,
-                transaction: 'unknown',
-                network: this.network,
-                extra: { digest, nonTerminal: true, authorizationOutcome: recovered.outcome, simulated: this.simulatedFlag() },
-              };
-            }
-            return this.fail('authorization_rejected', `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'}`, {
-              digest,
-              authorizationOutcome: recovered.outcome,
-            });
-          }
-          // Recovered: a matching durable approval exists. Continue with the signer.
-        } else {
-          // Never reach the signer. The payment is recorded as terminally rejected for this
-          // payload, so a retry requires a new payload.
-          this.store.markFailed(digest, `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'}`);
-          const reasonMap: Record<string, string> = {
-            rejected: 'authorization_rejected',
-            unknown: 'authorization_unknown',
-            owner_unavailable: 'authorization_owner_unavailable',
-            protocol_error: 'authorization_protocol_error',
-          };
-          const errorReason = reasonMap[auth.outcome] ?? 'authorization_failed';
-          const nonTerminal = auth.outcome === 'unknown' || auth.outcome === 'owner_unavailable';
-          if (nonTerminal) {
-            // Ambiguous: the owner may or may not have recorded a decision. Fail closed and
-            // leave the payment non-terminal so an operator can reconcile — never auto-retry.
-            return {
-              success: false,
-              errorReason: 'settlement_pending',
-              errorMessage: `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'} — reconcile before retrying`,
-              transaction: 'unknown',
-              network: this.network,
-              extra: { digest, nonTerminal: true, authorizationOutcome: auth.outcome, simulated: this.simulatedFlag() },
-            };
-          }
-          return this.fail(errorReason, `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'}`, {
-            digest,
-            authorizationOutcome: auth.outcome,
-          });
-        }
-      }
-    }
-
-    // TEST ONLY: terminate at the requested boundary.
-    if (this.dieAt === 'after-claim') {
-      process.kill(process.pid, 'SIGKILL');
-      await new Promise(() => {});
-    }
-
-    // ── Wire conversion (BEFORE the signer, AFTER authorization) ──────────────
-    // ORDER: validate → claim → authorize → recover → CONVERT → signer → hash → submit.
+    // ── Wire conversion (BEFORE authorization) ────────────────────────────────
+    // ORDER: validate → claim → sender-verify → CONVERT → authorize → signer →
+    // hash → submit. (Task 11: conversion moved BEFORE the authorization
+    // boundary.) The authorization must bind the EXACT transaction — its digest
+    // and type exist only after conversion — so a conversion failure fails
+    // closed here: the signer is never invoked and no authorization is recorded.
     // The converter receives the policy-derived energy, never a client-supplied value.
-    // A conversion failure fails closed: the signer is never invoked.
+    // Task 11 — conversion runs on the RESUMABLE path too: the bare envelope
+    // transaction is V2-shaped (no executionEnergyAmount, sponsor as
+    // `{address}`), which the SDK cannot parse, so no digest or energy could
+    // be computed from it. Converting first makes the authorization bind the
+    // same canonical transaction the signer will sign on both paths.
     let converted: SdkV1SignableTransaction | null = null;
-    if (!resumableHash) {
-      if (derivedEnergy === null) {
-        this.store.markFailed(digest, 'wire conversion has no policy-derived energy');
-        return this.fail('authorization_failed', 'no policy-derived energy for wire conversion', { digest });
-      }
+    {
       const sponsoredPayload = payload['payload'] as Record<string, unknown>;
       const rawSigned = sponsoredPayload?.['signedTransaction'] as Record<string, unknown> | undefined;
       if (!rawSigned || typeof rawSigned !== 'object') {
@@ -472,6 +376,187 @@ export class FacilitatorCore {
       converted = conversion.wire;
     }
 
+    // ── The exact transaction the signer will sign ───────────────────────────
+    // Both paths: the converted SDK transaction. The signer receives the same
+    // canonical transaction the authorization binds, so the digest the
+    // signing service recomputes is the digest the Owner certified.
+    //
+    // Task 11: the energy is the SDK-RECOMPUTED energy of that exact
+    // transaction (`transactionEnergyOf`), on BOTH paths. The resumable path
+    // needs it too: recovery re-validates the durable approval against the
+    // full transaction context, and the energy is part of that context. It
+    // must NOT be `deriveEnergyExposure`'s JSON-length estimate — that value
+    // disagrees with the recomputation (596 vs 635 NRG for the standard
+    // transfer), and the certificate must bind the energy the signing
+    // service actually enforces.
+    let txDigest: string;
+    let txType: string;
+    let txEnergy: bigint;
+    try {
+      if (converted === null) {
+        throw new Error('wire conversion produced no transaction');
+      }
+      const txForAuth = converted as unknown as Record<string, unknown>;
+      txDigest = signingDigestOf(converted);
+      txEnergy = transactionEnergyOf(converted) ?? (() => { throw new Error('transaction has no recomputed energy'); })();
+      txType = String((txForAuth['payload'] as Record<string, unknown> | undefined)?.['type'] ?? '');
+    } catch (e) {
+      this.store.markFailed(digest, `authorization digest failed: ${(e as Error).message}`);
+      return this.fail('authorization_failed', `could not compute the transaction digest for authorization: ${(e as Error).message}`, { digest });
+    }
+    if (txType === '') {
+      this.store.markFailed(digest, 'authorization: transaction type missing');
+      return this.fail('authorization_failed', 'transaction type is missing from the transaction', { digest });
+    }
+
+    // ── Authorization boundary ────────────────────────────────────────────────
+    // The Owner must explicitly approve THIS exact transaction: the
+    // authorization is bound to the transaction digest, sender, sponsor,
+    // recipient, amount, network, type, energy and fee policy (Task 11).
+    // The approval is recorded durably BEFORE the signer is invoked, and the
+    // certificate the Owner issues is the verifiable evidence the signing
+    // service verifies and consumes before signing.
+    const requirementsAny = requirements as Record<string, unknown>;
+    const acceptedAny = (payload['accepted'] ?? {}) as Record<string, unknown>;
+    const preimage = payload['payload']?.signedTransaction;
+    const header = (preimage as Record<string, unknown>)['header'] as Record<string, unknown>;
+    const authRequest: AuthorizationRequest = {
+      paymentDigest: digest,
+      network: this.network,
+      version: 1,
+      sender: String(header['sender']),
+      sponsor: String((requirementsAny['extra'] as Record<string, unknown> | undefined)?.['feePayer'] ?? this.signer.info().address),
+      // The authorization must name the recipient the signed transaction actually
+      // pays — not merely the claimed one. checkAgreement already binds the two for
+      // transfer-family payloads; using the signed recipient here keeps the durable
+      // authorization record bound to the ground truth even if the agreement check
+      // is ever bypassed. Non-transfer payloads have no signed recipient; fall back
+      // to the accepted payTo (the x402 payee).
+      recipient: String(this.signedRecipientOf(payload) ?? acceptedAny['payTo']),
+      asset: String(acceptedAny['asset']),
+      amount: String(acceptedAny['amount']),
+      expiry: Number(header['expiry']),
+      energy: txEnergy,
+      // Task 11: the authorization binds the exact transaction.
+      transactionDigest: txDigest,
+      transactionType: txType,
+      maxFeeMicroCcd: String(this.maxFeeMicroCcd),
+    };
+
+    // A recovery that did not approve returns the failure result; a matching
+    // approval returns null so the caller continues. Shared by the resumable
+    // path and by the already-recorded branch below.
+    const handleRecoverOutcome = (
+      recovered: Awaited<ReturnType<AuthorizationClient['recover']>>,
+    ): SettleBody | null => {
+      if (recovered.outcome === 'approved') return null;
+      this.store.markFailed(digest, `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'}`);
+      const nonTerminal = recovered.outcome === 'unknown' || recovered.outcome === 'owner_unavailable';
+      if (nonTerminal) {
+        return {
+          success: false,
+          errorReason: 'settlement_pending',
+          errorMessage: `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'} — reconcile before retrying`,
+          transaction: 'unknown',
+          network: this.network,
+          extra: { digest, nonTerminal: true, authorizationOutcome: recovered.outcome, simulated: this.simulatedFlag() },
+        };
+      }
+      return this.fail('authorization_rejected', `authorization recovery ${recovered.outcome}: ${recovered.reason ?? 'no reason'}`, {
+        digest,
+        authorizationOutcome: recovered.outcome,
+      });
+    };
+
+    let certificate: OwnerAuthorizationCertificate | undefined;
+    if (resumableHash) {
+      // A resumable payment already has a durable approval: recover it (and
+      // its certificate) instead of authorizing anew. Recovery re-validates
+      // the approval against the exact transaction context, so a tampered or
+      // different transaction cannot reuse the first attempt's approval.
+      let recovered: Awaited<ReturnType<AuthorizationClient['recover']>>;
+      try {
+        recovered = await this.authorization.recover(authRequest);
+      } catch (e) {
+        this.store.markFailed(digest, `authorization recovery threw: ${(e as Error).message}`);
+        return this.fail('authorization_failed', `authorization recovery error: ${(e as Error).message}`, { digest });
+      }
+      const recoverFailure = handleRecoverOutcome(recovered);
+      if (recoverFailure !== null) return recoverFailure;
+      certificate = recovered.certificate ?? undefined;
+    } else {
+      let auth: Awaited<ReturnType<AuthorizationClient['authorize']>>;
+      try {
+        auth = await this.authorization.authorize(authRequest);
+      } catch (e) {
+        this.store.markFailed(digest, `authorization threw: ${(e as Error).message}`);
+        return this.fail('authorization_failed', `authorization client error: ${(e as Error).message}`, { digest });
+      }
+
+      if (auth.outcome !== 'approved') {
+        // A prior approval was recorded. Do NOT trust the reason code alone.
+        // Ask the owner to verify the durable approval against the current canonical context.
+        // Only continue if the owner independently confirms a matching approval.
+        if (auth.reason === 'authorization_already_recorded') {
+          let recovered: Awaited<ReturnType<AuthorizationClient['recover']>>;
+          try {
+            recovered = await this.authorization.recover(authRequest);
+          } catch (e) {
+            this.store.markFailed(digest, `authorization recovery threw: ${(e as Error).message}`);
+            return this.fail('authorization_failed', `authorization recovery error: ${(e as Error).message}`, { digest });
+          }
+          const recoverFailure = handleRecoverOutcome(recovered);
+          if (recoverFailure !== null) return recoverFailure;
+          // Recovered: a matching durable approval exists. Continue with the signer.
+          certificate = recovered.certificate ?? undefined;
+        } else {
+          // Never reach the signer. The payment is recorded as terminally rejected for this
+          // payload, so a retry requires a new payload.
+          this.store.markFailed(digest, `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'}`);
+          const reasonMap: Record<string, string> = {
+            rejected: 'authorization_rejected',
+            unknown: 'authorization_unknown',
+            owner_unavailable: 'authorization_owner_unavailable',
+            protocol_error: 'authorization_protocol_error',
+          };
+          const errorReason = reasonMap[auth.outcome] ?? 'authorization_failed';
+          const nonTerminal = auth.outcome === 'unknown' || auth.outcome === 'owner_unavailable';
+          if (nonTerminal) {
+            // Ambiguous: the owner may or may not have recorded a decision. Fail closed and
+            // leave the payment non-terminal so an operator can reconcile — never auto-retry.
+            return {
+              success: false,
+              errorReason: 'settlement_pending',
+              errorMessage: `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'} — reconcile before retrying`,
+              transaction: 'unknown',
+              network: this.network,
+              extra: { digest, nonTerminal: true, authorizationOutcome: auth.outcome, simulated: this.simulatedFlag() },
+            };
+          }
+          return this.fail(errorReason, `authorization ${auth.outcome}: ${auth.reason ?? 'no reason'}`, {
+            digest,
+            authorizationOutcome: auth.outcome,
+          });
+        }
+      } else {
+        certificate = auth.certificate ?? undefined;
+      }
+    }
+
+    // Task 11: an approval without a certificate is a gap, not an approval.
+    // The signing service verifies and consumes the certificate; without it
+    // there is no verifiable authorization evidence to hand the signer.
+    if (!certificate) {
+      this.store.markFailed(digest, 'authorization approved without a certificate');
+      return this.fail('authorization_failed', 'Owner approved without an authorization certificate', { digest });
+    }
+
+    // TEST ONLY: terminate at the requested boundary.
+    if (this.dieAt === 'after-claim') {
+      process.kill(process.pid, 'SIGKILL');
+      await new Promise(() => {});
+    }
+
     // ── submission. The mock cannot sign; nothing here reaches a chain. ──
     // Ordering (closes the crash window):
     //   1. complete preparation (already done — claim + agreement + expiry + replay)
@@ -483,16 +568,16 @@ export class FacilitatorCore {
     //   7. record the broadcast (submitting → outcome_unknown)
     //   8. compare the returned hash to the persisted one; mismatch → never finalize
     let txHash: string;
-    // The signer receives the canonical SDK V1 wire object. On a resumable path
-    // there is no session payload to convert, so the persisted pipeline continues with the
-    // original payload — the sponsor signature is already bound into the durable hash.
+    // The signer receives the canonical SDK V1 wire object (`converted`), on
+    // both paths — the resumable path converts the envelope the same way, so
+    // the re-sign reproduces the transaction the persisted hash commits to.
     // Fee/energy context validation, actually invoked before signing.
     // The core-level fee cap binds here, in the facilitator's own validation path,
     // whether or not the signer exposes validateContext (mock signers omit it, so
     // without this check the configured fee cap would be unenforced in mock flows).
     // The signer's own validateContext (real/IPC signers) then re-checks the same
     // estimate against the same configured cap — the two can never disagree.
-    if (!resumableHash && derivedEnergy !== null) {
+    if (!resumableHash) {
       // Fee estimate — ESTIMATE-based policy only (see `energy.ts`): energy x the
       // fixed estimate rate, slightly above the measured Testnet rate
       // (7939.534 microCCD/NRG). This is NOT a guaranteed maximum actual chain
@@ -503,7 +588,7 @@ export class FacilitatorCore {
       // on-chain fee stays under the cap. Integer-safe (bigint). The signing
       // service re-derives the same estimate from the transaction it hashes, so
       // the two can never disagree about the fee model.
-      const feeEstimate = derivedEnergy * ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG;
+      const feeEstimate = txEnergy * ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG;
       if (feeEstimate > this.maxFeeMicroCcd) {
         this.store.markFailed(digest, `estimated fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`);
         return this.fail('fee_validation_failed', `estimated fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`, { digest });
@@ -530,7 +615,7 @@ export class FacilitatorCore {
           network: this.network,
           sponsor: this.signer.info().address,
           recipient,
-          energy: derivedEnergy,
+          energy: txEnergy,
           feeMicroCcd: feeEstimate,
         });
         if (vctx !== null) {
@@ -541,7 +626,18 @@ export class FacilitatorCore {
     }
 
     const signerInput = converted ?? payload.payload;
-    const sponsored = await this.signer.addSponsorSignature(signerInput);
+    // Task 11: the Owner authorization certificate and its payment digest
+    // ride with the signing call. A real signer forwards both to the signing
+    // service, which verifies and consumes the authorization before signing.
+    // The digest passed here is the digest of the exact transaction above —
+    // the service re-computes it from the parsed transaction and rejects any
+    // mismatch. On the resumable path `converted` is the same canonical
+    // transaction the first attempt signed, so the re-sign is deterministic
+    // and reproduces the persisted hash.
+    const sponsored = await this.signer.addSponsorSignature(signerInput, {
+      authorization: certificate,
+      paymentDigest: digest,
+    });
     if (this.dieAt === 'after-sponsor-sign') {
       process.kill(process.pid, 'SIGKILL');
       await new Promise(() => {});

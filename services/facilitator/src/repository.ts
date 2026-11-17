@@ -19,7 +19,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync } from 'node:fs';
 import {
   canTransition,
@@ -119,10 +119,20 @@ export interface SignEventRow {
   asset: string | null;
   amount: string | null;
   expiry: number | null;
+  /** Task 11. Null on legacy rows and on rejections. */
+  authorization_id: string | null;
+  transaction_digest: string | null;
+  transaction_type: string | null;
+  max_energy: string | null;
+  max_fee_microccd: string | null;
+  /** ms since epoch when the authorization was consumed, or null. */
+  consumed_at: number | null;
+  /** ms since epoch when the authorization was revoked, or null. */
+  revoked_at: number | null;
 }
 
 export type AuthorizeSignResult =
-  | { ok: true }
+  | { ok: true; authorizationId: string | null }
   | { ok: false; reason: 'unknown_payment' | 'payment_not_authorizable' | 'transaction_hash_already_prepared' | 'authorization_already_recorded' | 'payment_digest_mismatch' };
 
 /**
@@ -165,7 +175,54 @@ export interface SignEventInput {
   asset?: string;
   amount?: string;
   expiry?: number;
+  /**
+   * Task 11 — the exact transaction the approval covers. An approval recorded
+   * without a transaction digest/type cannot be issued as a certificate and
+   * cannot be consumed (fail closed). Omit only for legacy audit paths.
+   */
+  authorizationId?: string;
+  transactionDigest?: string;
+  transactionType?: string;
+  maxEnergy?: string;
+  maxFeeMicroCcd?: string;
 }
+
+/** Input to the atomic authorization-consumption gate. */
+export interface ConsumeAuthorizationInput {
+  authorizationId: string;
+  transactionDigest: string;
+  /** AgentTrust payment digest the authorization belongs to. */
+  paymentDigest: string;
+  network: string;
+  sender: string;
+  sponsor: string;
+  recipient: string;
+  asset: string;
+  amount: string;
+  expiry: number;
+  energy: string;
+  transactionType: string;
+  maxEnergy: string;
+  maxFeeMicroCcd: string;
+}
+
+export type ConsumeAuthorizationResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'unknown_authorization'
+        | 'authorization_already_consumed'
+        | 'authorization_revoked'
+        | 'authorization_expired'
+        | 'authorization_mismatch'
+        | 'payment_not_authorizable'
+        | 'transaction_hash_already_prepared';
+    };
+
+export type RevokeAuthorizationResult =
+  | { ok: true }
+  | { ok: false; reason: 'unknown_authorization' | 'authorization_already_consumed' };
 
 export interface SettlementRepository {
   /** Record a fresh verification (no state change beyond noting the payment). */
@@ -215,8 +272,24 @@ export interface SettlementRepository {
    * Atomically verify payment state + persist the authorization audit event.
    * Returns ok:false with a stable reason if the payment is not authorizable. Never throws
    * for a state-based rejection; throws only on unexpected DB errors.
+   *
+   * Task 11: on approval the result carries the authorization id the record
+   * was issued with (generated here when the caller supplies none).
    */
   authorizeSignEvent(input: SignEventInput & { decision: 'approved' | 'rejected' }): AuthorizeSignResult;
+  /**
+   * Atomically consume an authorization (Task 11). Marks the approval
+   * consumed in one BEGIN IMMEDIATE transaction after re-verifying every
+   * bound field against the durable record, the expiry against the clock,
+   * and the payment row still being `created` with NULL tx_hash. A second
+   * consume of the same authorization is refused. Never throws for a
+   * state-based refusal; throws only on unexpected DB errors.
+   */
+  consumeAuthorization(input: ConsumeAuthorizationInput): ConsumeAuthorizationResult;
+  /** Revoke an unconsumed authorization (Task 11). Idempotent. */
+  revokeAuthorization(authorizationId: string): RevokeAuthorizationResult;
+  /** Read one approval by authorization id (Task 11). */
+  authorizationById(authorizationId: string): SignEventRow | undefined;
   get(paymentDigest: string): PaymentRow | undefined;
   transitions(paymentDigest: string): TransitionRow[];
   listRecoverable(): PaymentRow[];
@@ -292,13 +365,27 @@ CREATE TABLE IF NOT EXISTS sign_events (
   asset            TEXT,
   amount           TEXT,
   expiry           INTEGER,
+  -- Task 11 — Owner authorization binding. An approval is issued with a unique
+  -- authorization id and the exact transaction it covers; the signing service
+  -- consumes it exactly once (consumed_at) and the Owner may revoke it
+  -- (revoked_at) before consumption. NULL = legacy row / rejection (fail closed).
+  authorization_id   TEXT UNIQUE,
+  transaction_digest TEXT,
+  transaction_type   TEXT,
+  max_energy         TEXT,
+  max_fee_microccd   TEXT,
+  consumed_at        INTEGER,
+  revoked_at         INTEGER,
   FOREIGN KEY (payment_digest) REFERENCES payments(payment_digest)
 );
 CREATE INDEX IF NOT EXISTS idx_sign_events_payment ON sign_events(payment_digest, id);
--- database-level exactly-once guard. Only one 'approved' sign event per payment.
+-- database-level exactly-once guard for LIVE approvals. Only one UNCONSUMED
+-- 'approved' sign event per payment: a consumed approval no longer blocks a
+-- fresh authorization (a retry after a consume-then-crash needs a new
+-- approval), but two live approvals for one payment can never exist.
 -- Rejected attempts are still recorded, so this is a partial index.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_sign_events_approved
-  ON sign_events(payment_digest) WHERE decision = 'approved';
+  ON sign_events(payment_digest) WHERE decision = 'approved' AND consumed_at IS NULL;
 
 -- authorization attempts whose payment row does not exist.
 -- No foreign key on purpose: a missing payment must be auditable without inventing a
@@ -382,11 +469,31 @@ export class SqliteSettlementRepository implements SettlementRepository {
       ['asset', 'TEXT'],
       ['amount', 'TEXT'],
       ['expiry', 'INTEGER'],
+      // Task 11 — Owner authorization binding columns (see SCHEMA).
+      ['authorization_id', 'TEXT'],
+      ['transaction_digest', 'TEXT'],
+      ['transaction_type', 'TEXT'],
+      ['max_energy', 'TEXT'],
+      ['max_fee_microccd', 'TEXT'],
+      ['consumed_at', 'INTEGER'],
+      ['revoked_at', 'INTEGER'],
     ];
+    let addedBindingColumn = false;
     for (const [name, type] of additions) {
       if (!existing.has(name)) {
         this.db.exec(`ALTER TABLE sign_events ADD COLUMN ${name} ${type}`);
+        if (name !== 'asset' && name !== 'amount' && name !== 'expiry') addedBindingColumn = true;
       }
+    }
+    if (addedBindingColumn) {
+      // A legacy database has the old "one approval ever" index. The Task 11
+      // invariant is "one LIVE approval": drop the old index and recreate it
+      // with the consumed_at predicate (fresh databases already have it from
+      // SCHEMA, so this only runs when a binding column was just added).
+      this.db.exec('DROP INDEX IF EXISTS ux_sign_events_approved');
+      this.db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_sign_events_approved ON sign_events(payment_digest) WHERE decision = 'approved' AND consumed_at IS NULL",
+      );
     }
     // The rejection confirmation counter must exist on databases created before it.
     // Existing rows default to 0, which is the correct semantics: no rejection evidence yet.
@@ -830,7 +937,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   signEvents(paymentDigest: string): SignEventRow[] {
     return this.db
       .prepare(
-        'SELECT id, payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry FROM sign_events WHERE payment_digest = ? ORDER BY id DESC',
+        'SELECT id, payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry, authorization_id, transaction_digest, transaction_type, max_energy, max_fee_microccd, consumed_at, revoked_at FROM sign_events WHERE payment_digest = ? ORDER BY id DESC',
       )
       .all(paymentDigest) as unknown as SignEventRow[];
   }
@@ -843,8 +950,11 @@ export class SqliteSettlementRepository implements SettlementRepository {
    *   2. require state === 'created'
    *   3. require tx_hash IS NULL
    *   4. require the digest matches (it is the PK, so this is implicit — asserted anyway)
-   *   5. require no prior successful authorization
-   *   6. append the audit event
+   *   5. require no prior LIVE successful authorization (Task 11: a CONSUMED
+   *      approval no longer blocks a fresh authorization — a retry after a
+   *      consume-then-crash needs a new approval. Two live approvals for one
+   *      payment can never exist: the partial unique index enforces it.)
+   *   6. append the audit event (with a fresh authorization id on approval)
    *
    * A concurrent `prepare()`/`claim()` from another process must wait for this write
    * transaction, so it cannot slip between the check and the commit.
@@ -884,17 +994,146 @@ export class SqliteSettlementRepository implements SettlementRepository {
       }
 
       const prior = this.db
-        .prepare("SELECT COUNT(*) AS n FROM sign_events WHERE payment_digest = ? AND decision = 'approved'")
+        .prepare("SELECT COUNT(*) AS n FROM sign_events WHERE payment_digest = ? AND decision = 'approved' AND consumed_at IS NULL")
         .get(input.paymentDigest) as { n: number };
       if (Number(prior.n) > 0) {
         this.insertRejectedSignEvent(input, t, 'authorization_already_recorded');
         return { ok: false as const, reason: 'authorization_already_recorded' as const };
       }
 
-      this.insertSignEvent(input, t);
+      const authorizationId =
+        input.decision === 'approved' ? (input.authorizationId ?? randomUUID()) : null;
+      this.insertSignEvent(input, t, authorizationId);
 
+      return { ok: true as const, authorizationId };
+    });
+  }
+
+  /**
+   * Atomic authorization consumption (Task 11).
+   *
+   * One `BEGIN IMMEDIATE` transaction: load the approval by authorization id,
+   * re-verify every bound field against the durable record, the expiry
+   * against the clock, and the payment row still being `created` with NULL
+   * tx_hash — then mark it consumed. The conditional UPDATE is
+   * defense-in-depth against a concurrent consume slipping past the SELECT:
+   * exactly one caller can flip an unconsumed row.
+   */
+  consumeAuthorization(input: ConsumeAuthorizationInput): ConsumeAuthorizationResult {
+    const t = this.now();
+    const nowSec = Math.floor(t / 1000);
+    return this.tx(() => {
+      const ev = this.db
+        .prepare(
+          'SELECT id, payment_digest, decision, network, sender, sponsor, recipient, energy, asset, amount, expiry, transaction_digest, transaction_type, max_energy, max_fee_microccd, consumed_at, revoked_at FROM sign_events WHERE authorization_id = ?',
+        )
+        .get(input.authorizationId) as
+        | {
+            id: number;
+            payment_digest: string;
+            decision: string;
+            network: string;
+            sender: string;
+            sponsor: string;
+            recipient: string;
+            energy: string;
+            asset: string | null;
+            amount: string | null;
+            expiry: number | null;
+            transaction_digest: string | null;
+            transaction_type: string | null;
+            max_energy: string | null;
+            max_fee_microccd: string | null;
+            consumed_at: number | null;
+            revoked_at: number | null;
+          }
+        | undefined;
+      if (!ev || ev.decision !== 'approved') {
+        return { ok: false as const, reason: 'unknown_authorization' as const };
+      }
+      if (ev.consumed_at !== null) {
+        return { ok: false as const, reason: 'authorization_already_consumed' as const };
+      }
+      if (ev.revoked_at !== null) {
+        return { ok: false as const, reason: 'authorization_revoked' as const };
+      }
+      // Expiry is checked against the clock here, not just at issuance: an
+      // approval that expired while its certificate was in flight cannot be used.
+      if (ev.expiry === null || ev.expiry <= nowSec) {
+        return { ok: false as const, reason: 'authorization_expired' as const };
+      }
+      // Every bound field must match the durable record exactly. A NULL in the
+      // record means the approval predates the binding — fail closed.
+      const mismatched =
+        ev.payment_digest !== input.paymentDigest ||
+        ev.transaction_digest !== input.transactionDigest ||
+        ev.transaction_type !== input.transactionType ||
+        ev.network !== input.network ||
+        ev.sender !== input.sender ||
+        ev.sponsor !== input.sponsor ||
+        ev.recipient !== input.recipient ||
+        ev.asset !== input.asset ||
+        ev.amount !== input.amount ||
+        ev.expiry !== input.expiry ||
+        ev.energy !== input.energy ||
+        ev.max_energy !== input.maxEnergy ||
+        ev.max_fee_microccd !== input.maxFeeMicroCcd;
+      if (mismatched) {
+        return { ok: false as const, reason: 'authorization_mismatch' as const };
+      }
+      const payment = this.db
+        .prepare('SELECT state, tx_hash FROM payments WHERE payment_digest = ?')
+        .get(ev.payment_digest) as { state: SettlementState; tx_hash: string | null } | undefined;
+      if (!payment) {
+        return { ok: false as const, reason: 'unknown_authorization' as const };
+      }
+      if (payment.tx_hash !== null) {
+        return { ok: false as const, reason: 'transaction_hash_already_prepared' as const };
+      }
+      if (payment.state !== 'created') {
+        return { ok: false as const, reason: 'payment_not_authorizable' as const };
+      }
+      const changed = this.db
+        .prepare('UPDATE sign_events SET consumed_at = ? WHERE authorization_id = ? AND consumed_at IS NULL')
+        .run(t, input.authorizationId).changes;
+      if (changed !== 1) {
+        return { ok: false as const, reason: 'authorization_already_consumed' as const };
+      }
       return { ok: true as const };
     });
+  }
+
+  /**
+   * Revoke an unconsumed authorization (Task 11). Idempotent: revoking an
+   * already-revoked authorization succeeds. A consumed authorization cannot
+   * be revoked — it is already spent.
+   */
+  revokeAuthorization(authorizationId: string): RevokeAuthorizationResult {
+    const t = this.now();
+    return this.tx(() => {
+      const ev = this.db
+        .prepare('SELECT decision, consumed_at, revoked_at FROM sign_events WHERE authorization_id = ?')
+        .get(authorizationId) as
+        | { decision: string; consumed_at: number | null; revoked_at: number | null }
+        | undefined;
+      if (!ev || ev.decision !== 'approved') {
+        return { ok: false as const, reason: 'unknown_authorization' as const };
+      }
+      if (ev.consumed_at !== null) {
+        return { ok: false as const, reason: 'authorization_already_consumed' as const };
+      }
+      if (ev.revoked_at !== null) return { ok: true as const };
+      this.db.prepare('UPDATE sign_events SET revoked_at = ? WHERE authorization_id = ?').run(t, authorizationId);
+      return { ok: true as const };
+    });
+  }
+
+  authorizationById(authorizationId: string): SignEventRow | undefined {
+    return this.db
+      .prepare(
+        'SELECT id, payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry, authorization_id, transaction_digest, transaction_type, max_energy, max_fee_microccd, consumed_at, revoked_at FROM sign_events WHERE authorization_id = ?',
+      )
+      .get(authorizationId) as unknown as SignEventRow | undefined;
   }
 
   // ─── reads ───────────────────────────────────────────────────────────
@@ -952,10 +1191,10 @@ export class SqliteSettlementRepository implements SettlementRepository {
    * gate. This method can never be reached from a public path, and its caller guarantees the
    * decision was produced by the gate.
    */
-  private insertSignEvent(input: SignEventInput, at: number): void {
+  private insertSignEvent(input: SignEventInput, at: number, authorizationId: string | null): void {
     this.db
       .prepare(
-        'INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry, authorization_id, transaction_digest, transaction_type, max_energy, max_fee_microccd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         input.paymentDigest,
@@ -971,6 +1210,11 @@ export class SqliteSettlementRepository implements SettlementRepository {
         input.asset ?? null,
         input.amount ?? null,
         input.expiry ?? null,
+        authorizationId,
+        input.transactionDigest ?? null,
+        input.transactionType ?? null,
+        input.maxEnergy ?? null,
+        input.maxFeeMicroCcd ?? null,
       );
   }
 
@@ -984,7 +1228,7 @@ export class SqliteSettlementRepository implements SettlementRepository {
   private insertRejectedSignEvent(input: SignEventInput, at: number, reason: string): void {
     this.db
       .prepare(
-        'INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry, authorization_id, transaction_digest, transaction_type, max_energy, max_fee_microccd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         input.paymentDigest,
@@ -1000,6 +1244,11 @@ export class SqliteSettlementRepository implements SettlementRepository {
         input.asset ?? null,
         input.amount ?? null,
         input.expiry ?? null,
+        null,
+        input.transactionDigest ?? null,
+        input.transactionType ?? null,
+        input.maxEnergy ?? null,
+        input.maxFeeMicroCcd ?? null,
       );
   }
 

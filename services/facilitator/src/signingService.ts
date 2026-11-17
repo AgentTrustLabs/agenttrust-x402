@@ -48,22 +48,30 @@
  * state, and it transitions pending → done exactly once.
  *
  * What this does NOT prove (honest residual, inherent to the architecture):
- * - It does not prove "this is the transaction the Owner authorized" — the owner's
- *   approval lives in the facilitator's durable payment store, keyed by payment
- *   digest, and this service has no access to it. A facilitator that asks the
- *   service to sign a transaction the Owner never approved is a facilitator bug,
- *   not a signing-service bug; the service's job is to make sure the digest it
- *   signs is the hash of the transaction it validated.
+ * - It does not prove "the Owner authorized THIS transaction" by itself —
+ *   that is what the Task 11 authorization certificate + consume step prove
+ *   (see `ownerAuthorization.ts`): the request must carry an Owner-signed
+ *   certificate binding the exact transaction, and the service consumes that
+ *   authorization at the Owner before signing. What remains assumed, not
+ *   proven here: the Owner's private key is readable only by the Owner's UID
+ *   (distinct from the facilitator's), and the consume channel really reaches
+ *   the Owner (client-side SO_PEERCRED on the Owner socket).
  * - The network is a config-equality check (`req.network === opts.network`), NOT
  *   cryptographically bound: the sponsor digest commits to expiry, sender, nonce,
  *   payload size, recomputed energy, sponsor, and the full payload, but NOT to the
  *   network/genesis. A wrong-network transaction would be rejected by the node at
- *   submission, not by this service.
+ *   submission, not by this service. (The certificate DOES bind the network
+ *   the Owner authorized, so a wrong-network certificate fails the binding.)
  *
- * Protocol v1 (digest-only, with an untrusted `context` field) is GONE. A v1
- * request is rejected as `unsupported_protocol`, and a request carrying a `context`
- * key is rejected as `malformed_request`: metadata the signer cannot verify must
- * not travel with the request at all.
+ * Protocol v3 (Task 11): every sign request MUST carry an Owner authorization
+ * certificate (`authorization`) and the payment digest it belongs to
+ * (`paymentDigest`). The service verifies the certificate's signature against
+ * the Owner's configured public key, compares every bound field against the
+ * parsed transaction, and consumes the authorization at the Owner before
+ * signing. A v2 request (no certificate) is rejected as
+ * `unsupported_protocol`, and a request carrying a `context` key is rejected
+ * as `malformed_request`: metadata the signer cannot verify must not travel
+ * with the request at all. Protocol v1 (digest-only) is likewise gone.
  *
  * Process boundary: the facilitator (uid 1001, gid 1002 `authclients`) connects
  * over a Unix socket; the service enforces the peer uid via `SO_PEERCRED`
@@ -77,14 +85,21 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type Server, type Socket } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { sign as edSign, generateKeyPairSync } from 'node:crypto';
+import type { KeyObject } from 'node:crypto';
 import { AccountAddress, AccountTransactionType, Transaction } from '@concordium/web-sdk';
 import { AccountTransactionV1 } from '@concordium/web-sdk/transactions';
 import type { AccountSigner, AccountTransactionSignature } from '@concordium/web-sdk';
 import { ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
+import {
+  loadOwnerAuthorizationPublicKey,
+  verifyOwnerAuthorizationCertificate,
+  type OwnerAuthorizationCertificate,
+  type OwnerConsumeClient,
+} from './ownerAuthorization.js';
 
 // ─── protocol ─────────────────────────────────────────────────────────────
 
-export const SIGNING_PROTOCOL_VERSION = 2;
+export const SIGNING_PROTOCOL_VERSION = 3;
 export const SIGNING_MAX_MSG = 64 * 1024;
 
 /**
@@ -109,6 +124,22 @@ export interface SigningRequest {
   transaction: unknown;
   sponsor: string; // base58check sponsor address
   network: string; // CAIP-2
+  /**
+   * Task 11 — the Owner's authorization certificate for the exact
+   * transaction. REQUIRED. The service verifies its signature against the
+   * Owner's configured public key and compares every bound field against
+   * the parsed transaction before signing anything. A request without a
+   * certificate is rejected: the service never signs on a caller's bare
+   * claim that the Owner approved.
+   */
+  authorization: unknown;
+  /**
+   * Task 11 — the AgentTrust payment digest the authorization belongs to.
+   * REQUIRED, 64-hex. The service requires the certificate's paymentDigest
+   * to equal it, so a certificate issued for one payment cannot authorize
+   * a transaction for another.
+   */
+  paymentDigest: string;
 }
 
 export interface SigningResponse {
@@ -123,7 +154,7 @@ export interface SigningResponse {
 // ─── validation ────────────────────────────────────────────────────────────
 
 const FORBIDDEN = new Set(['decision', 'approved', 'outcome', 'reason', 'result', 'signature']);
-const REQ_ALLOWED = new Set(['protocolVersion', 'requestId', 'operation', 'digest', 'sponsor', 'network', 'transaction']);
+const REQ_ALLOWED = new Set(['protocolVersion', 'requestId', 'operation', 'digest', 'sponsor', 'network', 'transaction', 'authorization', 'paymentDigest']);
 
 export function validateSigningRequest(req: unknown): { ok: true; value: SigningRequest } | { ok: false; reason: string } {
   if (typeof req !== 'object' || req === null || Array.isArray(req)) {
@@ -160,6 +191,18 @@ export function validateSigningRequest(req: unknown): { ok: true; value: Signing
   if (typeof r.network !== 'string' || r.network.length === 0) {
     return { ok: false, reason: 'invalid_network' };
   }
+  // Task 11 — the authorization certificate is REQUIRED. Its signature and
+  // field binding are verified in runSign, after the transaction binding;
+  // here the request is rejected early if the evidence is absent entirely.
+  if (r.authorization === undefined) {
+    return { ok: false, reason: 'authorization_missing' };
+  }
+  if (typeof r.authorization !== 'object' || r.authorization === null || Array.isArray(r.authorization)) {
+    return { ok: false, reason: 'authorization_invalid' };
+  }
+  if (typeof r.paymentDigest !== 'string' || !/^[0-9a-fA-F]{64}$/.test(r.paymentDigest)) {
+    return { ok: false, reason: 'invalid_field' };
+  }
   return { ok: true, value: r as unknown as SigningRequest };
 }
 
@@ -181,6 +224,38 @@ export function signingDigestOf(transaction: unknown): string {
   const unsigned = Transaction.preFinalized(signable);
   const digest = AccountTransactionV1.signDigest(unsigned);
   return Buffer.from(digest).toString('hex');
+}
+
+/**
+ * Recompute the execution energy (NRG) of a signable V1 transaction JSON —
+ * the same value the signing service enforces (`preFinalized` + the
+ * unsigned header's energy amount). Returns null when the transaction
+ * cannot be parsed or carries no energy.
+ *
+ * Task 11: the facilitator MUST authorize (and fee) on THIS value, not on
+ * `deriveEnergyExposure`'s JSON-length estimate. The two disagree (596 vs
+ * 635 NRG for the standard transfer: the estimate counts only the header's
+ * signature count and measures the payload as JSON text, while the chain
+ * counts both signature slots and the binary payload size), and the
+ * certificate must bind the energy the signing service actually enforces.
+ * Authorizing on the estimate would make every real settlement fail the
+ * certificate check — and would understate the fee the sponsor pays.
+ */
+export function transactionEnergyOf(transaction: unknown): bigint | null {
+  let signable: ReturnType<typeof Transaction.signableFromJSON>;
+  try {
+    signable = Transaction.signableFromJSON(transaction);
+  } catch {
+    return null;
+  }
+  if (signable.version !== 1) return null;
+  let unsigned: ReturnType<typeof Transaction.preFinalized>;
+  try {
+    unsigned = Transaction.preFinalized(signable);
+  } catch {
+    return null;
+  }
+  return energyOf(unsigned.header.energyAmount);
 }
 
 /** Canonical base58 of an address string or an AccountAddress object, or null if invalid. */
@@ -284,7 +359,23 @@ function expiryOf(value: unknown): bigint | null {
 }
 
 type BindingCheck =
-  | { ok: true; digest: string; energy: bigint; estimatedFeeMicroCcd: bigint }
+  | {
+      ok: true;
+      digest: string;
+      energy: bigint;
+      estimatedFeeMicroCcd: bigint;
+      /** Parsed fields, for the authorization-certificate binding (Task 11). */
+      sender: string;
+      sponsor: string;
+      /** Transfer-family recipient, or null for non-transfer payloads. */
+      recipient: string | null;
+      /** Transfer-family amount (microCCD), or null for non-transfer payloads. */
+      amount: bigint | null;
+      /** Raw payload type string from the transaction JSON, e.g. 'transfer'. */
+      transactionType: string;
+      /** Transaction expiry, epoch seconds. */
+      expiry: bigint;
+    }
   | { ok: false; reason: string; detail: string };
 
 /**
@@ -351,19 +442,21 @@ function checkTransactionBinding(
   // validate them. Covers Transfer AND TransferWithMemo — the memo is opaque
   // bytes already committed by the digest, so it needs no separate check.
   // Non-transfer payloads have no recipient/amount and skip this block.
+  let recipientAddr: string | null = null;
+  let amount: bigint | null = null;
   if (TRANSFER_FAMILY_TYPES.has(signable.payload.type)) {
     const to = (signable.payload as { toAddress?: unknown }).toAddress;
     if (to === undefined) {
       return { ok: false, reason: 'recipient_missing', detail: 'transfer has no recipient' };
     }
-    const recipientAddr = canonicalAddress(to);
+    recipientAddr = canonicalAddress(to);
     if (recipientAddr === null) {
       return { ok: false, reason: 'recipient_malformed', detail: 'recipient is not a valid account address' };
     }
     if (recipientAddr === sponsorAddr) {
       return { ok: false, reason: 'recipient_equals_sponsor', detail: 'recipient must not be the sponsor' };
     }
-    const amount = amountOf(signable.payload);
+    amount = amountOf(signable.payload);
     if (amount === null) {
       return { ok: false, reason: 'amount_missing', detail: 'transfer has no amount' };
     }
@@ -397,7 +490,118 @@ function checkTransactionBinding(
   if (expiry === null || expiry * 1000n <= BigInt(nowMs)) {
     return { ok: false, reason: 'transaction_expired', detail: 'transaction expiry is in the past' };
   }
-  return { ok: true, digest, energy, estimatedFeeMicroCcd };
+  // Raw payload type string from the transaction JSON (e.g. 'transfer'). The
+  // digest commits to the payload, so this string is bound by the digest;
+  // the certificate must name exactly this type.
+  const rawPayload = req.transaction as { payload?: { type?: unknown } };
+  const transactionType = typeof rawPayload.payload?.type === 'string' ? rawPayload.payload.type : '';
+  if (transactionType === '') {
+    return { ok: false, reason: 'invalid_transaction', detail: 'transaction has no payload type' };
+  }
+  return {
+    ok: true,
+    digest,
+    energy,
+    estimatedFeeMicroCcd,
+    sender: senderAddr,
+    sponsor: sponsorAddr,
+    recipient: recipientAddr,
+    amount,
+    transactionType,
+    expiry,
+  };
+}
+
+/**
+ * Task 11 — verify the Owner authorization certificate against the parsed
+ * transaction. The signature is checked first (a forged or tampered
+ * certificate fails here, before any field is trusted), then every bound
+ * field is compared against the transaction the service parsed and the
+ * request's payment digest. A certificate that verifies but covers a
+ * different transaction is a mismatch, not an approval.
+ */
+function checkAuthorizationBinding(
+  cert: unknown,
+  bound: Extract<BindingCheck, { ok: true }>,
+  req: SigningRequest,
+  opts: SigningServiceOptions,
+  ownerPublicKey: KeyObject,
+  nowMs: number,
+): { ok: true; fields: OwnerAuthorizationCertificate } | { ok: false; reason: string; detail: string } {
+  const v = verifyOwnerAuthorizationCertificate(cert, ownerPublicKey);
+  if (!v.ok) {
+    return { ok: false, reason: v.reason, detail: v.detail };
+  }
+  const f = v.fields;
+  // The certificate must belong to this payment: a certificate issued for
+  // another payment cannot authorize this transaction, even if the
+  // transaction itself is identical.
+  if (f.paymentDigest.toLowerCase() !== req.paymentDigest.toLowerCase()) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate paymentDigest does not match the request' };
+  }
+  if (f.transactionDigest.toLowerCase() !== bound.digest) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate transactionDigest does not match the transaction' };
+  }
+  if (f.network !== opts.network) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate network does not match the configured network' };
+  }
+  if (f.sender !== bound.sender) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate sender does not match the transaction' };
+  }
+  if (f.sponsor !== bound.sponsor) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate sponsor does not match the transaction' };
+  }
+  if (f.transactionType !== bound.transactionType) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate transactionType does not match the transaction' };
+  }
+  // Transfer-family: recipient + amount must equal the transaction's own.
+  // Non-transfer payloads carry no recipient/amount in the transaction; the
+  // certificate's values are checked for shape only (the Owner already
+  // enforced sponsor != recipient and amount validity at issuance).
+  if (bound.recipient !== null) {
+    if (f.recipient !== bound.recipient) {
+      return { ok: false, reason: 'authorization_mismatch', detail: 'certificate recipient does not match the transaction' };
+    }
+  } else if (f.recipient === f.sponsor) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate recipient equals the sponsor' };
+  }
+  if (bound.amount !== null) {
+    if (f.amount !== bound.amount.toString()) {
+      return { ok: false, reason: 'authorization_mismatch', detail: 'certificate amount does not match the transaction' };
+    }
+  }
+  // Energy: the certificate authorizes EXACTLY the recomputed energy. A
+  // transaction whose energy differs from the authorized value is a
+  // different transaction for authorization purposes.
+  if (f.energy !== bound.energy.toString()) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate energy does not match the transaction' };
+  }
+  // Fee policy: the authorized energy and the caps the authorization was
+  // issued under must permit this transaction. The service still enforces
+  // its own caps independently (checkTransactionBinding above).
+  let maxEnergy: bigint;
+  let maxFee: bigint;
+  try {
+    maxEnergy = BigInt(f.maxEnergy);
+    maxFee = BigInt(f.maxFeeMicroCcd);
+  } catch {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate energy/fee caps are not integers' };
+  }
+  if (bound.energy > maxEnergy) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'transaction energy exceeds the authorized energy cap' };
+  }
+  if (bound.estimatedFeeMicroCcd > maxFee) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'estimated fee exceeds the authorized fee cap' };
+  }
+  // Expiry: the certificate binds the transaction's expiry, and it must
+  // still be in the future. (The Owner re-checks expiry at consumption.)
+  if (f.expiry !== Number(bound.expiry)) {
+    return { ok: false, reason: 'authorization_mismatch', detail: 'certificate expiry does not match the transaction' };
+  }
+  if (BigInt(f.expiry) * 1000n <= BigInt(nowMs)) {
+    return { ok: false, reason: 'authorization_expired', detail: 'certificate expiry is in the past' };
+  }
+  return { ok: true, fields: { ...f, signature: (cert as OwnerAuthorizationCertificate).signature } };
 }
 
 /** Fingerprint of a request's signable content, for replay detection. */
@@ -405,6 +609,8 @@ function requestFingerprint(req: SigningRequest): string {
   return createHash('sha256')
     .update(req.digest)
     .update(JSON.stringify(req.transaction))
+    .update(req.paymentDigest)
+    .update(JSON.stringify(req.authorization))
     .digest('hex');
 }
 
@@ -457,6 +663,18 @@ export interface SigningServiceOptions {
    * stays under the cap. The energy cap above is the hard bound.
    */
   maxFeeMicroCcd?: bigint;
+  /**
+   * Task 11 — Owner authorization verification. REQUIRED: the service cannot
+   * sign without it, and `createSigningService` throws when it is absent.
+   * `publicKey` is the Owner's authorization public key (SPKI DER hex or a
+   * KeyObject) — the service verifies certificate signatures against it and
+   * never sees the Owner's private key. `consume` is the Owner consume
+   * client (real IPC or a test fake with identical atomic semantics).
+   */
+  ownerAuthorization: {
+    publicKey: string | KeyObject;
+    consume: OwnerConsumeClient;
+  };
 }
 
 export interface SigningService {
@@ -470,6 +688,25 @@ export interface SigningService {
 
 export function createSigningService(opts: SigningServiceOptions): SigningService {
   const now = opts.now ?? (() => Date.now());
+  // Task 11 — the Owner authorization verifier is REQUIRED. Fail closed at
+  // construction: a service built without it could never verify evidence, so
+  // it must not exist. The public key is parsed once, here.
+  if (!opts.ownerAuthorization || typeof opts.ownerAuthorization.consume?.consume !== 'function') {
+    throw new Error('createSigningService: ownerAuthorization with a consume client is required (Task 11)');
+  }
+  let ownerPublicKey: KeyObject;
+  try {
+    ownerPublicKey =
+      typeof opts.ownerAuthorization.publicKey === 'string'
+        ? loadOwnerAuthorizationPublicKey(opts.ownerAuthorization.publicKey)
+        : opts.ownerAuthorization.publicKey;
+  } catch (e) {
+    throw new Error(`createSigningService: invalid Owner public key: ${(e as Error).message}`);
+  }
+  if (ownerPublicKey.asymmetricKeyType !== 'ed25519') {
+    throw new Error('createSigningService: Owner public key is not Ed25519');
+  }
+  const ownerConsume = opts.ownerAuthorization.consume;
   /**
    * Replay store. A `pending` entry is the concurrency reservation: it is
    * written synchronously, before any `await`, so a second concurrent request
@@ -502,11 +739,18 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
   };
 
   /**
-   * Binding + signing for one request. Pure work: validates the digest ↔
-   * transaction binding from the parsed transaction and signs the recomputed
+   * Binding + authorization + signing for one request. Pure work: validates
+   * the digest ↔ transaction binding from the parsed transaction, verifies
+   * the Owner authorization certificate against that transaction, consumes
+   * the authorization at the Owner, and only then signs the recomputed
    * digest. NEVER touches the replay map — the caller (`doSign`) owns
    * reservation and storage. Always resolves to a `SigningResponse`; it must
    * never throw, so the pending reservation always transitions to `done`.
+   *
+   * Order matters (Task 11): a rejected authorization NEVER reaches the
+   * signing operation. Certificate verification and field binding run before
+   * consumption, and consumption runs before signing. A consume failure
+   * discards the request without signing.
    */
   const runSign = async (req: SigningRequest): Promise<SigningResponse> => {
     const rid = req.requestId;
@@ -514,6 +758,51 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
     const bound = checkTransactionBinding(req, opts, now());
     if (!bound.ok) {
       return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: bound.reason, detail: bound.detail };
+    }
+    // Owner authorization certificate: signature + every bound field, checked
+    // against the parsed transaction. A forged, tampered, or mismatched
+    // certificate never reaches consumption or signing.
+    const authz = checkAuthorizationBinding(req.authorization, bound, req, opts, ownerPublicKey, now());
+    if (!authz.ok) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: authz.reason, detail: authz.detail };
+    }
+    const cert = authz.fields;
+    // Consume the authorization at the Owner: single-use, restart-proof,
+    // revocable. Only a consumed authorization may be signed.
+    let consumed: Awaited<ReturnType<OwnerConsumeClient['consume']>>;
+    try {
+      consumed = await ownerConsume.consume({
+        authorizationId: cert.authorizationId,
+        transactionDigest: bound.digest,
+        context: {
+          paymentDigest: cert.paymentDigest,
+          network: cert.network,
+          sender: cert.sender,
+          sponsor: cert.sponsor,
+          recipient: cert.recipient,
+          asset: cert.asset,
+          amount: cert.amount,
+          expiry: cert.expiry,
+          energy: cert.energy,
+          transactionType: cert.transactionType,
+          maxEnergy: cert.maxEnergy,
+          maxFeeMicroCcd: cert.maxFeeMicroCcd,
+        },
+      });
+    } catch (e) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'owner_unavailable', signature: null, reason: 'owner_unavailable', detail: `consume threw: ${(e as Error).message}` };
+    }
+    if (consumed.outcome === 'owner_unavailable') {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'owner_unavailable', signature: null, reason: 'owner_unavailable', detail: consumed.detail ?? 'Owner unavailable at consume time' };
+    }
+    if (consumed.outcome === 'protocol_error') {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'protocol_error', signature: null, reason: consumed.reason ?? 'protocol_error', detail: consumed.detail };
+    }
+    if (consumed.outcome !== 'consumed') {
+      // 'rejected' or 'unknown': the Owner refused consumption (already
+      // consumed, revoked, expired, mismatched, or no such authorization).
+      // The approval is spent or invalid — never sign.
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: consumed.reason ?? 'authorization_not_consumed', detail: consumed.detail };
     }
     // Sign the RECOMPUTED digest, never the caller-supplied one. The Buffer view
     // (not `.buffer.slice`) is passed, so the signer reads exactly these 32 bytes.
@@ -667,6 +956,19 @@ export interface IpcAccountSignerOptions {
    * socket; the service re-verifies it independently (the client is not trusted).
    */
   transaction?: unknown;
+  /**
+   * Task 11 — the Owner's authorization certificate for the bound transaction.
+   * REQUIRED to sign: the service verifies it and consumes the authorization
+   * before signing. Without it the client refuses client-side, and the
+   * service would reject the request as `authorization_missing`.
+   */
+  authorization?: OwnerAuthorizationCertificate;
+  /**
+   * Task 11 — the AgentTrust payment digest the authorization belongs to.
+   * REQUIRED to sign (with `authorization`): the service requires the
+   * certificate's paymentDigest to equal it.
+   */
+  paymentDigest?: string;
 }
 
 /**
@@ -681,6 +983,8 @@ export class IpcAccountSigner {
   private readonly network: string;
   private readonly timeoutMs: number;
   private readonly transaction: unknown;
+  private readonly authorization: OwnerAuthorizationCertificate | undefined;
+  private readonly paymentDigest: string | undefined;
 
   constructor(opts: IpcAccountSignerOptions) {
     this.socketPath = opts.socketPath;
@@ -689,6 +993,8 @@ export class IpcAccountSigner {
     this.network = opts.network;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.transaction = opts.transaction;
+    this.authorization = opts.authorization;
+    this.paymentDigest = opts.paymentDigest;
   }
 
   getSignatureCount(): bigint {
@@ -698,6 +1004,12 @@ export class IpcAccountSigner {
   async sign(digest: ArrayBuffer): Promise<AccountTransactionSignature> {
     if (this.transaction === undefined) {
       throw new Error('IpcAccountSigner: no transaction bound — refusing to sign a bare digest');
+    }
+    // Task 11 — no Owner authorization evidence, no signing. The service
+    // would reject the request, but refusing here keeps an unevidenced
+    // request from ever crossing the socket.
+    if (this.authorization === undefined || this.paymentDigest === undefined) {
+      throw new Error('IpcAccountSigner: no Owner authorization bound — refusing to sign without authorization evidence');
     }
     // Client-side binding: the digest must be the hash of the bound transaction.
     // The service re-verifies this independently; the client is not trusted.
@@ -716,6 +1028,8 @@ export class IpcAccountSigner {
       transaction: this.transaction,
       sponsor: this.sponsorAddress,
       network: this.network,
+      authorization: this.authorization,
+      paymentDigest: this.paymentDigest,
     };
     // The service validates sponsor/network against ITS OWN configured values. A client
     // that sends a mismatched sponsor/network is rejected — the client cannot influence

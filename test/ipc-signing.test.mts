@@ -10,6 +10,7 @@
 
 import { eq, ok } from './helpers.mjs';
 import { createSigningService, createFakeSigner, IpcAccountSigner, signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx, fakeConsumedClient } from './owner-authz-helper.mjs';
 import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,6 +36,24 @@ const fixtureTx = {
   signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
 };
 const DIGEST = signingDigestOf(fixtureTx);
+/** One payment digest and one ephemeral Owner keypair for the whole suite. */
+const PAYMENT_DIGEST = 'ab'.repeat(32);
+const ownerKey = makeTestOwnerKey();
+const fixtureCert = () =>
+  issueTestCertificate(ownerKey.privateKey, certFieldsForTx(fixtureTx, {
+    paymentDigest: PAYMENT_DIGEST,
+    recipient: RECIPIENT,
+    amount: '250000',
+    network: NETWORK,
+  }));
+const makeService = (signer: ReturnType<typeof createFakeSigner>) =>
+  createSigningService({
+    accountSigner: signer,
+    sponsorAddress: SPONSOR,
+    network: NETWORK,
+    allowedUid: FACILITATOR_UID,
+    ownerAuthorization: { publicKey: ownerKey.publicKeyHex, consume: fakeConsumedClient() },
+  });
 const digestBuf = () => digestHexToArrayBuffer(DIGEST);
 
 const results: Array<[string, boolean, string]> = [];
@@ -74,10 +93,10 @@ const run = (cmd: string, args: string[], as?: string) =>
 
 test('01. IpcAccountSigner signs through the IPC service', async () => {
   const signer = createFakeSigner({ signature: 'ee'.repeat(64) });
-  const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
+  const svc = makeService(signer);
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, transaction: fixtureTx });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, transaction: fixtureTx, authorization: fixtureCert(), paymentDigest: PAYMENT_DIGEST });
     const sig = await client.sign(digestBuf());
     eq(sig[0]?.[0], 'ee'.repeat(64), 'signature from fake signer');
   } finally {
@@ -87,10 +106,10 @@ test('01. IpcAccountSigner signs through the IPC service', async () => {
 
 test('02. wrong sponsor rejected by the service', async () => {
   const signer = createFakeSigner({ signature: 'ee'.repeat(64) });
-  const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
+  const svc = makeService(signer);
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', network: NETWORK, transaction: fixtureTx });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', network: NETWORK, transaction: fixtureTx, authorization: fixtureCert(), paymentDigest: PAYMENT_DIGEST });
     let threw = false;
     try {
       await client.sign(digestBuf());
@@ -105,10 +124,10 @@ test('02. wrong sponsor rejected by the service', async () => {
 
 test('03. wrong network rejected by the service', async () => {
   const signer = createFakeSigner({ signature: 'ee'.repeat(64) });
-  const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
+  const svc = makeService(signer);
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: 'ccd:0000', transaction: fixtureTx });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: 'ccd:0000', transaction: fixtureTx, authorization: fixtureCert(), paymentDigest: PAYMENT_DIGEST });
     let threw = false;
     try {
       await client.sign(digestBuf());
@@ -123,10 +142,10 @@ test('03. wrong network rejected by the service', async () => {
 
 test('04. signer failure propagates as a rejection', async () => {
   const signer = createFakeSigner({ behaviour: 'sign-throws' });
-  const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
+  const svc = makeService(signer);
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, transaction: fixtureTx });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, transaction: fixtureTx, authorization: fixtureCert(), paymentDigest: PAYMENT_DIGEST });
     let threw = false;
     try {
       await client.sign(digestBuf());
@@ -140,7 +159,7 @@ test('04. signer failure propagates as a rejection', async () => {
 });
 
 test('05. service unavailable → error (no local fallback)', async () => {
-  const client = new IpcAccountSigner({ socketPath: join(base, 'missing.sock'), expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 1000, transaction: fixtureTx });
+  const client = new IpcAccountSigner({ socketPath: join(base, 'missing.sock'), expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 1000, transaction: fixtureTx, authorization: fixtureCert(), paymentDigest: PAYMENT_DIGEST });
   let threw = false;
   try {
     await client.sign(digestBuf());
@@ -152,10 +171,10 @@ test('05. service unavailable → error (no local fallback)', async () => {
 
 test('06. timeout → error', async () => {
   const signer = createFakeSigner({ behaviour: 'sign-hangs' });
-  const svc = createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: FACILITATOR_UID });
+  const svc = makeService(signer);
   await svc.listen(sock);
   try {
-    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 200, transaction: fixtureTx });
+    const client = new IpcAccountSigner({ socketPath: sock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR, network: NETWORK, timeoutMs: 200, transaction: fixtureTx, authorization: fixtureCert(), paymentDigest: PAYMENT_DIGEST });
     let threw = false;
     try {
       await client.sign(digestBuf());

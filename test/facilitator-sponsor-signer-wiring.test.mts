@@ -14,7 +14,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Socket } from 'node:net';
-import { mkdtempSync, rmSync, writeFileSync, statSync, realpathSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, notOk, ok } from './helpers.mjs';
@@ -26,7 +26,8 @@ import { startFacilitator } from '../services/facilitator/src/server.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { LocalAuthorizationClient, IpcAuthorizationClient } from '../services/facilitator/src/authorization.js';
-import type { SponsorSigner } from '../services/facilitator/src/signer.js';
+import type { SponsorSigner, AddSponsorSignatureOptions } from '../services/facilitator/src/signer.js';
+import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx } from './owner-authz-helper.mjs';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const RECIPIENT = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -118,6 +119,13 @@ const ipcSignerFor = (sock: string, timeoutMs = 600) =>
     network: NETWORK,
     timeoutMs,
     transaction: envelope().paymentPayload.payload.signedTransaction,
+    // Task 11: the client refuses to send a request without Owner
+    // authorization evidence. These transport tests use a certificate
+    // issued by an ephemeral test keypair for the envelope transaction;
+    // the raw stub servers never validate it — it only gets the request
+    // onto the socket so the transport failure under test can happen.
+    authorization: envelopeCert(),
+    paymentDigest: PAYMENT_DIGEST,
   });
 
 const expectSignError = async (sock: string, re: RegExp, label: string, timeoutMs = 600) => {
@@ -162,6 +170,26 @@ const envelope = () => {
   };
   return { x402Version: 2, paymentPayload: payload, paymentRequirements: payload.accepted };
 };
+
+// Task 11 — one payment digest and one ephemeral Owner keypair for the
+// whole suite. `envelopeCert()` issues a certificate for the envelope
+// transaction, so signing requests carry the authorization evidence the
+// client-side guard requires. Transport tests (B02/D01–D05) send it to raw
+// stub servers that never validate it; the cross-process tests (E) send it
+// to the real signing service, whose public key is this keypair's.
+const PAYMENT_DIGEST = 'cd'.repeat(32);
+const ownerKey = makeTestOwnerKey();
+const envelopeCert = () =>
+  issueTestCertificate(
+    ownerKey.privateKey,
+    certFieldsForTx(envelope().paymentPayload.payload.signedTransaction, {
+      paymentDigest: PAYMENT_DIGEST,
+      recipient: RECIPIENT,
+      amount: '250000',
+      network: NETWORK,
+      issuedAt: NOW * 1000,
+    }),
+  );
 
 // ═══ A. configuration contract ══════════════════════════════════════════════
 
@@ -299,7 +327,11 @@ test('B02. a valid config builds a SponsorSigner that signs REMOTELY, not locall
     eq(signer.info().network, NETWORK, 'network');
     let message = '';
     try {
-      await signer.addSponsorSignature(envelope().paymentPayload.payload);
+      // Task 11: the signing call carries the Owner authorization evidence.
+      await signer.addSponsorSignature(envelope().paymentPayload.payload, {
+        authorization: envelopeCert(),
+        paymentDigest: PAYMENT_DIGEST,
+      });
     } catch (e) {
       message = (e as Error).message;
     }
@@ -484,11 +516,23 @@ if (!hasIpc) {
 } else {
   const base = mkdtempSync(join(tmpdir(), 't46-ipc-'));
   const sock = join(base, 'sign.sock');
+  // Task 11: the signing service verifies Owner certificates and consumes
+  // them at the Owner. The service is started with this keypair's public
+  // key and the Owner socket; E02 runs a real Owner on `ownerSock`, the
+  // other E tests only need the env set (no consume ever happens there).
+  const ownerSock = join(base, 'owner.sock');
+  const ownerScript = `${process.cwd()}/scripts/authz-owner.mts`;
   const serviceScript = `${process.cwd()}/scripts/signing-ipc-service.mts`;
 
   const startService = async (allowedUid: number) => {
     const proc = spawn('npx', ['tsx', serviceScript, sock, SPONSOR, NETWORK, String(allowedUid)], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        SIGNING_OWNER_PUBLIC_KEY: ownerKey.publicKeyHex,
+        SIGNING_OWNER_SOCKET: ownerSock,
+        SIGNING_OWNER_UID: String(FACILITATOR_UID),
+      },
     });
     await new Promise<void>((resolve) => {
       const t = setTimeout(resolve, 30_000);
@@ -533,9 +577,12 @@ if (!hasIpc) {
 
   const countedSigner = (inner: SponsorSigner, calls: { sign: number }): SponsorSigner => ({
     info: inner.info,
-    addSponsorSignature: async (tx: unknown) => {
+    // Task 11: forward the per-call signing options (the Owner certificate
+    // and payment digest) — dropping them would make the inner IPC signer
+    // refuse client-side before any socket activity.
+    addSponsorSignature: async (tx: unknown, opts?: AddSponsorSignatureOptions) => {
       calls.sign++;
-      return inner.addSponsorSignature(tx);
+      return inner.addSponsorSignature(tx, opts);
     },
     submitTransaction: inner.submitTransaction,
     waitForFinalization: inner.waitForFinalization,
@@ -543,6 +590,53 @@ if (!hasIpc) {
     getTokenBalance: inner.getTokenBalance,
     getTokenDecimals: inner.getTokenDecimals,
   });
+
+  /** Start a real Owner process on `ownerSock` (Task 11, for E02). */
+  const startOwner = async (dbPath: string) => {
+    const ownerDir = join(base, 'e02-owner');
+    mkdirSync(ownerDir, { mode: 0o700 });
+    const ownerKeyFile = join(ownerDir, 'owner-key.pem');
+    writeFileSync(ownerKeyFile, ownerKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+    const proc = spawn('npx', ['tsx', ownerScript, ownerDir, ownerSock, String(FACILITATOR_UID), String(FACILITATOR_UID)], {
+      env: {
+        ...process.env,
+        AUTHZ_SPONSOR_ADDRESS: SPONSOR,
+        AUTHZ_NETWORK: NETWORK,
+        AUTHZ_MAX_ENERGY: '100000',
+        AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
+        AUTHZ_ALLOWED_ASSETS: 'CCD',
+        AUTHZ_POLICY_VERSION: 't46',
+        AUTHZ_DB_FILE: dbPath,
+        AUTHZ_SEED_FIXTURES: '0',
+        AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('owner start timeout')), 30_000);
+      let stderr = '';
+      proc.stderr.on('data', (c) => { stderr += c.toString(); });
+      proc.stdout.on('data', (c) => {
+        if (c.toString().includes('owner listening')) {
+          clearTimeout(t);
+          resolve();
+        }
+      });
+      proc.on('exit', (code) => {
+        clearTimeout(t);
+        reject(new Error(`owner exited early code=${code}: ${stderr.trim().split('\n').slice(-15).join(' | ')}`));
+      });
+    });
+    return proc;
+  };
+  const stopOwner = async (proc: ReturnType<typeof spawn>) => {
+    if (proc.exitCode === null && proc.pid !== undefined) {
+      const exited = new Promise<void>((r) => proc.once('exit', () => r()));
+      try { process.kill(-proc.pid, 'SIGTERM'); } catch { proc.kill('SIGTERM'); }
+      await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 5_000))]);
+    }
+  };
 
   const localAuth = (repo: SqliteSettlementRepository) =>
     new LocalAuthorizationClient({
@@ -578,18 +672,33 @@ if (!hasIpc) {
   });
 
   test('E02. the facilitator obtains a fake sponsor signature through the IPC path', async () => {
+    // Task 11: the full Owner chain — a real Owner process issues the
+    // certificate (shared DB with the core) and the signing service
+    // consumes it there before signing. The core authorizes through the
+    // real Owner client, not the local mock.
+    //
+    // Clock note: the Owner and signing-service processes run on REAL time,
+    // while this suite's fixtures use a fixed future clock. E02 therefore
+    // runs on real time throughout (envelope expiry, core clock, repo
+    // clock) — a fixed-future expiry would be rejected by the Owner as
+    // expiry_excessive, and a real-time expiry would look expired to the
+    // fixed-clock consume gate.
+    const realNowSec = Math.floor(Date.now() / 1000);
+    const env = envelope();
+    (env.paymentPayload.payload.signedTransaction.header as Record<string, unknown>)['expiry'] = realNowSec + 200;
+    const repo = new SqliteSettlementRepository(join(base, 'e02.db'), { now: () => Date.now() });
+    const ownerProc = await startOwner(join(base, 'e02.db'));
     const proc = await startService(FACILITATOR_UID);
-    const repo = new SqliteSettlementRepository(join(base, 'e02.db'), { now: () => NOW * 1000 });
     const calls = { sign: 0 };
     const core = new FacilitatorCore({
       network: NETWORK,
       signer: countedSigner(ipc(FACILITATOR_UID), calls),
       dbPath: join(base, 'e02.db'),
-      now: () => NOW * 1000,
-      authorization: localAuth(repo),
+      now: () => Date.now(),
+      authorization: new IpcAuthorizationClient(ownerSock),
     });
     try {
-      const res = await core.settle(envelope());
+      const res = await core.settle(env);
       eq(calls.sign, 1, 'sponsor signer called once');
       // Signing crossed the process boundary; broadcast is deliberately absent, so the only
       // honest outcome is the ambiguous/pending one — never success.
@@ -600,6 +709,7 @@ if (!hasIpc) {
     } finally {
       repo.close();
       await stop(proc);
+      await stopOwner(ownerProc);
     }
   });
 
@@ -622,7 +732,12 @@ if (!hasIpc) {
     try {
       let message = '';
       try {
-        await ipc(FACILITATOR_UID, 3_000).addSponsorSignature(envelope().paymentPayload.payload);
+        // Task 11: the request carries the Owner authorization evidence, so
+        // it reaches the service — which then refuses on the peer UID.
+        await ipc(FACILITATOR_UID, 3_000).addSponsorSignature(envelope().paymentPayload.payload, {
+          authorization: envelopeCert(),
+          paymentDigest: PAYMENT_DIGEST,
+        });
       } catch (e) {
         message = (e as Error).message;
       }
@@ -668,7 +783,12 @@ if (!hasIpc) {
     ok(proc.exitCode !== null || proc.signalCode !== null, 'service process exited');
     let message = '';
     try {
-      await signer.addSponsorSignature(envelope().paymentPayload.payload);
+      // Task 11: the request carries the Owner authorization evidence, so
+      // the failure is the dead socket — not the client-side guard.
+      await signer.addSponsorSignature(envelope().paymentPayload.payload, {
+        authorization: envelopeCert(),
+        paymentDigest: PAYMENT_DIGEST,
+      });
     } catch (e) {
       message = (e as Error).message;
     }
