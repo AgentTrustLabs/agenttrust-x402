@@ -19,6 +19,7 @@
 
 import { eq, ok } from './helpers.mjs';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -64,6 +65,10 @@ const request = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest
   amount: '250000',
   expiry: NOW + 200,
   energy: 700n,
+  // the authorization binds the exact transaction and fee policy.
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 
@@ -79,17 +84,20 @@ test('13. legacy record with NULL context fails closed (legacy_context_missing)'
   repo.claim(A, 'k');
   repo.close();
 
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3416', NULL, NULL, NULL)`);
   raw.close();
 
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
   const rec = await client.recover(request());
   check('legacy → unknown', rec.outcome === 'unknown', `${rec.outcome}/${rec.reason}`);
   eq(rec.reason, 'legacy_context_missing', 'reason is legacy_context_missing');
-  eq(repo2.signEvents(A).length, 1, 'no new record created');
+  eq(ownerRepo2.signEvents(A).length, 1, 'no new record created');
   repo2.close();
   rm();
 });
@@ -135,7 +143,8 @@ test('05. missing payment row → unknown (unknown_payment)', async () => {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   // Insert a sign_event without a payment row is impossible (FK). So recovery finds no payment.
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   // Use a digest with no payment row at all.
   const rec = await client.recover(request({ paymentDigest: 'f'.repeat(64) }));
   check('05. unknown payment → unknown', rec.outcome === 'unknown', `${rec.outcome}/${rec.reason}`);
@@ -190,14 +199,17 @@ test('09. duplicate approved insert blocked by partial unique index', async () =
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified(A, 'k');
   repo.claim(A, 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   await client.authorize(request());
   repo.close();
 
-  const raw = new DatabaseSync(db);
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
   let threw = false;
   try {
-    raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
+    raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
               VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3416', 'CCD', '250000', ${NOW + 200})`);
   } catch (e) {
     threw = /UNIQUE constraint/i.test((e as Error).message);
@@ -216,19 +228,22 @@ test('10. repeated recovery on a legacy record is idempotent and writes nothing'
   repo.claim(A, 'k');
   repo.close();
 
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3416', NULL, NULL, NULL)`);
   raw.close();
 
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
-  const before = repo2.signEvents(A).length;
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
+  const before = ownerRepo2.signEvents(A).length;
   for (let i = 0; i < 5; i++) {
     const rec = await client.recover(request());
     ok(rec.outcome !== 'approved', `iteration ${i} → ${rec.outcome}`);
   }
-  eq(repo2.signEvents(A).length, before, 'no records written');
+  eq(ownerRepo2.signEvents(A).length, before, 'no records written');
   repo2.close();
   rm();
 });
@@ -242,15 +257,18 @@ test('11. legacy record remains fail-closed after repeated reads (crash-safe)', 
   repo.claim(A, 'k');
   repo.close();
 
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3416', NULL, NULL, NULL)`);
   raw.close();
 
   // Simulate 10 "restarts" — each re-opens the DB and tries recovery.
   for (let i = 0; i < 10; i++) {
     const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-    const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+    const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
     const rec = await client.recover(request());
     ok(rec.outcome !== 'approved', `restart ${i} → ${rec.outcome}`);
     repo2.close();
@@ -267,17 +285,20 @@ test('12. concurrent recovery on a legacy record produces no approval', async ()
   repo.claim(A, 'k');
   repo.close();
 
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3416', NULL, NULL, NULL)`);
   raw.close();
 
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
   const outs = await Promise.all(Array.from({ length: 8 }, () => client.recover(request())));
   const approved = outs.filter((o) => o.outcome === 'approved').length;
   check('12. 0/8 approved', approved === 0, `${approved}/8`);
-  eq(repo2.signEvents(A).length, 1, 'no new records');
+  eq(ownerRepo2.signEvents(A).length, 1, 'no new records');
   repo2.close();
   rm();
 });
@@ -285,12 +306,12 @@ test('12. concurrent recovery on a legacy record produces no approval', async ()
 // ── 14. Backfill does not create approval or call signer ─────────────────────
 
 test('14. recovery never creates an approval or invokes the signer', async () => {
-  const { rm, client, repo } = setup();
+  const { rm, client, ownerRepo } = setup();
   await client.authorize(request());
-  const before = repo.signEvents(A).length;
+  const before = ownerRepo.signEvents(A).length;
   for (let i = 0; i < 10; i++) await client.recover(request());
-  eq(repo.signEvents(A).length, before, 'no new records');
-  eq(repo.signEvents(A).length, 1, 'exactly one approval');
+  eq(ownerRepo.signEvents(A).length, before, 'no new records');
+  eq(ownerRepo.signEvents(A).length, 1, 'exactly one approval');
   rm();
 });
 
@@ -299,8 +320,9 @@ const setup = () => {
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified(A, 'k');
   repo.claim(A, 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
-  return { dir, db, rm, repo, client };
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
+  return { dir, db, rm, repo, ownerRepo, client };
 };
 
 (async () => {

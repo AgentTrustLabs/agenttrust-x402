@@ -21,6 +21,7 @@ import { createServer } from 'node:net';
 import { mkdirSync, chmodSync, rmSync, existsSync, lstatSync, readFileSync, appendFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { RepositorySettlementStateReader, SqliteOwnerAuthorizationRepository } from '../services/facilitator/src/ownerAuthorizationRepository.js';
 import { decideAuthorization } from '../services/facilitator/src/narrowSponsor.js';
 import { randomUUID } from 'node:crypto';
 
@@ -39,7 +40,7 @@ const dir = process.argv[2];
 const sock = process.argv[3];
 const facilitatorUid = Number(process.argv[4] ?? 1001);
 const crashAt = Number(process.env.CRASH_AT ?? 0);
-const logPath = process.env.TASK349_LOG ?? `${dir}/owner.log`;
+const logPath = process.env.AUTHZ_CRASH_OWNER_LOG ?? `${dir}/owner.log`;
 
 if (!dir || !sock) {
   console.error('usage: sqlite-crash-owner.mts <db-dir> <socket-path> <facilitator-uid>');
@@ -60,9 +61,20 @@ if (st) {
 mkdirSync(dir, { recursive: true, mode: 0o700 });
 chmodSync(dir, 0o700);
 
-// Create schema via the real repository (then close — we'll use raw connections for the test tx).
-const bootstrap = new SqliteSettlementRepository(`${dir}/auth.db`, { now: () => Date.now() });
-bootstrap.close();
+// Create schemas via the real repositories (then close — we'll use raw
+// connections for the test tx).
+// split databases: the settlement repository creates the
+// payments schema in auth.db; the Owner repository creates the
+// authorizations schema in the Owner-private authz.db. The raw crash
+// transaction below writes authorizations, never the settlement file.
+const bootstrapSettlement = new SqliteSettlementRepository(`${dir}/auth.db`, { now: () => Date.now() });
+const bootstrapOwner = new SqliteOwnerAuthorizationRepository(
+  `${dir}/authz.db`,
+  new RepositorySettlementStateReader(bootstrapSettlement),
+  { now: () => Date.now() },
+);
+bootstrapOwner.close();
+bootstrapSettlement.close();
 
 // Seed payments via a fresh repo.
 const seedRepo = new SqliteSettlementRepository(`${dir}/auth.db`, { now: () => Date.now() });
@@ -115,7 +127,7 @@ const crash = (point: number, why: string) => {
 
 // peer credentials via C helper
 import { execFileSync } from 'node:child_process';
-const PEERCRED_BIN = process.env.TASK349_PEERCRED_BIN ?? `${process.cwd()}/scripts/authz-peercred`;
+const PEERCRED_BIN = process.env.AUTHZ_CRASH_OWNER_PEERCRED_BIN ?? `${process.cwd()}/scripts/authz-peercred`;
 const peerCredOf = (conn: import('node:net').Socket): { uid: number } | null => {
   const fd = (conn as unknown as { _handle?: { fd?: number } })._handle?.fd;
   if (typeof fd !== 'number') return null;
@@ -204,15 +216,21 @@ const server = createServer((conn) => {
 
       crash(1, 'before transaction begins');
 
-      // Open a raw connection for the transaction (schema already exists).
-      const db = new DatabaseSync(`${dir}/auth.db`);
+      // Open raw connections for the transaction (schemas already exist).
+      // the authorization transaction runs on the Owner-private
+      // database; payment state is read from the settlement database on a
+      // separate connection, mirroring the production split (the Owner reads
+      // settlement state through a reader, outside its own transaction).
+      const db = new DatabaseSync(`${dir}/authz.db`);
       db.exec('PRAGMA busy_timeout = 5000');
+      const settlementDb = new DatabaseSync(`${dir}/auth.db`);
+      settlementDb.exec('PRAGMA busy_timeout = 5000');
 
       crash(2, 'after BEGIN IMMEDIATE, before authorization reads');
       db.exec('BEGIN IMMEDIATE');
 
-      // read payment state
-      const row = db.prepare('SELECT payment_digest, state, tx_hash FROM payments WHERE payment_digest = ?').get(digest) as
+      // read payment state (settlement database)
+      const row = settlementDb.prepare('SELECT payment_digest, state, tx_hash FROM payments WHERE payment_digest = ?').get(digest) as
         | { payment_digest: string; state: string; tx_hash: string | null }
         | undefined;
 
@@ -222,7 +240,7 @@ const server = createServer((conn) => {
       if (!row || row.state !== 'created' || row.tx_hash !== null) {
         result = { approved: false, reason: row ? (row.tx_hash !== null ? 'transaction_hash_already_prepared' : 'payment_not_authorizable') : 'unknown_payment' };
       } else {
-        const priorApproved = db.prepare("SELECT COUNT(*) AS n FROM sign_events WHERE payment_digest = ? AND decision = 'approved'").get(digest) as { n: number };
+        const priorApproved = db.prepare("SELECT COUNT(*) AS n FROM authorizations WHERE payment_digest = ? AND decision = 'approved'").get(digest) as { n: number };
         if (Number(priorApproved.n) > 0) {
           result = { approved: false, reason: 'authorization_already_recorded' };
         } else {
@@ -245,12 +263,12 @@ const server = createServer((conn) => {
           );
           if (!decision.approved) {
             // insert rejected event
-            db.prepare('INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)')
+            db.prepare('INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)')
               .run(digest, Date.now(), 'rejected', decision.reason ?? null, c.network as string, c.sender as string, c.sponsor as string, c.recipient as string, c.energy as string, POLICY.policyVersion);
             result = { approved: false, reason: decision.reason };
           } else {
             // insert approved event
-            db.prepare('INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)')
+            db.prepare('INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)')
               .run(digest, Date.now(), 'approved', null, c.network as string, c.sender as string, c.sponsor as string, c.recipient as string, c.energy as string, POLICY.policyVersion);
             result = { approved: true };
           }
@@ -261,6 +279,7 @@ const server = createServer((conn) => {
 
       db.exec('COMMIT');
       db.close();
+      settlementDb.close();
 
       // The authorization is now durable. Persist the idempotency record so a retry after a
       // crash-before-response recovers the ORIGINAL result instead of re-deriving one.

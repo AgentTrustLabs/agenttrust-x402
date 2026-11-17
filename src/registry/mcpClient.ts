@@ -130,7 +130,7 @@ export class AgentRegistryMcp {
     });
   }
 
-  /** Escape hatch for tools without a typed wrapper (task-scoped). */
+  /** Escape hatch for tools without a typed wrapper (scoped to the current operation). */
   callToolRaw<T = Record<string, unknown>>(name: string, args: Record<string, unknown>): Promise<T> {
     return this.callTool<T>(name, args);
   }

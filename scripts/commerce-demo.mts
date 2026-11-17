@@ -109,7 +109,7 @@ async function createPaymentPayload(requirements: PaymentRequirements): Promise<
 
 const audit = new AuditTrail({
   filePath: `${OUT}/audit-trail.jsonl`,
-  sessionId: `cs_task05_demo_${Date.now()}`,
+  sessionId: `cs_demo_${Date.now()}`,
 });
 
 const deps: OrchestratorDeps = {

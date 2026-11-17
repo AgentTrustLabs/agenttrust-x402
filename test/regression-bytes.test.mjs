@@ -76,7 +76,7 @@ test('transaction hashes in the report are well-formed', () => {
   }
 });
 
-test('no credential material in any task artefact', () => {
+test('no credential material in any generated artefact', () => {
   const files = [
     'registration-manifest.json',
     'repin-manifest.json',

@@ -18,6 +18,18 @@ import { createHash } from 'node:crypto';
 import { AccountTransactionV1 } from '@concordium/web-sdk/transactions';
 import { AccountAddress, Energy, AccountTransactionType, Payload, Transaction } from '@concordium/web-sdk';
 import { ConfigurationError } from './config.js';
+import type { OwnerAuthorizationCertificate } from './ownerAuthorization.js';
+
+/**
+ * Per-call signing options . The facilitator passes the Owner's
+ * authorization certificate and the payment digest it belongs to; a real
+ * (IPC) signer forwards both to the signing service, which verifies and
+ * consumes the authorization before signing. Mock signers ignore them.
+ */
+export interface AddSponsorSignatureOptions {
+  authorization?: OwnerAuthorizationCertificate;
+  paymentDigest?: string;
+}
 
 export interface SignerInfo {
   /** Sponsor account address (base58check). Public identifier, never a secret. */
@@ -97,8 +109,13 @@ export interface SponsorSigner {
   /**
    * Adds the sponsor signature. The mock does not sign: it returns the input unchanged but
    * marked, so a caller cannot mistake the result for a signed transaction.
+   *
+   * `opts` carries the Owner's authorization certificate and the
+   * payment digest it belongs to. A real signer MUST forward both to the
+   * signing service; a signer that signs without them is a gap, not a
+   * feature. Mock signers ignore them.
    */
-  addSponsorSignature(txJson: unknown): Promise<unknown>;
+  addSponsorSignature(txJson: unknown, opts?: AddSponsorSignatureOptions): Promise<unknown>;
   /** Submits the transaction. The mock never contacts a chain. */
   submitTransaction(txJson: unknown): Promise<string>;
   /** Waits for finalization. */
@@ -223,6 +240,8 @@ export interface LedgerSignerOptions {
   network: string;
   behaviour?: MockSubmissionBehaviour;
   now?: () => number;
+  /** Passed through to the inner mock signer (mock-sponsor override). */
+  placeholderAddress?: string;
   /** Optional per-process label, so the ledger shows which process attempted. */
   label?: string;
 }
@@ -230,6 +249,7 @@ export interface LedgerSignerOptions {
 export function createLedgerSigner(opts: LedgerSignerOptions): SponsorSigner {
   const inner = createMockSigner({
     network: opts.network,
+    ...(opts.placeholderAddress ? { placeholderAddress: opts.placeholderAddress } : {}),
     ...(opts.behaviour ? { behaviour: opts.behaviour } : {}),
     ...(opts.now ? { now: opts.now } : {}),
   });
@@ -249,7 +269,7 @@ export function createLedgerSigner(opts: LedgerSignerOptions): SponsorSigner {
     info: () => inner.info(),
     // Wraps the mock: outcomes are simulated, never real.
     simulated: true,
-    addSponsorSignature: tx => inner.addSponsorSignature(tx),
+    addSponsorSignature: (tx, _opts) => inner.addSponsorSignature(tx, _opts),
     async submitTransaction(txJson) {
       // Recorded BEFORE the attempt: even a throwing submission is an attempt, and the count
       // must reflect that, not just the successes.
@@ -420,7 +440,7 @@ export function computeFinalizedTransactionHash(txJson: unknown): string {
  * Build the signer the config asks for.
  *
  * `real` throws: this prototype has no real signer, and inventing one here would mean the
- * gateway's repository handling a sponsor key. A future task provisions it out of process.
+ * gateway's repository handling a sponsor key. Provisioning it out of process is future work.
  */
 export function createSigner(config: { mode: 'mock' | 'real'; network: string }): SponsorSigner {
   if (config.mode === 'real') {

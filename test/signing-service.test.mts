@@ -4,9 +4,11 @@
  * Proves the service contract: validation, SO_PEERCRED, replay, wrong sponsor/network,
  * signer failure, and that only valid requests reach the fake signer.
  *
- * Protocol v2: every request carries the signable transaction and the service
+ * Protocol v3 (since ): every request carries the signable transaction and the service
  * recomputes the digest from it — a request whose digest does not match its
- * transaction is rejected before any signing happens.
+ * transaction is rejected before any signing happens — and an Owner
+ * authorization certificate for the exact transaction, which the service
+ * verifies and consumes before signing.
  *
  * Run: npx tsx test/signing-service.test.mts
  */
@@ -14,6 +16,7 @@
 import { eq, ok } from './helpers.mjs';
 import { createSigningService, createFakeSigner, signingDigestOf, validateSigningRequest } from '../services/facilitator/src/signingService.js';
 import type { SigningRequest } from '../services/facilitator/src/signingService.js';
+import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx, fakeConsumedClient } from './owner-authz-helper.mjs';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -47,19 +50,43 @@ const test = (name: string, fn: () => Promise<void> | void) => tests.push([name,
 
 const makeService = (over: { fakeSig?: string; behaviour?: 'sign-ok' | 'sign-throws' | 'sign-hangs' } = {}) => {
   const signer = createFakeSigner({ signature: over.fakeSig ?? 'ff'.repeat(64), behaviour: over.behaviour });
-  return createSigningService({ accountSigner: signer, sponsorAddress: SPONSOR, network: NETWORK, allowedUid: 1001 });
+  // the service cannot sign without Owner authorization evidence.
+  return createSigningService({
+    accountSigner: signer,
+    sponsorAddress: SPONSOR,
+    network: NETWORK,
+    allowedUid: 1001,
+    ownerAuthorization: { publicKey: ownerKey.publicKeyHex, consume: fakeConsumedClient() },
+  });
 };
 
-const validReq = (over: Partial<SigningRequest> = {}): SigningRequest => ({
-  protocolVersion: 2,
-  requestId: crypto.randomUUID(),
-  operation: 'sign',
-  digest: DIGEST,
-  transaction: fixtureTx,
-  sponsor: SPONSOR,
-  network: NETWORK,
-  ...over,
-});
+/** One payment digest and one ephemeral Owner keypair for the whole suite. */
+const PAYMENT_DIGEST = 'ab'.repeat(32);
+const ownerKey = makeTestOwnerKey();
+
+const validReq = (over: Partial<SigningRequest> = {}): SigningRequest => {
+  const { authorization, paymentDigest, ...rest } = over;
+  // Protocol v3: every request carries an Owner authorization
+  // certificate for the exact fixture transaction.
+  const cert = authorization ?? issueTestCertificate(ownerKey.privateKey, certFieldsForTx(fixtureTx, {
+    paymentDigest: paymentDigest ?? PAYMENT_DIGEST,
+    recipient: RECIPIENT,
+    amount: '250000',
+    network: NETWORK,
+  }));
+  return {
+    protocolVersion: 3,
+    requestId: crypto.randomUUID(),
+    operation: 'sign',
+    digest: DIGEST,
+    transaction: fixtureTx,
+    sponsor: SPONSOR,
+    network: NETWORK,
+    authorization: cert,
+    paymentDigest: paymentDigest ?? PAYMENT_DIGEST,
+    ...rest,
+  };
+};
 
 // ── 1. valid request ────────────────────────────────────────────────────────
 
@@ -170,13 +197,13 @@ test('10. signer throws → rejected / signer_error', async () => {
 // ── 11. validateSigningRequest unit checks ──────────────────────────────────
 
 test('11. validateSigningRequest rejects unknown operation', () => {
-  const r = validateSigningRequest({ protocolVersion: 2, requestId: 'r', operation: 'exec', digest: DIGEST, transaction: fixtureTx, sponsor: SPONSOR, network: NETWORK });
+  const r = validateSigningRequest({ protocolVersion: 3, requestId: 'r', operation: 'exec', digest: DIGEST, transaction: fixtureTx, sponsor: SPONSOR, network: NETWORK, authorization: validReq().authorization, paymentDigest: PAYMENT_DIGEST });
   ok(!r.ok, 'rejected');
   if (!r.ok) eq(r.reason, 'unknown_operation', 'reason');
 });
 
 test('12. validateSigningRequest rejects forbidden field', () => {
-  const r = validateSigningRequest({ protocolVersion: 2, requestId: 'r', operation: 'sign', digest: DIGEST, transaction: fixtureTx, sponsor: SPONSOR, network: NETWORK, decision: 'approved' });
+  const r = validateSigningRequest({ protocolVersion: 3, requestId: 'r', operation: 'sign', digest: DIGEST, transaction: fixtureTx, sponsor: SPONSOR, network: NETWORK, authorization: validReq().authorization, paymentDigest: PAYMENT_DIGEST, decision: 'approved' });
   ok(!r.ok, 'rejected');
   if (!r.ok) eq(r.reason, 'forbidden_field', 'reason');
 });

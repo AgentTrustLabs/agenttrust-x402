@@ -11,6 +11,7 @@ import { eq, ok } from './helpers.mjs';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { AuthorizationClient, AuthorizationResponse, AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { createSdkSponsorSigner } from '../services/facilitator/src/sdkSponsorSigner.js';
@@ -208,7 +209,7 @@ test('03. approved authorization reaches the SDK adapter and hashes after signin
   });
 
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const authz = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const authz = new LocalAuthorizationClient({ policy, repository: ownerRepoFor(db, repo, () => NOW * 1000), now: () => NOW * 1000 });
 
   const calls = { submit: 0 };
   const inner = createMockSigner({ network: CAIP2, now: () => NOW * 1000 });

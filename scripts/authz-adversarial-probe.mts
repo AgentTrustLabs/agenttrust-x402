@@ -8,6 +8,7 @@
  */
 
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from '../test/owner-authz-helper.mts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const SPONSOR = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const RECIPIENT = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const NOW = 1_900_000_000;
+const NOW_MS = NOW * 1000;
 
 let findings = 0;
 const report = (name: string, safe: boolean, detail: string) => {
@@ -64,12 +66,14 @@ console.log('── probe 1: no public approval-insertion API ──');
   } catch (e) {
     rawErr = (e as Error).message;
   }
-  const approved = repo.signEvents(d).filter(e => e.decision === 'approved').length;
+  // the settlement database has no authorization table — the
+  // raw INSERT fails by construction; approvals live in the Owner repo.
+  const approved = ownerRepoFor(db, repo, () => NOW_MS).signEvents(d).filter(e => e.decision === 'approved').length;
   console.log(`   approved events after raw INSERT: ${approved}${rawErr ? ` (threw: ${rawErr.slice(0, 80)})` : ''}`);
   report(
     'no public path can create an approval for a prepared payment',
     !hasLegacy && approved === 0 && rawErr !== null,
-    !hasLegacy && approved === 0 && rawErr !== null ? 'method removed + DB trigger refused the raw insert' : 'BYPASS POSSIBLE',
+    !hasLegacy && approved === 0 && rawErr !== null ? 'method removed + no authorization table in the settlement DB' : 'BYPASS POSSIBLE',
   );
   repo.close();
   rm();
@@ -79,13 +83,14 @@ console.log('\n── probe 2: authorizeSignEvent() on the SAME prepared payment
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   const d = 'b'.repeat(64);
   repo.noteVerified(d, 'k');
   repo.claim(d, 'k');
   repo.prepare(d, 'tx-p2');
 
-  const r = repo.authorizeSignEvent(event(d));
-  const approved = repo.signEvents(d).filter(e => e.decision === 'approved').length;
+  const r = ownerRepo.authorizeSignEvent(event(d));
+  const approved = ownerRepo.signEvents(d).filter(e => e.decision === 'approved').length;
   console.log(`   gate result: ${JSON.stringify(r)} approved events: ${approved}`);
   report('authorizeSignEvent() blocks the prepared payment', !r.ok && approved === 0, String((r as any).reason));
   repo.close();
@@ -96,11 +101,12 @@ console.log('\n── probe 3: two approved events via the gate (unique index ba
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   const d = 'c'.repeat(64);
   repo.noteVerified(d, 'k');
-  const a = repo.authorizeSignEvent(event(d));
-  const b = repo.authorizeSignEvent(event(d));
-  const approved = repo.signEvents(d).filter(e => e.decision === 'approved').length;
+  const a = ownerRepo.authorizeSignEvent(event(d));
+  const b = ownerRepo.authorizeSignEvent(event(d));
+  const approved = ownerRepo.signEvents(d).filter(e => e.decision === 'approved').length;
   console.log(`   first=${JSON.stringify(a)} second=${JSON.stringify(b)} approved=${approved}`);
   report('exactly one approved event via the gate', a.ok && !b.ok && approved === 1, `${approved} event(s)`);
   repo.close();
@@ -111,12 +117,13 @@ console.log('\n── probe 4: is a gate rejection audited? ──');
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   const d = 'd'.repeat(64);
   repo.noteVerified(d, 'k');
   repo.claim(d, 'k');
   repo.prepare(d, 'tx-p4');
-  repo.authorizeSignEvent(event(d));
-  const events = repo.signEvents(d);
+  ownerRepo.authorizeSignEvent(event(d));
+  const events = ownerRepo.signEvents(d);
   console.log(`   sign_events after a state rejection: ${events.length} → ${JSON.stringify(events.map(e => [e.decision, e.reason]))}`);
   report(
     'state rejection is audited as rejected/transaction_hash_already_prepared',
@@ -131,9 +138,10 @@ console.log('\n── probe 4b: missing payment is auditable without a fake paym
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   const missing = 'f'.repeat(64);
-  const r = repo.authorizeSignEvent(event(missing));
-  const attempts = repo.signAttempts(missing);
+  const r = ownerRepo.authorizeSignEvent(event(missing));
+  const attempts = ownerRepo.signAttempts(missing);
   const payments = repo.get(missing);
   console.log(`   gate result: ${JSON.stringify(r)} attempts: ${attempts.length} payments row: ${payments === undefined ? 'none' : 'PRESENT'}`);
   report(
@@ -145,15 +153,17 @@ console.log('\n── probe 4b: missing payment is auditable without a fake paym
   rm();
 }
 
-console.log('\n── probe 5: fresh database has the unique partial index ──');
+console.log('\n── probe 5: fresh Owner database has the unique partial index ──');
 {
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db);
-  const idx = repo['db']
-    .prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND name='ux_sign_events_approved'")
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
+  const idx = ownerRepo['db']
+    .prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND name='ux_authorizations_approved'")
     .get() as { name: string; sql: string } | undefined;
   console.log(`   index: ${idx ? idx.sql : 'MISSING'}`);
-  report('ux_sign_events_approved exists on a fresh DB', Boolean(idx?.sql?.includes("decision = 'approved'")), idx ? 'present and partial' : 'MISSING');
+  report('ux_authorizations_approved exists on a fresh Owner DB', Boolean(idx?.sql?.includes("decision = 'approved'")), idx ? 'present and partial' : 'MISSING');
+  ownerRepo.close();
   repo.close();
   rm();
 }
@@ -183,20 +193,22 @@ console.log('\n── probe 6: legacy DB with duplicate approved events (migrati
   `);
   raw.close();
 
-  let err: string | null = null;
-  try {
-    const repo = new SqliteSettlementRepository(db);
-    repo.close();
-  } catch (e) {
-    err = (e as Error).message;
-  }
-  console.log(`   opening a legacy DB with 2 approved rows: ${err ? `threw — ${err.slice(0, 90)}` : 'opened silently'}`);
+  // the settlement repository no longer reads authorization
+  // tables at all — legacy rows are inert evidence there. The component
+  // that must refuse ambiguous legacy state is the EXPLICIT migration
+  // script: run it against this file and expect a non-zero exit.
+  const { spawnSync } = await import('node:child_process');
+  const ownerDir = join((await import('node:fs')).mkdtempSync(join(tmpdir(), 't343-mig-')), 'owner');
+  (await import('node:fs')).mkdirSync(ownerDir, { mode: 0o700 });
+  const out = spawnSync(process.execPath, ['--import', 'tsx', join(process.cwd(), 'scripts/migrate-owner-authz-db.mts'), '--legacy-db', db, '--owner-db', join(ownerDir, 'authz.db')], { encoding: 'utf8' });
+  const err = out.status !== 0 ? (out.stderr || out.stdout || `exit ${out.status}`) : null;
+  console.log(`   migration of a legacy DB with 2 approved rows: ${err ? `refused — ${String(err).slice(0, 120)}` : 'ACCEPTED (bad)'}`);
   report(
-    'legacy duplicate-approved DB fails closed',
+    'legacy duplicate-approved DB is refused by the explicit migration',
     err !== null,
-    err ? 'construction throws (no silent unprotected start)' : 'SILENTLY OPENED — database left unprotected',
+    err ? 'migration refuses ambiguous legacy state' : 'MIGRATION ACCEPTED — ambiguous state copied',
   );
   rm();
 }
 
-console.log(`\ntask34.3 probe: ${findings} BYPASS/GAP finding(s)`);
+console.log(`\nprobe 34.3: ${findings} BYPASS/GAP finding(s)`);

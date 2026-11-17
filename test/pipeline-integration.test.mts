@@ -11,6 +11,7 @@ import { eq, ok } from './helpers.mjs';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import { convertV2ToSdkV1 } from '../services/facilitator/src/wireConverter.js';
 import type { WireConversionPolicy } from '../services/facilitator/src/wireConverter.js';
@@ -86,19 +87,20 @@ const buildCore = (over: {
     getTokenDecimals: inner.getTokenDecimals,
   };
   const repo = new SqliteSettlementRepository(over.dbPath, { now: over.now });
+  const ownerRepo = ownerRepoFor(over.dbPath, repo, over.now);
   const core = new FacilitatorCore({
     network: CAIP2,
     signer,
     dbPath: over.dbPath,
     now: over.now,
-    authorization: new LocalAuthorizationClient({ policy, repository: repo, now: over.now }),
+    authorization: new LocalAuthorizationClient({ policy, repository: ownerRepo, now: over.now }),
     senderVerifier: async () => { over.calls.verify++; return over.senderResult; },
     wireConverter: (input: unknown, p: WireConversionPolicy) => {
       over.calls.convert++;
       return convertV2ToSdkV1(input, p);
     },
   });
-  return { core, repo };
+  return { core, repo, ownerRepo };
 };
 
 // ── 1. valid verification → full pipeline ──────────────────────────────────
@@ -149,11 +151,11 @@ for (const [label, result] of reasons) {
 test('08. rejected sender verification records no approval', async () => {
   const { db, rm } = mk();
   const calls = { verify: 0, convert: 0, sign: 0, submit: 0 };
-  const { core, repo } = buildCore({ senderResult: { ok: false, reason: 'invalid_signature' }, calls, dbPath: db, now: () => NOW * 1000 });
+  const { core, repo, ownerRepo } = buildCore({ senderResult: { ok: false, reason: 'invalid_signature' }, calls, dbPath: db, now: () => NOW * 1000 });
   await core.settle(envelope());
   const { paymentDigest } = await import('../services/facilitator/src/store.js');
   const digest = paymentDigest((envelope() as any).paymentPayload);
-  const events = repo.signEvents(digest);
+  const events = ownerRepo.signEvents(digest);
   eq(events.length, 0, 'no sign event recorded');
   repo.close();
   rm();
@@ -175,12 +177,13 @@ test('09. default (no verifier injected) still works — mock flow preserved', a
     getTokenDecimals: inner.getTokenDecimals,
   };
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
   const core = new FacilitatorCore({
     network: CAIP2,
     signer,
     dbPath: db,
     now: () => NOW * 1000,
-    authorization: new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 }),
+    authorization: new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 }),
   });
   const res = await core.settle(envelope());
   check('09. settle succeeded', res.success === true, res.success ? 'ok' : String(res.errorMessage));

@@ -10,8 +10,8 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Socket } from 'node:net';
-import { generateKeyPairSync, sign as edSign } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { generateKeyPairSync, randomUUID, sign as edSign } from 'node:crypto';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, ok } from './helpers.mjs';
@@ -20,6 +20,8 @@ import { createIpcSponsorSigner } from '../services/facilitator/src/ipcSponsorSi
 import { IpcAccountSigner, probeSigningService, signingDigestOf } from '../services/facilitator/src/signingService.js';
 import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 import { createSdkSponsorSigner, validateSponsorContext } from '../services/facilitator/src/sdkSponsorSigner.js';
+import type { OwnerAuthorizationCertificate } from '../services/facilitator/src/ownerAuthorization.js';
+import { certFieldsForTx, issueTestCertificate, makeTestOwner, makeTestOwnerKey, ownerRepoFor, recomputedEnergyOf } from './owner-authz-helper.mts';
 import { GrpcAccountInfoProvider } from '../services/facilitator/src/grpcAccountInfoProvider.js';
 import { makeFakeAccountInfo } from '../services/facilitator/src/senderVerifier.js';
 import { startFacilitator } from '../services/facilitator/src/server.js';
@@ -81,7 +83,12 @@ const tmpsock = (tag: string) => {
   return { dir, sock: join(dir, 's.sock'), rm: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
-const ipcSignerFor = (sock: string, timeoutMs = 600, transaction: unknown = sponsoredTx()) =>
+const ipcSignerFor = (
+  sock: string,
+  timeoutMs = 600,
+  transaction: unknown = sponsoredTx(),
+  auth?: { authorization: OwnerAuthorizationCertificate; paymentDigest: string },
+) =>
   new IpcAccountSigner({
     socketPath: sock,
     expectedUid: FACILITATOR_UID,
@@ -89,6 +96,7 @@ const ipcSignerFor = (sock: string, timeoutMs = 600, transaction: unknown = spon
     network: NETWORK,
     timeoutMs,
     transaction,
+    ...(auth !== undefined ? { authorization: auth.authorization, paymentDigest: auth.paymentDigest } : {}),
   });
 
 /** A minimal, deterministic V1 sponsored transaction in the SDK signable shape. */
@@ -155,7 +163,19 @@ test('A03. the private seed never appears in any IPC request', async () => {
     });
   });
   try {
-    try { await ipcSignerFor(sock, 300).sign(fixtureDigest()); } catch { /* expected */ }
+    // the client refuses to send a request without authorization
+    // evidence, so carry a directly-issued test certificate (no Owner
+    // process: the raw server never consumes it). The certificate carries
+    // no key material.
+    const tx = sponsoredTx();
+    const ownerKey = makeTestOwnerKey();
+    const cert = issueTestCertificate(ownerKey.privateKey, certFieldsForTx(tx, {
+      paymentDigest: (randomUUID() + randomUUID()).replace(/-/g, ''),
+      recipient: RECIPIENT,
+      amount: '250000',
+      network: NETWORK,
+    }));
+    try { await ipcSignerFor(sock, 300, tx, { authorization: cert, paymentDigest: cert.paymentDigest }).sign(fixtureDigest()); } catch { /* expected */ }
     ok(!seen.includes(key.privateKeyHex), 'private seed absent from wire');
     ok(!seen.includes(key.publicKeyHex), 'public key absent from wire');
     // The request carries a 64-hex digest and the transaction it binds to.
@@ -237,7 +257,7 @@ test('B05. the pipeline invokes validateContext and fails closed on a fee breach
     now: () => NOW * 1000,
     authorization: new LocalAuthorizationClient({
       policy: { network: NETWORK, sponsor: SPONSOR, maxEnergy: 100_000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 't48' },
-      repository: repo,
+      repository: ownerRepoFor(join(db, 'f.db'), repo, () => NOW * 1000),
       now: () => NOW * 1000,
     }),
   });
@@ -281,7 +301,7 @@ test('B06. the pipeline does not call validateContext when the signer omits it',
     now: () => NOW * 1000,
     authorization: new LocalAuthorizationClient({
       policy: { network: NETWORK, sponsor: SPONSOR, maxEnergy: 100_000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 't48' },
-      repository: repo,
+      repository: ownerRepoFor(join(db, 'f.db'), repo, () => NOW * 1000),
       now: () => NOW * 1000,
     }),
   });
@@ -396,9 +416,125 @@ if (!hasIpc) {
   const sock = join(base, 'sign.sock');
   const serviceScript = `${process.cwd()}/scripts/signing-service.mts`;
 
+  // ──  Owner (suite-scoped) ─────────────────────────────────────────
+  // The signing service consumes every authorization at a REAL Owner process
+  // before signing, so the E tests run one. Certificates are issued
+  // in-process by `testOwner`'s LocalAuthorizationClient against the SAME
+  // database file the Owner process serves consume from — issuance is the
+  // mock Owner's job here (its authorize path is covered by the
+  // owner-authorization-binding suite); what the E tests own is the signing
+  // service's verify → consume → sign chain.
+  //
+  // Clock note: the fixtures use a fixed future clock (NOW = 1_800_000_000),
+  // so the in-process Owner runs on that clock — a real-time clock would
+  // reject the fixture expiry as expiry_excessive. The Owner process and
+  // the signing service run on real time, and the fixture expiry (NOW+200,
+  // ~2027) is still in the future for them, so their expiry checks pass.
+  const ownerKey = makeTestOwnerKey();
+  const testOwner = makeTestOwner({
+    sponsor: SPONSOR,
+    network: NETWORK,
+    maxEnergy: 10000n,
+    policyVersion: 't48',
+    now: () => NOW * 1000,
+  });
+  const ownerSock = join(base, 'owner.sock');
+  const ownerScript = `${process.cwd()}/scripts/authz-owner.mts`;
+  let ownerProc: ReturnType<typeof spawn> | null = null;
+  let ownerStarting: Promise<void> | null = null;
+
+  const ensureOwner = (): Promise<void> => {
+    if (ownerProc !== null) return Promise.resolve();
+    if (ownerStarting !== null) return ownerStarting;
+    ownerStarting = (async () => {
+      // the Owner process serves consume from the SAME
+      // Owner-private database the in-process testOwner writes
+      // certificates to, so the Owner directory IS testOwner.ownerDir
+      // and AUTHZ_DB_FILE is testOwner.ownerDbPath. The settlement DB
+      // (testOwner.dbPath) lives in the parent dir — a different
+      // directory, as the launcher requires.
+      const ownerDir = testOwner.ownerDir;
+      const ownerKeyFile = join(ownerDir, 'owner-key.pem');
+      writeFileSync(ownerKeyFile, ownerKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+      // Same-UID harness: present the settlement file read-only at Owner
+      // startup so the launcher's writable guard passes. testOwner's
+      // settlement connection stays open, so later seeds write via its
+      // file descriptor.
+      chmodSync(testOwner.dbPath, 0o400);
+      const proc = spawn('npx', ['tsx', ownerScript, ownerDir, ownerSock, String(FACILITATOR_UID), String(FACILITATOR_UID)], {
+        env: {
+          ...process.env,
+          AUTHZ_SPONSOR_ADDRESS: SPONSOR,
+          AUTHZ_NETWORK: NETWORK,
+          AUTHZ_MAX_ENERGY: '100000',
+          AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
+          AUTHZ_ALLOWED_ASSETS: 'CCD',
+          AUTHZ_POLICY_VERSION: 't48',
+          AUTHZ_DB_FILE: testOwner.ownerDbPath,
+          AUTHZ_SETTLEMENT_DB_FILE: testOwner.dbPath,
+          AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+          // Same-UID harness: the Owner runs as the test process here, so
+          // the launcher's default distinct-UID refusal is opted out
+          // explicitly (test-only, never set in production).
+          AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
+      });
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('owner start timeout')), 30_000);
+        let stderr = '';
+        proc.stderr.on('data', (c) => { stderr += c.toString(); });
+        proc.stdout.on('data', (c) => {
+          if (c.toString().includes('owner listening')) {
+            clearTimeout(t);
+            resolve();
+          }
+        });
+        proc.on('exit', (code) => {
+          clearTimeout(t);
+          reject(new Error(`owner exited early code=${code}: ${stderr.trim().split('\n').slice(-15).join(' | ')}`));
+        });
+      });
+      ownerProc = proc;
+    })();
+    return ownerStarting;
+  };
+
+  /** Issue one fresh single-use authorization for `tx` (default: the fixture). */
+  const authorizeOnce = async (tx: unknown = sponsoredTx(1)) => {
+    const paymentDigest = (randomUUID() + randomUUID()).replace(/-/g, '');
+    testOwner.seedPayment(paymentDigest);
+    const res = await testOwner.authorization.authorize({
+      paymentDigest,
+      network: NETWORK,
+      version: 1,
+      sender: RECIPIENT,
+      sponsor: SPONSOR,
+      recipient: RECIPIENT,
+      asset: 'CCD',
+      amount: '250000',
+      expiry: NOW + 200,
+      energy: recomputedEnergyOf(tx),
+      transactionDigest: signingDigestOf(tx),
+      transactionType: 'transfer',
+      maxFeeMicroCcd: '10000000',
+    });
+    if (res.outcome !== 'approved' || !res.certificate) {
+      throw new Error(`test authorize failed: ${res.outcome}/${res.reason ?? ''} ${res.detail ?? ''}`);
+    }
+    return { certificate: res.certificate, paymentDigest };
+  };
+
   const startService = async (socketPath: string, allowedUid: number, key?: TestKey) => {
+    // the service refuses to start without the Owner verifier, so
+    // the Owner must be up (and its public key known) before the service.
+    await ensureOwner();
     const env = { ...process.env };
     if (key) env['TEST_SIGNING_SEED_HEX'] = key.privateKeyHex;
+    env['SIGNING_OWNER_PUBLIC_KEY'] = testOwner.authorization.authorizationPublicKeyHex();
+    env['SIGNING_OWNER_SOCKET'] = ownerSock;
+    env['SIGNING_OWNER_UID'] = String(FACILITATOR_UID);
     const proc = spawn('npx', ['tsx', serviceScript, socketPath, SPONSOR, NETWORK, String(allowedUid)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
@@ -451,7 +587,12 @@ if (!hasIpc) {
         maxFeeMicroCcd: 10_000_000n,
         timeoutMs: 5_000,
       });
-      const signed = (await signer.addSponsorSignature(sponsoredTx(1))) as any;
+      // one fresh single-use authorization for this exact transaction.
+      const auth = await authorizeOnce();
+      const signed = (await signer.addSponsorSignature(sponsoredTx(1), {
+        authorization: auth.certificate,
+        paymentDigest: auth.paymentDigest,
+      })) as any;
       const sponsorSig = signed?.signatures?.sponsor;
       ok(sponsorSig?.['0']?.['0'] !== undefined, 'sponsor signature present');
       const sigHex = sponsorSig['0']['0'];
@@ -481,7 +622,11 @@ if (!hasIpc) {
         sponsorAddress: SPONSOR, network: NETWORK, socketPath: esock,
         expectedUid: FACILITATOR_UID, maxEnergy: 100_000n, maxFeeMicroCcd: 10_000_000n, timeoutMs: 5_000,
       });
-      const signed = (await signer.addSponsorSignature(sponsoredTx(1))) as any;
+      const auth = await authorizeOnce();
+      const signed = (await signer.addSponsorSignature(sponsoredTx(1), {
+        authorization: auth.certificate,
+        paymentDigest: auth.paymentDigest,
+      })) as any;
       const bad = { '0': { '0': '00'.repeat(64) } };
       const info = accountInfoFor(key, SPONSOR);
       const okBad = await Transaction.verifySignature(Transaction.signableFromJSON(signed), bad, {
@@ -501,18 +646,23 @@ if (!hasIpc) {
     const { sock: esock, rm: erm } = tmpsock('e04');
     const proc = await startService(esock, FACILITATOR_UID, key);
     try {
+      // the authorization is bound to the CORRECT sponsor/network,
+      // so both wrong-identity requests are refused by the service before
+      // consumption; the certificate is never spent by either rejection.
+      const auth = await authorizeOnce();
       const wrongSponsor = createIpcSponsorSigner({
         sponsorAddress: RECIPIENT, network: NETWORK, socketPath: esock,
         expectedUid: FACILITATOR_UID, maxEnergy: 100_000n, maxFeeMicroCcd: 10_000_000n, timeoutMs: 3_000,
       });
       let msg = '';
-      try { await wrongSponsor.addSponsorSignature(sponsoredTx(1)); } catch (e) { msg = (e as Error).message; }
+      try { await wrongSponsor.addSponsorSignature(sponsoredTx(1), { authorization: auth.certificate, paymentDigest: auth.paymentDigest }); } catch (e) { msg = (e as Error).message; }
       ok(/wrong_sponsor/.test(msg), `wrong sponsor refused: "${msg}"`);
 
       const wrongNetwork = new IpcAccountSigner({
         socketPath: esock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR,
         network: 'ccd:00000000000000000000000000000000', timeoutMs: 3_000,
         transaction: sponsoredTx(1),
+        authorization: auth.certificate, paymentDigest: auth.paymentDigest,
       });
       msg = '';
       try { await wrongNetwork.sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
@@ -530,10 +680,13 @@ if (!hasIpc) {
     try {
       let msg = '';
       try {
+        // the client must carry authorization evidence to reach the
+        // peer check at all; without it the refusal would be client-side.
+        const auth = await authorizeOnce();
         await createIpcSponsorSigner({
           sponsorAddress: SPONSOR, network: NETWORK, socketPath: esock,
           expectedUid: FACILITATOR_UID, maxEnergy: 100_000n, maxFeeMicroCcd: 10_000_000n, timeoutMs: 3_000,
-        }).addSponsorSignature(sponsoredTx(1));
+        }).addSponsorSignature(sponsoredTx(1), { authorization: auth.certificate, paymentDigest: auth.paymentDigest });
       } catch (e) { msg = (e as Error).message; }
       ok(/unauthorized_peer/i.test(msg), `uid mismatch refused: "${msg}"`);
     } finally {
@@ -544,12 +697,16 @@ if (!hasIpc) {
 
   test('E06. timeout, crash, and connection failure all fail closed', async () => {
     const key = generateTestKey();
+    // the raw-socket cases need authorization evidence to get past
+    // the client-side refusal; the evidence is never consumed here (no real
+    // service), so one authorization covers all four sub-cases.
+    const auth = await authorizeOnce();
     // (a) timeout: a silent listener
     const a = tmpsock('e06a');
     const asrv = await rawServer(a.sock, () => {});
     try {
       let msg = '';
-      try { await ipcSignerFor(a.sock, 300).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
+      try { await ipcSignerFor(a.sock, 300, sponsoredTx(), { authorization: auth.certificate, paymentDigest: auth.paymentDigest }).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
       ok(/signing service timeout/i.test(msg), `timeout: "${msg}"`);
     } finally { await asrv.close(); a.rm(); }
     // (b) crash: the peer exits mid-request
@@ -557,13 +714,13 @@ if (!hasIpc) {
     const bsrv = await rawServer(b.sock, (conn) => conn.once('data', () => conn.destroy()));
     try {
       let msg = '';
-      try { await ipcSignerFor(b.sock, 5_000).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
+      try { await ipcSignerFor(b.sock, 5_000, sponsoredTx(), { authorization: auth.certificate, paymentDigest: auth.paymentDigest }).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
       ok(/closed the connection before responding/i.test(msg), `crash: "${msg}"`);
     } finally { await bsrv.close(); b.rm(); }
     // (c) connection refused
     const c = tmpsock('e06c');
     let msg = '';
-    try { await ipcSignerFor(c.sock, 300).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
+    try { await ipcSignerFor(c.sock, 300, sponsoredTx(), { authorization: auth.certificate, paymentDigest: auth.paymentDigest }).sign(fixtureDigest()); } catch (e) { msg = (e as Error).message; }
     ok(/unavailable/i.test(msg), `refused: "${msg}"`);
     c.rm();
     // (d) real service: no local fallback
@@ -575,7 +732,7 @@ if (!hasIpc) {
     });
     await stop(proc, esock);
     msg = '';
-    try { await signer.addSponsorSignature(sponsoredTx(1)); } catch (e) { msg = (e as Error).message; }
+    try { await signer.addSponsorSignature(sponsoredTx(1), { authorization: auth.certificate, paymentDigest: auth.paymentDigest }); } catch (e) { msg = (e as Error).message; }
     ok(/unavailable|timeout|closed the connection/i.test(msg), `no local fallback: "${msg}"`);
   });
 
@@ -591,27 +748,32 @@ if (!hasIpc) {
         conn.on('data', (chunk) => {
           wire += chunk.toString();
           conn.write(JSON.stringify({
-            protocolVersion: 2, requestId: JSON.parse(chunk.toString()).requestId,
+            protocolVersion: 3, requestId: JSON.parse(chunk.toString()).requestId,
             outcome: 'signed', signature: { 0: { 0: 'ff'.repeat(64) } }, reason: null, detail: null,
           }) + '\n');
         });
       });
       try {
         const tx = sponsoredTx(1);
+        // the request must carry the Owner authorization evidence.
+        const auth = await authorizeOnce(tx);
         await new IpcAccountSigner({
           socketPath: rsock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR,
           network: NETWORK, timeoutMs: 1_000, transaction: tx,
+          authorization: auth.certificate, paymentDigest: auth.paymentDigest,
         }).sign(digestHexToArrayBuffer(signingDigestOf(tx)));
       } finally {
         await rsrv.close();
         rrm();
       }
-      // New invariant (protocol v2): the request carries the transaction, and the
-      // digest in the wire equals the transaction's recomputed digest — the
-      // property the signing service verifies before signing.
+      // New invariant (protocol v3): the request carries the transaction, the
+      // Owner authorization certificate and the payment digest, and the digest
+      // in the wire equals the transaction's recomputed digest — the property
+      // the signing service verifies before signing.
       const req = JSON.parse(wire.trim());
-      eq(req.protocolVersion, 2, 'protocol v2');
+      eq(req.protocolVersion, 3, 'protocol v3');
       ok(req.transaction !== undefined, 'transaction present');
+      ok(req.authorization !== undefined, 'authorization present');
       eq(req.digest, signingDigestOf(req.transaction), 'digest equals the transaction recompute');
       eq(req.transaction.payload.toAddress, RECIPIENT, 'recipient in the wire is the transaction recipient');
       ok(!wire.includes(key.privateKeyHex), 'private seed absent from wire');
@@ -627,12 +789,16 @@ if (!hasIpc) {
     const proc = await startService(esock, FACILITATOR_UID, key);
     try {
       // Sign several times; the key must never appear in any response or log line.
+      // each sign consumes one authorization, so each call carries a
+      // fresh single-use certificate for the same transaction.
       const signer = createIpcSponsorSigner({
         sponsorAddress: SPONSOR, network: NETWORK, socketPath: esock,
         expectedUid: FACILITATOR_UID, maxEnergy: 100_000n, maxFeeMicroCcd: 10_000_000n, timeoutMs: 5_000,
       });
-      await signer.addSponsorSignature(sponsoredTx(1));
-      await signer.addSponsorSignature(sponsoredTx(1));
+      const auth1 = await authorizeOnce();
+      await signer.addSponsorSignature(sponsoredTx(1), { authorization: auth1.certificate, paymentDigest: auth1.paymentDigest });
+      const auth2 = await authorizeOnce();
+      await signer.addSponsorSignature(sponsoredTx(1), { authorization: auth2.certificate, paymentDigest: auth2.paymentDigest });
       // The child's stdout/stderr buffers never contain the seed (the harness logs the mode only).
       let log = '';
       proc.stdout.on('data', (c) => { log += c.toString(); });
@@ -645,7 +811,13 @@ if (!hasIpc) {
     }
   });
 
-  process.on('exit', () => rmSync(base, { recursive: true, force: true }));
+  process.on('exit', () => {
+    // Best-effort: stop the suite-scoped Owner (a detached process group)
+    // before removing the socket/db dirs it serves from.
+    try { if (ownerProc?.pid !== undefined) process.kill(-ownerProc.pid, 'SIGTERM'); } catch { /* already gone */ }
+    try { testOwner.close(); } catch { /* already closed */ }
+    rmSync(base, { recursive: true, force: true });
+  });
 }
 
 // ═══ F. invariants ══════════════════════════════════════════════════════════

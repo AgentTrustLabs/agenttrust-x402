@@ -184,7 +184,7 @@ const result = await verifyAgent({
 const finalEvidence = {
   ...result.evidence,
   meta: {
-    task: 'read-only discovery & independent cross-agent verification',
+    purpose: 'read-only discovery & independent cross-agent verification',
     network: NETWORK,
     caip2: CAIP2,
     token_id: TOKEN_ID,

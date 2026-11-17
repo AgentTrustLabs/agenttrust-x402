@@ -429,7 +429,7 @@ test('14. commerce run still produces a verifiable chained trail', async () => {
   const search = JSON.parse(rf(`${FIX}discovery-search.raw.json`, 'utf8'));
 
   const { file } = tmp();
-  const audit = new AuditTrail({ filePath: file, sessionId: 'cs_task05_compat' });
+  const audit = new AuditTrail({ filePath: file, sessionId: 'cs_compat' });
 
   const facilitator = {
     async verify() { return { isValid: true, payer: '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d' }; },

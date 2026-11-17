@@ -19,6 +19,7 @@ import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner, type SponsorSigner } from '../services/facilitator/src/signer.js';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { paymentDigest } from '../services/facilitator/src/store.js';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
@@ -84,6 +85,7 @@ const setup = () => {
   const dir = mkdtempSync(join(tmpdir(), 'agenttrust-amount-'));
   const db = join(dir, 'f.db');
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
   const calls = { sign: 0 };
   const core = new FacilitatorCore({
     network: CAIP2,
@@ -101,11 +103,11 @@ const setup = () => {
         allowedAssets: ['CCD'],
         policyVersion: 't-amount',
       },
-      repository: repo,
+      repository: ownerRepo,
       now: () => NOW * 1000,
     }),
   });
-  return { dir, db, repo, calls, core, cleanup: () => { repo.close(); rmSync(dir, { recursive: true, force: true }); } };
+  return { dir, db, repo, ownerRepo, calls, core, cleanup: () => { try { ownerRepo.close(); } catch { /* already closed */ } repo.close(); rmSync(dir, { recursive: true, force: true }); } };
 };
 
 test('01. matching amounts settle past the agreement check (signer called once)', async () => {
@@ -130,7 +132,7 @@ test('02. signed amount != accepted amount is refused before any signer call', a
     ok(/amount mismatch/i.test(String(res.errorMessage)), `message names the mismatch: ${String(res.errorMessage)}`);
     eq(s.calls.sign, 0, 'signer never reached');
     // No sign event was recorded for the refused payment.
-    const events = s.repo.signEvents(paymentDigest(envelope('1').paymentPayload));
+    const events = s.ownerRepo.signEvents(paymentDigest(envelope('1').paymentPayload));
     eq(events.length, 0, 'no sign event recorded');
   } finally {
     s.cleanup();

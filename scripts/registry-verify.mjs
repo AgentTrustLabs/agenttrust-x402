@@ -36,8 +36,8 @@ console.log('agent_wallet  :', r.agent_wallet ?? '(unset)');
 
 // ---- 2. local card hash -------------------------------------------------
 // Prefer the post-mint card (v2) — it is the one anchored on chain after re-pin.
-const CARD = process.env.AGENTTRUST_CARD ?? 'docs/evidence/task02/agent-card.v2.json';
-const REPIN_MANIFEST = 'docs/evidence/task02/repin-manifest.v2.json';
+const CARD = process.env.AGENTTRUST_CARD ?? 'docs/evidence/agent-card/agent-card.v2.json';
+const REPIN_MANIFEST = 'docs/evidence/agent-card/repin-manifest.v2.json';
 const cardBytes = readFileSync(CARD);
 const localHash = createHash('sha256').update(cardBytes).digest('hex');
 const repin = JSON.parse(readFileSync(REPIN_MANIFEST, 'utf8'));

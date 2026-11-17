@@ -8,10 +8,19 @@
  * The key is supplied out-of-band by the test process via the environment. It is never
  * logged, never written to disk by this script, and never appears in any output.
  *
+ * the service verifies an Owner authorization certificate and consumes
+ * the authorization at the Owner before signing. The Owner's public key, socket
+ * and UID are REQUIRED (exit 2 when unset) — a service without them cannot
+ * verify authorization evidence and must not start.
+ *
  * Usage: npx tsx scripts/signing-service.mts <socket-path> <sponsor> <network> <allowed-uid>
  * Env:   TEST_SIGNING_SEED_HEX=<64 hex>   (optional; enables the real Ed25519 signer)
+ *        SIGNING_OWNER_PUBLIC_KEY=<SPKI DER hex>  (required)
+ *        SIGNING_OWNER_SOCKET=<owner socket path> (required)
+ *        SIGNING_OWNER_UID=<owner uid>            (required)
  */
 import { createSigningService, createFakeSigner } from '../services/facilitator/src/signingService.js';
+import { IpcOwnerConsumeClient } from '../services/facilitator/src/ownerAuthorization.js';
 import { buildBasicAccountSigner } from '@concordium/web-sdk';
 import { chmodSync } from 'node:fs';
 
@@ -21,6 +30,16 @@ if (!socketPath || !sponsor || !network || !allowedUidRaw) {
   process.exit(2);
 }
 const allowedUid = Number(allowedUidRaw);
+
+// Owner authorization verification is required, not optional.
+const ownerPublicKey = process.env['SIGNING_OWNER_PUBLIC_KEY'];
+const ownerSocket = process.env['SIGNING_OWNER_SOCKET'];
+const ownerUidRaw = process.env['SIGNING_OWNER_UID'];
+if (!ownerPublicKey || !ownerSocket || !ownerUidRaw) {
+  console.error('refusing to start: SIGNING_OWNER_PUBLIC_KEY, SIGNING_OWNER_SOCKET and SIGNING_OWNER_UID are required ');
+  process.exit(2);
+}
+const ownerConsume = new IpcOwnerConsumeClient({ socketPath: ownerSocket, ownerUid: Number(ownerUidRaw) });
 
 const testKey = process.env['TEST_SIGNING_SEED_HEX'];
 let accountSigner: any;
@@ -32,7 +51,13 @@ if (testKey && /^[0-9a-fA-F]{64}$/.test(testKey)) {
   accountSigner = createFakeSigner({ signature: 'ee'.repeat(64) });
 }
 
-const svc = createSigningService({ accountSigner, sponsorAddress: sponsor, network, allowedUid });
+const svc = createSigningService({
+  accountSigner,
+  sponsorAddress: sponsor,
+  network,
+  allowedUid,
+  ownerAuthorization: { publicKey: ownerPublicKey, consume: ownerConsume },
+});
 
 await svc.listen(socketPath);
 try {

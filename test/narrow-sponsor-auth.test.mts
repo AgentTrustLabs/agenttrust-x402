@@ -10,6 +10,7 @@
 import { MockNarrowSponsorSigner } from '../services/facilitator/src/narrowSponsorMock.js';
 import { decideAuthorization, validatePolicy } from '../services/facilitator/src/narrowSponsor.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,7 +64,7 @@ const test = (name: string, fn: () => Promise<void> | void) => tests.push([name,
 test('01. valid transaction context → approved', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest());
   eq(r.approved, true, 'approved');
   const events = signer['repo'].signEvents('a'.repeat(64));
@@ -76,7 +77,7 @@ test('01. valid transaction context → approved', async () => {
 test('02. wrong network → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ network: 'ccd:9dd9ca4d19e9393877d2c44b70f89acb' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'wrong_network', 'wrong_network');
@@ -87,7 +88,7 @@ test('02. wrong network → rejected', async () => {
 test('03. wrong sponsor identity → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ sponsor: RECIPIENT }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'wrong_sponsor', 'wrong_sponsor');
@@ -97,7 +98,7 @@ test('03. wrong sponsor identity → rejected', async () => {
 test('04. sponsor equals sender → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: { ...POLICY, sponsor: SENDER }, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db, { ...POLICY, sponsor: SENDER });
   const r = await signer.authorize(validRequest({ sponsor: SENDER, sender: SENDER }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'sponsor_is_sender', 'sponsor_is_sender');
@@ -107,7 +108,7 @@ test('04. sponsor equals sender → rejected', async () => {
 test('05. sponsor equals recipient → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: { ...POLICY, sponsor: RECIPIENT }, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db, { ...POLICY, sponsor: RECIPIENT });
   const r = await signer.authorize(validRequest({ sponsor: RECIPIENT, recipient: RECIPIENT }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'sponsor_is_recipient', 'sponsor_is_recipient');
@@ -117,7 +118,7 @@ test('05. sponsor equals recipient → rejected', async () => {
 test('06. missing sender → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ sender: '' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'missing_sender', 'missing_sender');
@@ -127,7 +128,7 @@ test('06. missing sender → rejected', async () => {
 test('07. missing recipient → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ recipient: '' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'missing_recipient', 'missing_recipient');
@@ -137,7 +138,7 @@ test('07. missing recipient → rejected', async () => {
 test('08. invalid address → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ sender: 'not-an-address' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'invalid_sender', 'invalid_sender');
@@ -147,7 +148,7 @@ test('08. invalid address → rejected', async () => {
 test('09. expired transaction → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ expiry: NOW - 1 }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'expired', 'expired');
@@ -157,7 +158,7 @@ test('09. expired transaction → rejected', async () => {
 test('10. excessive expiry → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ expiry: NOW + 601 }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'expiry_excessive', 'expiry_excessive');
@@ -168,7 +169,7 @@ test('11. missing energy limit → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
   const badPolicy = { ...POLICY, maxEnergy: undefined as unknown as bigint };
-  const signer = new MockNarrowSponsorSigner({ policy: badPolicy, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db, badPolicy);
   const r = await signer.authorize(validRequest());
   eq(r.approved, false, 'rejected');
   // A broken policy cannot be audited with a valid policyVersion, so the adapter must still
@@ -180,7 +181,7 @@ test('11. missing energy limit → rejected', async () => {
 test('12. energy above cap → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ energy: 10_001n }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'energy_exceeds_cap', 'energy_exceeds_cap');
@@ -190,7 +191,7 @@ test('12. energy above cap → rejected', async () => {
 test('13. energy exactly at cap → approved', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ energy: 10_000n }));
   eq(r.approved, true, 'approved');
   rm();
@@ -199,7 +200,7 @@ test('13. energy exactly at cap → approved', async () => {
 test('14. malformed energy value → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ energy: '3000' as unknown as bigint }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'energy_malformed', 'energy_malformed');
@@ -208,7 +209,7 @@ test('14. malformed energy value → rejected', async () => {
 
 test('15. duplicate payment digest → rejected', async () => {
   const { dir, db, rm } = mk();
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const repo = new SqliteSettlementRepository(db);
   repo.noteVerified('a'.repeat(64), 'k');
   repo.claim('a'.repeat(64), 'k');
@@ -226,11 +227,13 @@ test('15. duplicate payment digest → rejected', async () => {
 test('16. audit persistence failure → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  // Use ONE repo instance: dropping sign_events must persist for the signer's connection.
+  // Use ONE Owner repo instance: dropping authorizations must persist for the signer's connection.
   // (A fresh connection would re-run the idempotent SCHEMA and recreate the table.)
+  // the audit table lives in the Owner-private database now.
   const repo = new SqliteSettlementRepository(db);
-  repo['db'].exec('DROP TABLE sign_events');
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => NOW_MS });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
+  ownerRepo['db'].exec('DROP TABLE authorizations');
+  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepo, now: () => NOW_MS });
   const r = await signer.authorize(validRequest());
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'audit_write_failed', 'audit_write_failed');
@@ -242,7 +245,7 @@ test('16. audit persistence failure → rejected', async () => {
 test('17. negative energy → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ energy: -1n }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'energy_negative', 'energy_negative');
@@ -252,7 +255,7 @@ test('17. negative energy → rejected', async () => {
 test('17b. zero energy → rejected (matches LocalAuthorizationClient)', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ energy: 0n }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'energy_negative', 'energy_negative');
@@ -262,7 +265,7 @@ test('17b. zero energy → rejected (matches LocalAuthorizationClient)', async (
 test('18. energy overflow (int64) → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ energy: 0x8000000000000000n }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'energy_overflow', 'energy_overflow');
@@ -272,7 +275,7 @@ test('18. energy overflow (int64) → rejected', async () => {
 test('19. negative policy energy → rejected (policy fails closed)', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: { ...POLICY, maxEnergy: -5n }, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db, { ...POLICY, maxEnergy: -5n });
   const r = await signer.authorize(validRequest());
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'energy_negative', 'energy_negative');
@@ -282,7 +285,7 @@ test('19. negative policy energy → rejected (policy fails closed)', async () =
 test('20. unsupported asset → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ asset: 'EURR' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'unsupported_asset', 'unsupported_asset');
@@ -292,7 +295,7 @@ test('20. unsupported asset → rejected', async () => {
 test('21. wrong version → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ version: 0 }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'wrong_version', 'wrong_version');
@@ -302,7 +305,7 @@ test('21. wrong version → rejected', async () => {
 test('22. invalid recipient → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ recipient: 'bad' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'invalid_recipient', 'invalid_recipient');
@@ -312,7 +315,7 @@ test('22. invalid recipient → rejected', async () => {
 test('23. missing sponsor → rejected', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const r = await signer.authorize(validRequest({ sponsor: '' }));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'missing_sponsor', 'missing_sponsor');
@@ -322,7 +325,7 @@ test('23. missing sponsor → rejected', async () => {
 test('24. concurrent authorization: exactly *** approved', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   const [a, b] = await Promise.all([signer.authorize(validRequest()), signer.authorize(validRequest())]);
   const approved = [a, b].filter(r => r.approved).length;
   // Exactly-once: the second attempt must be refused by the durable gate.
@@ -340,10 +343,10 @@ test('24. concurrent authorization: exactly *** approved', async () => {
 test('25. audit events survive restart', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const a = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const a = signerFor(db);
   await a.authorize(validRequest());
   a['repo'].close();
-  const b = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const b = signerFor(db);
   const events = b['repo'].signEvents('a'.repeat(64));
   eq(events.length, 1, 'one event after restart');
   eq(events[0].decision, 'approved', 'approved after restart');
@@ -375,7 +378,7 @@ test('27. decideAuthorization is pure and deterministic', () => {
 test('28. audit event fields are complete and do not leak secrets', async () => {
   const { dir, db, rm } = mk();
   seed(db);
-  const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+  const signer = signerFor(db);
   await signer.authorize(validRequest());
   const e = signer['repo'].signEvents('a'.repeat(64))[0];
   for (const f of ['id', 'payment_digest', 'decided_at', 'decision', 'network', 'sender', 'sponsor', 'recipient', 'energy', 'policy_version']) {
@@ -389,6 +392,17 @@ test('28. audit event fields are complete and do not leak secrets', async () => 
 
 // ═══ helpers ═══════════════════════════════════════════════════════════
 
+/**
+ * Split-repo signer : a settlement repository for payment state
+ * plus an Owner-private repository for authorization state. The signer's
+ * `repo` is the Owner repository, so `signer['repo'].signEvents(...)` keeps
+ * reading the authorization audit trail.
+ */
+function signerFor(db: string, policy: typeof POLICY = POLICY) {
+  const repo = new SqliteSettlementRepository(db);
+  return new MockNarrowSponsorSigner({ policy, repository: ownerRepoFor(db, repo, () => NOW_MS), now: () => NOW_MS });
+}
+
 function mk() {
   const dir = mkdtempSync(join(tmpdir(), 'agenttrust-t34-'));
   const db = join(dir, 'f.db');
@@ -396,7 +410,7 @@ function mk() {
   return { dir, db, rm };
 }
 
-/** Seed a payment row so the sign_events FK is satisfied. */
+/** Seed a payment row so the Owner gate sees an authorizable payment. */
 function seed(db: string, digest = 'a'.repeat(64)) {
   const repo = new SqliteSettlementRepository(db);
   repo.noteVerified(digest, 'k');

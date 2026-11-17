@@ -131,8 +131,8 @@ test('no credential material is stored in the repository', () => {
   // 32/64-byte hex values rather than the substring "privateKey".
   const banned = ['seedAsHex', 'mnemonic', 'Mnemonic', 'idCredSec', 'signingKey'];
   for (const file of [
-    'docs/evidence/task02/registration-manifest.json',
-    'docs/evidence/task02/repin-manifest.v2.json',
+    'docs/evidence/agent-card/registration-manifest.json',
+    'docs/evidence/agent-card/repin-manifest.v2.json',
   ]) {
     const text = readText(new URL(file, `file://${process.cwd()}/`).pathname);
     for (const needle of banned) {

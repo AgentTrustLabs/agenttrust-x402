@@ -1,10 +1,12 @@
 /**
  * F1/F7/F8 — Authorization Owner startup configuration (no IPC needed).
  *
- * F1: fixture seeding defaults to OFF. An owner started without
- *     AUTHZ_SEED_FIXTURES must not write the harness digests a..e into its
- *     database; only an explicit AUTHZ_SEED_FIXTURES=1 seeds them.
- * F7: the files the owner opens/creates (shared auth.db, owner-private
+ * AUTHZ_SEED_FIXTURES was REMOVED — the Owner never writes
+ * the settlement database, so fixture seeding moved to the test harness.
+ * F1: setting AUTHZ_SEED_FIXTURES at all refuses startup (exit 3); a
+ *     default start creates the Owner-private database (<dir>/authz.db)
+ *     and does not touch the settlement database.
+ * F7: the files the owner opens/creates (owner-private authz.db and
  *     idem.db) are tightened to 0600 on open.
  * F8: an unusable AUTHZ_MAX_ENERGY refuses to start with a clean exit-3
  *     message, not an uncaught SyntaxError stack trace.
@@ -14,7 +16,9 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, ok } from './helpers.mjs';
@@ -28,15 +32,34 @@ const test = (name: string, fn: () => Promise<void> | void) => tests.push([name,
 
 const ws = (tag: string) => {
   const dir = mkdtempSync(join(tmpdir(), `agenttrust-owncfg-${tag}-`));
-  return { dir, db: join(dir, 'auth.db'), sock: join(dir, 'authz.sock'), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  // the Owner needs an authorization-signing key. Ephemeral for this run.
+  const keyFile = join(dir, 'owner-key.pem');
+  writeFileSync(keyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  // the settlement database lives in a SEPARATE directory (the
+  // launcher refuses it inside the Owner directory) and must exist before
+  // startup — the legacy-state gate refuses an unreadable settlement DB.
+  // It is presented read-only (0400): this harness runs the Owner as the
+  // test UID, so a 0600 file would trip the launcher's writable guard.
+  const settlementDir = join(dir, 'settlement');
+  mkdirSync(settlementDir);
+  const settlementDb = join(settlementDir, 'f.db');
+  const seed = new SqliteSettlementRepository(settlementDb, { now: () => Date.now() });
+  seed.close();
+  chmodSync(settlementDb, 0o400);
+  return { dir, db: join(dir, 'authz.db'), settlementDb, sock: join(dir, 'authz.sock'), keyFile, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
 const startOwner = (w: ReturnType<typeof ws>, extraEnv: Record<string, string> = {}): { proc: ChildProcess; ready: Promise<boolean> } => {
-  // Unless the test opts in explicitly, the child must NOT inherit a seeding
-  // variable from the ambient environment: the default (unset) is what is
-  // under test.
-  const env: Record<string, string | undefined> = { ...process.env, ...extraEnv };
-  if (!('AUTHZ_SEED_FIXTURES' in extraEnv)) delete env.AUTHZ_SEED_FIXTURES;
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    AUTHZ_AUTHORIZATION_KEY_FILE: w.keyFile,
+    AUTHZ_SETTLEMENT_DB_FILE: w.settlementDb,
+    // Same-UID harness: this suite spawns the Owner as the test process
+    // itself (facilitatorUid 1001), which the launcher now refuses by
+    // default. The opt-out is explicit here and never set in production.
+    AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
+    ...extraEnv,
+  };
   const proc = spawn('npx', ['tsx', ownerScript, w.dir, w.sock, '1001'], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -72,13 +95,16 @@ const stopOwner = async (proc: ChildProcess): Promise<number | null> => {
   });
 };
 
-test('F1. default (no AUTHZ_SEED_FIXTURES) seeds nothing into the database', async () => {
+test('F1. default start creates the Owner-private database and does not touch the settlement database', async () => {
   const w = ws('f1-default');
   const { proc, ready } = startOwner(w);
   try {
     ok(await ready, 'owner started');
     await stopOwner(proc);
-    const repo = new SqliteSettlementRepository(w.db, { now: () => Date.now() });
+    // The Owner-private database was created by the Owner process.
+    ok(statSync(w.db).isFile(), 'authz.db exists');
+    // The settlement database holds no harness digests — the Owner never seeds it.
+    const repo = new SqliteSettlementRepository(w.settlementDb, { now: () => Date.now() });
     try {
       for (const d of DIGESTS) {
         eq(repo.get(d), undefined, `no seeded row for ${d.slice(0, 8)}…`);
@@ -92,22 +118,58 @@ test('F1. default (no AUTHZ_SEED_FIXTURES) seeds nothing into the database', asy
   }
 });
 
-test('F1. explicit AUTHZ_SEED_FIXTURES=1 seeds the harness digests', async () => {
-  const w = ws('f1-optin');
-  const { proc, ready } = startOwner(w, { AUTHZ_SEED_FIXTURES: '1' });
+test('F1. AUTHZ_SEED_FIXTURES refuses startup (exit 3)', async () => {
+  const w = ws('f1-refuse');
+  let stderr = '';
+  const proc = spawn('npx', ['tsx', ownerScript, w.dir, w.sock, '1001'], {
+    env: {
+      ...process.env,
+      AUTHZ_AUTHORIZATION_KEY_FILE: w.keyFile,
+      AUTHZ_SETTLEMENT_DB_FILE: w.settlementDb,
+      AUTHZ_SEED_FIXTURES: '1',
+      AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr?.on('data', (c) => { stderr += c.toString(); });
+  const code = await new Promise<number | null>((resolve) => {
+    const t = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 30_000);
+    proc.on('exit', (c) => { clearTimeout(t); resolve(c); });
+  });
   try {
-    ok(await ready, 'owner started');
-    await stopOwner(proc);
-    const repo = new SqliteSettlementRepository(w.db, { now: () => Date.now() });
-    try {
-      for (const d of DIGESTS) {
-        const row = repo.get(d);
-        ok(row !== undefined, `seeded row exists for ${d.slice(0, 8)}…`);
-        eq(row?.state, 'created', 'seeded payment is created');
-      }
-    } finally {
-      repo.close();
-    }
+    eq(code, 3, `exit 3 (got ${code})`);
+    ok(/AUTHZ_SEED_FIXTURES was removed/.test(stderr), `clean message, got: ${stderr.slice(0, 200)}`);
+  } finally {
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    w.cleanup();
+  }
+});
+
+// Distinct-UID enforcement is ON by default: the Owner refuses to start
+// when the facilitator UID equals its own UID. The harness opt-out is
+// what the same-UID spawns in this suite use; without it, startup must
+// fail closed with exit 3. The spawn below runs as the test process, so
+// argv[4] must be the test process's own UID for the refusal to trigger.
+test('F1. same-UID Owner refuses startup by default (exit 3)', async () => {
+  const w = ws('f1-sameuid');
+  let stderr = '';
+  const selfUid = String(process.getuid?.() ?? 1001);
+  const proc = spawn('npx', ['tsx', ownerScript, w.dir, w.sock, selfUid], {
+    env: {
+      ...process.env,
+      AUTHZ_AUTHORIZATION_KEY_FILE: w.keyFile,
+      AUTHZ_SETTLEMENT_DB_FILE: w.settlementDb,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stderr?.on('data', (c) => { stderr += c.toString(); });
+  const code = await new Promise<number | null>((resolve) => {
+    const t = setTimeout(() => { proc.kill('SIGKILL'); resolve(null); }, 30_000);
+    proc.on('exit', (c) => { clearTimeout(t); resolve(c); });
+  });
+  try {
+    eq(code, 3, `exit 3 (got ${code})`);
+    ok(/facilitator UID equals the Owner UID/.test(stderr), `clean message, got: ${stderr.slice(0, 200)}`);
   } finally {
     if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
     w.cleanup();
@@ -116,7 +178,7 @@ test('F1. explicit AUTHZ_SEED_FIXTURES=1 seeds the harness digests', async () =>
 
 test('F7. owner database files are 0600 after the owner opens them', async () => {
   const w = ws('f7');
-  const { proc, ready } = startOwner(w, { AUTHZ_SEED_FIXTURES: '1' });
+  const { proc, ready } = startOwner(w);
   try {
     ok(await ready, 'owner started');
     await stopOwner(proc);
@@ -134,7 +196,7 @@ test('F8. invalid AUTHZ_MAX_ENERGY refuses to start (exit 3, clean message)', as
   for (const bad of ['abc', '', '10.5']) {
     const w = ws(`f8-${bad === '' ? 'empty' : bad.replace('.', '_')}`);
     const proc = spawn('npx', ['tsx', ownerScript, w.dir, w.sock, '1001'], {
-      env: { ...process.env, AUTHZ_MAX_ENERGY: bad },
+      env: { ...process.env, AUTHZ_MAX_ENERGY: bad, AUTHZ_ALLOW_SAME_UID_HARNESS: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stderr = '';

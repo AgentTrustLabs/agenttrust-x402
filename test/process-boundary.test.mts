@@ -110,7 +110,9 @@ console.log('\n── legitimate authorization through IPC ──');
 
 console.log('\n── raw writer as owner (must succeed — owner owns the DB) ──');
 {
-  const dbPath = join(dir, 'auth.db');
+  // the raw-write target is the Owner-private database: the
+  // settlement database holds no authorization records anymore.
+  const dbPath = join(dir, 'authz.db');
   const r = await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-rawwriter.mts`, dbPath, D], { as: 'authowner' });
   let parsed: { stage?: string; approved?: number; layer?: string; message?: string } = {};
   try { parsed = JSON.parse(r.stdout.split('\n').pop() ?? ''); } catch { /* ignore */ }
@@ -122,7 +124,8 @@ console.log('\n── raw writer as owner (must succeed — owner owns the DB) �
 
 console.log('\n── raw writer as non-owner (must fail at OS permission layer) ──');
 {
-  const dbPath = join(dir, 'auth.db');
+  // same Owner-private target as above.
+  const dbPath = join(dir, 'authz.db');
   const r = await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-rawwriter.mts`, dbPath, D], { as: 'ubuntu' });
   let parsed: { layer?: string; message?: string } = {};
   try {
@@ -239,16 +242,17 @@ console.log('\n── owner unavailable ──');
 
 console.log('\n── audit-write failure (owner-side) ──');
 {
-  // Drop sign_events on the owner's DB by running a migration as authowner, then authorize.
+  // Drop authorizations on the owner's (Owner-private) DB by running a
+  // migration as authowner, then authorize.
   await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-seed.mts`, join(dir, 'auth.db'), 'd'.repeat(64)], { as: 'authowner' });
-  const mig = await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-migrate.mts`, join(dir, 'auth.db'), 'rename'], { as: 'authowner' });
+  const mig = await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-migrate.mts`, join(dir, 'authz.db'), 'rename'], { as: 'authowner' });
   console.log('   migration:', mig.code === 0 ? 'ok' : mig.stderr);
   const r = await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-caller.mts`, sock, req('d'.repeat(64))], { as: 'ubuntu' });
   let parsed: { approved?: boolean; reason?: string } = {};
   try { parsed = JSON.parse(r.stdout); } catch { /* ignore */ }
   check('12. audit write failure → not approved', parsed.approved !== true, JSON.stringify(parsed));
   // restore
-  await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-migrate.mts`, join(dir, 'auth.db'), 'restore'], { as: 'authowner' });
+  await run('npx', ['tsx', `${process.cwd()}/scripts/ipc-migrate.mts`, join(dir, 'authz.db'), 'restore'], { as: 'authowner' });
 }
 
 // ── cleanup ───────────────────────────────────────────────────────────────────

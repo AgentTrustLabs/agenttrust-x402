@@ -12,13 +12,18 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, chmodSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { IpcAuthorizationClient } from '../services/facilitator/src/authorization.js';
+import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { signingDigestOf } from '../services/facilitator/src/signingService.js';
+import { generateOwnerAuthorizationKeyPair, ownerAuthorizationPublicKeyHex } from '../services/facilitator/src/ownerAuthorization.js';
+import { requireFacilitatorProcess } from './os-identity.mts';
+import { recomputedEnergyOf } from './owner-authz-helper.mjs';
+import { randomUUID } from 'node:crypto';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const RECIPIENT = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const FACILITATOR_UID = 1001;
-const FACILITATOR_GID = 1002;
 const OWNER_USER = 'authowner';
 
 /** Signable fixture transaction (protocol v2: the client sends this, not a bare digest). */
@@ -42,20 +47,111 @@ const check = (name: string, pass: boolean, detail = '') => {
   console.log(`${pass ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
-const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
-const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
-if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`separate-process-signing: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
-  process.exit(0);
-}
+const FACILITATOR_UID = requireFacilitatorProcess('separate-process-signing');
 
 const mkBase = () => {
   const base = mkdtempSync(join(tmpdir(), 't44-'));
   const sock = join(base, 'sign.sock');
   const txFile = join(base, 'tx.json');
+  const certFile = join(base, 'cert.json');
   mkdirSync(base, { recursive: true });
   writeFileSync(txFile, JSON.stringify(fixtureTx));
-  return { base, sock, txFile };
+  return { base, sock, txFile, certFile };
+};
+
+/**
+ * the suite-level Owner. The signing service (a separate process)
+ * verifies Owner certificates and consumes them at the Owner before signing,
+ * so the valid-request tests need a real Owner. One Owner for the suite,
+ * one fresh approval per test (consumption is single-use).
+ *
+ * The Owner runs as the test user (ubuntu) here — the peer check only
+ * requires the CLIENT's uid to equal the facilitator uid, and the test
+ * process is that client. The distinct-UID deployment hardening is a
+ * production requirement, not a property this transport suite proves.
+ */
+const ownerBase = mkdtempSync(join(tmpdir(), 't44-owner-'));
+const ownerSock = join(ownerBase, 'owner.sock');
+// split storage. The settlement database lives in its own
+// directory (the launcher refuses it inside the Owner directory), and the
+// Owner-private database is a fresh file inside the Owner directory.
+const settlementBase = mkdtempSync(join(tmpdir(), 't44-settlement-'));
+const ownerDb = join(settlementBase, 'f.db');
+const ownerKey = generateOwnerAuthorizationKeyPair();
+const ownerKeyFile = join(ownerBase, 'owner-key.pem');
+writeFileSync(ownerKeyFile, ownerKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+const ownerRepo = new SqliteSettlementRepository(ownerDb, { now: () => Date.now() });
+const ownerClient = new IpcAuthorizationClient(ownerSock);
+let ownerProc: ReturnType<typeof spawn> | null = null;
+
+const startOwner = async () => {
+  // this harness runs the Owner as the test UID (same-UID,
+  // transport-only — see the comment above), so the launcher's
+  // startup guard would refuse a group/other-writable settlement file
+  // owned by that UID. Present it read-only at startup: the in-process
+  // settlement connection stays open, so later seeds still write via
+  // its file descriptor.
+  chmodSync(ownerDb, 0o400);
+  // detached: the Owner runs as its own process GROUP. A signal to the
+  // direct `npx` child alone never reaches the `sh → tsx → node` chain
+  // beneath it, so the Owner node process survived every stop before this.
+  const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/authz-owner.mts`, ownerBase, ownerSock, String(FACILITATOR_UID), String(FACILITATOR_UID)], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+    env: {
+      ...process.env,
+      AUTHZ_SPONSOR_ADDRESS: SPONSOR,
+      AUTHZ_NETWORK: NETWORK,
+      AUTHZ_MAX_ENERGY: '100000',
+      AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
+      AUTHZ_ALLOWED_ASSETS: 'CCD',
+      AUTHZ_POLICY_VERSION: 't44',
+      AUTHZ_DB_FILE: join(ownerBase, 'authz.db'),
+      AUTHZ_SETTLEMENT_DB_FILE: ownerDb,
+      AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+      // Same-UID harness: the Owner runs as the test process here, so
+      // the launcher's default distinct-UID refusal is opted out
+      // explicitly (test-only, never set in production).
+      AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
+    },
+  });
+  await new Promise<void>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('owner start timeout')), 30000);
+    proc.stdout.on('data', (c) => { if (c.toString().includes('owner listening')) { clearTimeout(t); resolve(); } });
+    proc.on('exit', () => { clearTimeout(t); reject(new Error('owner exited early')); });
+  });
+  return proc;
+};
+
+/** Authorize the fixture transaction for a fresh payment and write its certificate. */
+const authorizeFixture = async (certFile: string): Promise<string> => {
+  // A fresh 64-hex payment digest per test (consumption is single-use).
+  const paymentDigest = (randomUUID() + randomUUID()).replace(/-/g, '');
+  ownerRepo.noteVerified(paymentDigest, 'k');
+  ownerRepo.claim(paymentDigest, 'k');
+  const auth = await ownerClient.authorize({
+    paymentDigest,
+    network: NETWORK,
+    version: 1,
+    sender: SENDER,
+    sponsor: SPONSOR,
+    recipient: RECIPIENT,
+    asset: 'CCD',
+    amount: '250000',
+    // The certificate must name the transaction's own expiry (the service
+    // requires cert.expiry == tx expiry), so read it from the fixture —
+    // not a fresh now+600, which would drift from the fixture by seconds.
+    expiry: (fixtureTx.header as Record<string, unknown>)['expiry'] as number,
+    energy: recomputedEnergyOf(fixtureTx),
+    transactionDigest: signingDigestOf(fixtureTx),
+    transactionType: 'transfer',
+    maxFeeMicroCcd: '10000000',
+  });
+  if (auth.outcome !== 'approved' || !auth.certificate) {
+    throw new Error(`authorize failed: ${auth.outcome}/${auth.reason ?? '-'}`);
+  }
+  writeFileSync(certFile, JSON.stringify(auth.certificate));
+  return paymentDigest;
 };
 
 const chownGroup = async (path: string) => {
@@ -69,7 +165,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const startService = async (sock: string, allowedUid: number) => {
   const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-service.mts`, sock, SPONSOR, NETWORK, String(allowedUid)], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
+    detached: true, // own process group — see stopProc below
+    // the service verifies Owner certificates and consumes them at
+    // the Owner before signing.
+    env: {
+      ...process.env,
+      SIGNING_OWNER_PUBLIC_KEY: ownerAuthorizationPublicKeyHex(ownerKey.publicKey),
+      SIGNING_OWNER_SOCKET: ownerSock,
+      SIGNING_OWNER_UID: String(FACILITATOR_UID),
+    },
   });
   let ready = false;
   await new Promise<void>((resolve) => {
@@ -84,15 +188,37 @@ const startService = async (sock: string, allowedUid: number) => {
   return { proc, ready };
 };
 
+// Kill a spawned `npx tsx` chain as a whole. The old stop signalled only
+// the direct `npx` child: SIGTERM to it never reaches the `sh → tsx → node`
+// chain beneath it, so the service/Owner node process survived every stop
+// (dozens of leaked processes accumulated across runs). Spawns above use
+// `detached: true`, so the whole chain shares one process group and dies
+// together. Note `proc.killed` only reports that a signal was SENT, never
+// that the process exited — the old `if (!proc.killed)` SIGKILL branch
+// could never fire, so it is gone.
+const killGroup = async (proc: ReturnType<typeof spawn>, signal: NodeJS.Signals = 'SIGTERM') => {
+  const pid = proc.pid;
+  if (pid === undefined) { try { proc.kill(signal); } catch { /* already dead */ } return; }
+  try { process.kill(-pid, signal); } catch { try { proc.kill(signal); } catch { /* already dead */ } }
+};
+const waitExit = (proc: ReturnType<typeof spawn>, ms: number) => new Promise<boolean>((resolve) => {
+  if (proc.exitCode !== null) return resolve(true);
+  const t = setTimeout(() => resolve(false), ms);
+  proc.on('exit', () => { clearTimeout(t); resolve(true); });
+});
 const stopProc = async (proc: ReturnType<typeof spawn>) => {
-  proc.kill('SIGTERM');
-  await new Promise((r) => setTimeout(r, 500));
-  if (!proc.killed) proc.kill('SIGKILL');
+  await killGroup(proc, 'SIGTERM');
+  if (!(await waitExit(proc, 2000))) await killGroup(proc, 'SIGKILL');
+  await waitExit(proc, 2000);
 };
 
-const runClient = (sock: string, expectedUid: number, txFile: string): Promise<{ ok: boolean; signature?: string; error?: string; pid?: number; uid?: number }> => {
+const runClient = (sock: string, expectedUid: number, txFile: string, certFile?: string): Promise<{ ok: boolean; signature?: string; error?: string; pid?: number; uid?: number }> => {
   return new Promise((resolve) => {
-    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, NETWORK, String(expectedUid), txFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // the client carries the Owner authorization certificate for
+    // the fixture transaction (and defaults the payment digest to the
+    // certificate's). Without it the client refuses before any socket
+    // activity.
+    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, NETWORK, String(expectedUid), txFile, ...(certFile ? [certFile] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     p.on('close', () => {
@@ -108,10 +234,11 @@ const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
 // ── 1. valid request → fake signature ──────────────────────────────────────
 
 test('01. valid request returns fake signature (cross-process)', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const { proc, ready } = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, txFile);
+    const r = await runClient(sock, FACILITATOR_UID, txFile, certFile);
     check('01. client ok', r.ok === true, r.error ?? r.signature?.slice(0, 12));
     check('01. signature returned', typeof r.signature === 'string' && r.signature.length === 128, r.signature?.slice(0, 12));
     // distinct PIDs prove process separation
@@ -125,11 +252,12 @@ test('01. valid request returns fake signature (cross-process)', async () => {
 // ── 2. wrong sponsor ────────────────────────────────────────────────────────
 
 test('02. wrong sponsor → rejected (cross-process)', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
     // client sends a different sponsor; service rejects
-    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', NETWORK, String(FACILITATOR_UID), txFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d', NETWORK, String(FACILITATOR_UID), txFile, certFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     await new Promise((r) => p.on('close', r));
@@ -145,10 +273,11 @@ test('02. wrong sponsor → rejected (cross-process)', async () => {
 // ── 3. wrong network ────────────────────────────────────────────────────────
 
 test('03. wrong network → rejected (cross-process)', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
-    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, 'ccd:0000', String(FACILITATOR_UID), txFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-client.mts`, sock, SPONSOR, 'ccd:0000', String(FACILITATOR_UID), txFile, certFile], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     await new Promise((r) => p.on('close', r));
@@ -181,8 +310,9 @@ test('04. malformed message rejected (service-side)', async () => {
 // ── 5. service unavailable → fail closed ────────────────────────────────────
 
 test('05. service unavailable → client fails closed (no local fallback)', async () => {
-  const { base, sock, txFile } = mkBase();
-  const r = await runClient(sock, FACILITATOR_UID, txFile);
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
+  const r = await runClient(sock, FACILITATOR_UID, txFile, certFile);
   check('05. client fails closed', r.ok === false, r.error);
   check('05. unavailable error', /unavailable/i.test(r.error ?? ''), r.error);
   rmSync(base, { recursive: true, force: true });
@@ -191,11 +321,12 @@ test('05. service unavailable → client fails closed (no local fallback)', asyn
 // ── 6. timeout → no local fallback ─────────────────────────────────────────
 
 test('06. timeout enforced (client-side)', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
     // Normal request succeeds within timeout
-    const r = await runClient(sock, FACILITATOR_UID, txFile);
+    const r = await runClient(sock, FACILITATOR_UID, txFile, certFile);
     check('06. valid request still works', r.ok === true, r.error);
   } finally {
     await stopProc(proc);
@@ -206,13 +337,14 @@ test('06. timeout enforced (client-side)', async () => {
 // ── 7. service restart → new request accepted ──────────────────────────────
 
 test('07. service restart accepts a new request', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const s1 = await startService(sock, FACILITATOR_UID);
   await stopProc(s1.proc);
   await sleep(500);
   const s2 = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, txFile);
+    const r = await runClient(sock, FACILITATOR_UID, txFile, certFile);
     check('07. post-restart request succeeds', r.ok === true, r.error);
   } finally {
     await stopProc(s2.proc);
@@ -223,15 +355,19 @@ test('07. service restart accepts a new request', async () => {
 // ── 8. stale socket recovery ────────────────────────────────────────────────
 
 test('08. stale socket replaced on restart', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const s1 = await startService(sock, FACILITATOR_UID);
-  // kill without cleanup
-  s1.proc.kill('SIGKILL');
+  // kill without cleanup — the WHOLE service chain dies (group SIGKILL),
+  // which is what this test simulates: a crashed service, not a killed
+  // wrapper with its node child still serving the socket.
+  await killGroup(s1.proc, 'SIGKILL');
+  await waitExit(s1.proc, 2000);
   await sleep(500);
   // socket file may linger; service should handle it
   const s2 = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, txFile);
+    const r = await runClient(sock, FACILITATOR_UID, txFile, certFile);
     check('08. post-crash request succeeds', r.ok === true, r.error);
   } finally {
     await stopProc(s2.proc);
@@ -242,10 +378,11 @@ test('08. stale socket replaced on restart', async () => {
 // ── 9. distinct PIDs prove process separation ───────────────────────────────
 
 test('09. distinct PIDs prove process separation', async () => {
-  const { base, sock, txFile } = mkBase();
+  const { base, sock, txFile, certFile } = mkBase();
+  await authorizeFixture(certFile);
   const { proc } = await startService(sock, FACILITATOR_UID);
   try {
-    const r = await runClient(sock, FACILITATOR_UID, txFile);
+    const r = await runClient(sock, FACILITATOR_UID, txFile, certFile);
     check('09. distinct PIDs', r.pid !== proc.pid && r.pid !== undefined, `client=${r.pid} service=${proc.pid}`);
   } finally {
     await stopProc(proc);
@@ -255,14 +392,27 @@ test('09. distinct PIDs prove process separation', async () => {
 
 (async () => {
   let failed = 0;
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-    } catch (e) {
-      failed++;
-      console.log(`FAIL ${name} — ${(e as Error).message}`);
+  // Start the suite-level Owner before any test authorizes.
+  ownerProc = await startOwner();
+  try {
+    for (const [name, fn] of tests) {
+      try {
+        await fn();
+      } catch (e) {
+        failed++;
+        console.log(`FAIL ${name} — ${(e as Error).message}`);
+      }
     }
+  } finally {
+    if (ownerProc) await stopProc(ownerProc);
+    try { ownerRepo.close(); } catch { /* already closed */ }
+    rmSync(ownerBase, { recursive: true, force: true });
   }
-  console.log(`\nseparate-process-signing: ${tests.length - failed}/${tests.length} passed, ${failed} failed`);
-  process.exit(failed ? 1 : 0);
+  // The `check()` helper records results without throwing: a failing check
+  // must fail the suite, or the summary lies. (Before  this suite
+  // reported "9/9 passed" while checks failed.)
+  const checkFailed = results.filter(([, pass]) => !pass).length;
+  const totalFailed = failed + checkFailed;
+  console.log(`\nseparate-process-signing: ${results.length - checkFailed}/${results.length} checks passed, ${totalFailed} failed`);
+  process.exit(totalFailed ? 1 : 0);
 })();

@@ -8,6 +8,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { eq, ok } from './helpers.mjs';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -52,6 +53,10 @@ const request = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest
   amount: '250000',
   expiry: NOW + 200,
   energy: 700n,
+  // the authorization binds the exact transaction and fee policy.
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 
@@ -65,16 +70,19 @@ test('14a. a duplicate approved record is refused as conflicting_evidence', asyn
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified(A, 'k');
   repo.claim(A, 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   await client.authorize(request());
   repo.close();
 
-  // The partial unique index ux_sign_events_approved prevents a second 'approved' row at
+  // The partial unique index ux_authorizations_approved prevents a second 'approved' row at
   // the storage level. Prove it: attempt a duplicate insert and expect it to fail.
-  const raw = new DatabaseSync(db);
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
   let duplicateRejected = false;
   try {
-    raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version)
+    raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version)
               VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3413')`);
   } catch (e) {
     duplicateRejected = /UNIQUE constraint/i.test((e as Error).message);
@@ -84,7 +92,8 @@ test('14a. a duplicate approved record is refused as conflicting_evidence', asyn
 
   // With only one approved row, recovery returns approved.
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client2 = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client2 = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
   const rec = await client2.recover(request());
   check('single approved row recovers as approved', rec.outcome === 'approved', `${rec.outcome}/${rec.reason}`);
   repo2.close();
@@ -100,13 +109,16 @@ test('15a. an approved record with an empty policy_version does not recover as a
   repo.claim(A, 'k');
   repo.close();
 
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version)
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', '')`);
   raw.close();
 
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
   const rec = await client.recover(request());
   check('15a. empty policy_version → not approved', rec.outcome !== 'approved', `${rec.outcome}/${rec.reason}`);
   rm();
@@ -119,13 +131,16 @@ test('15b. an approved record with a mismatched energy string does not recover a
   repo.claim(A, 'k');
   repo.close();
 
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version)
+  // the authorization table lives in the Owner-private file — create it first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', 'not-a-number', 'v3413')`);
   raw.close();
 
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
   const rec = await client.recover(request());
   check('15b. malformed energy → not approved', rec.outcome !== 'approved', `${rec.outcome}/${rec.reason}`);
   rm();
@@ -138,15 +153,16 @@ test('18. concurrent recovery requests all return the same result and write noth
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified(A, 'k');
   repo.claim(A, 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   await client.authorize(request());
-  const before = repo.signEvents(A).length;
+  const before = ownerRepo.signEvents(A).length;
 
   const outs = await Promise.all(Array.from({ length: 8 }, () => client.recover(request())));
   const approved = outs.filter((o) => o.outcome === 'approved').length;
   check('8 concurrent recoveries all approved', approved === 8, `${approved}/8`);
-  eq(repo.signEvents(A).length, before, 'no records written');
-  eq(repo.signEvents(A).length, 1, 'still exactly one record');
+  eq(ownerRepo.signEvents(A).length, before, 'no records written');
+  eq(ownerRepo.signEvents(A).length, 1, 'still exactly one record');
   repo.close();
   rm();
 });
@@ -158,7 +174,8 @@ test('17. caller-supplied decision fields are not part of the recovery contract'
   // builds its own envelope from the typed request; unknown fields never reach the owner.
   const { db, rm } = mk();
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   const withClaim = { ...request({ paymentDigest: 'e'.repeat(64) }), decision: 'approved', approved: true } as AuthorizationRequest;
   const rec = await client.recover(withClaim);
   check('17a. crafted claim → not approved', rec.outcome !== 'approved', `${rec.outcome}/${rec.reason}`);

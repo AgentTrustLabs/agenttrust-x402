@@ -2,7 +2,7 @@
  * Authorization database owner process (proof of concept).
  *
  * This process is the ONLY writer of the authorization database. It:
- *   - creates the DB in a private directory,
+ *   - creates the DBs in a private directory,
  *   - listens on a Unix socket,
  *   - accepts a narrow authorization request (NO decision field),
  *   - independently reads durable payment state and evaluates authorization,
@@ -10,12 +10,19 @@
  *
  * It never exposes a writable SQLite connection and never accepts a caller-supplied decision.
  *
+ * split databases: the settlement database (`auth.db`) holds only
+ * payment state (seeded here so the PoC has something to authorize); the
+ * authorization records live in the Owner-private database (`authz.db`),
+ * which only this UID can open. The signer writes through the Owner
+ * repository, never through the settlement repository.
+ *
  * Run: npx tsx scripts/ipc-owner.mts <db-dir> <socket-path>
  */
 
 import { createServer } from 'node:net';
 import { mkdirSync, chmodSync, rmSync, existsSync } from 'node:fs';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { RepositorySettlementStateReader, SqliteOwnerAuthorizationRepository } from '../services/facilitator/src/ownerAuthorizationRepository.js';
 import { MockNarrowSponsorSigner } from '../services/facilitator/src/narrowSponsorMock.js';
 import { decideAuthorization } from '../services/facilitator/src/narrowSponsor.js';
 
@@ -39,14 +46,20 @@ if (!dir || !sock) {
 
 mkdirSync(dir, { recursive: true, mode: 0o700 });
 chmodSync(dir, 0o700);
-const db = `${dir}/auth.db`;
-const repo = new SqliteSettlementRepository(db, { now: () => Date.now() });
-const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => Date.now() });
+// Settlement state (payments) — read by the Owner through the reader below.
+// Authorization records — Owner-private file, this UID only.
+const settlementRepo = new SqliteSettlementRepository(`${dir}/auth.db`, { now: () => Date.now() });
+const ownerRepo = new SqliteOwnerAuthorizationRepository(
+  `${dir}/authz.db`,
+  new RepositorySettlementStateReader(settlementRepo),
+  { now: () => Date.now() },
+);
+const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepo, now: () => Date.now() });
 
 // Seed a valid payment so the PoC has something to authorize.
 const d = 'a'.repeat(64);
-repo.noteVerified(d, 'k');
-repo.claim(d, 'k');
+settlementRepo.noteVerified(d, 'k');
+settlementRepo.claim(d, 'k');
 
 if (existsSync(sock)) rmSync(sock);
 const server = createServer((conn) => {
@@ -94,6 +107,7 @@ server.listen(sock, () => {
 });
 process.on('SIGTERM', () => {
   server.close();
-  repo.close();
+  ownerRepo.close();
+  settlementRepo.close();
   process.exit(0);
 });

@@ -5,7 +5,7 @@
  * network). Owner-authorized via signed challenges. Never creates an
  * on-chain account: the wallet is provisioned with a local signing identity and
  * marked `awaiting_funding`; the on-chain account address is recorded later by
- * the owner (after credential deployment, which is out of scope for this task and
+ * the owner (after credential deployment, which is out of scope for this change and
  * requires a transaction).
  *
  * Idempotent + concurrency-safe: `provision` returns the existing wallet for the

@@ -1,5 +1,5 @@
 /**
- * Regression tests for the Task 08 settlement-path fixes.
+ * Regression tests for the  settlement-path fixes.
  *
  * Defect 1 — the signed transaction's recipient was never bound to the payment
  * requirement's payTo: a payload whose signed `toAddress` differed from `payTo`
@@ -20,13 +20,17 @@
  */
 
 import { eq, ok, notOk } from './helpers.mjs';
+import { randomUUID } from 'node:crypto';
 import { startFacilitator } from '../services/facilitator/src/server.js';
 import { loadConfig, ConfigurationError } from '../services/facilitator/src/config.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
-import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST } from '../services/facilitator/src/energy.js';
+import { SIMPLE_TRANSFER_BASE_COST } from '../services/facilitator/src/energy.js';
+import { convertV2ToSdkV1 } from '../services/facilitator/src/wireConverter.js';
+import { recomputedEnergyOf } from './owner-authz-helper.mjs';
 import type { AuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { WireConversionPolicy, WireConversionResult, SdkV1SignableTransaction } from '../services/facilitator/src/wireConverter.js';
+import { makeTestOwnerKey, issueTestCertificate } from './owner-authz-helper.mjs';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -74,10 +78,21 @@ const envelope = (paymentPayload, paymentRequirements) => ({
   paymentRequirements,
 });
 
-/** The energy the core derives for the standard fixture (same formula, same input). */
-const FIXTURE_ENERGY = deriveEnergyExposure(payloadFixture().payload.signedTransaction, {
-  transactionSpecificCost: SIMPLE_TRANSFER_BASE_COST,
-});
+/** The energy the core authorizes/fees on for the standard fixture: the SDK recomputation of the converted transaction (the certificate binds the recomputed energy, not the JSON-length estimate, which reads 596 for this fixture). */
+const FIXTURE_ENERGY = (() => {
+  const signed = payloadFixture().payload.signedTransaction as Record<string, unknown>;
+  const withPolicyEnergy = {
+    ...signed,
+    header: { ...(signed['header'] as Record<string, unknown>), executionEnergyAmount: Number(SIMPLE_TRANSFER_BASE_COST) },
+  };
+  const conversion = convertV2ToSdkV1(withPolicyEnergy, {
+    network: CAIP2,
+    sponsorAddress: MOCK_SPONSOR,
+    maxExecutionEnergy: 100000n,
+  });
+  if (!conversion.ok) throw new Error(`fixture conversion failed: ${conversion.code}: ${conversion.message}`);
+  return recomputedEnergyOf(conversion.wire);
+})();
 /** The conservative fee estimate the core hands to the signer for the fixture. */
 const FIXTURE_FEE = FIXTURE_ENERGY * 8000n;
 
@@ -127,10 +142,61 @@ function sponsorRecipientValidatingSigner() {
   return { signer, counts };
 }
 
-/** Test-only authorization client that approves every request. */
+/** Test-only authorization client that approves every request (an
+ * approval must carry a certificate, so this seam issues a real one from the
+ * request's own bound fields, signed by an ephemeral test key. The mock
+ * signer never verifies it, so the seam still isolates the boundary under
+ * test — it just no longer pretends an approval can exist without evidence. */
+const alwaysApproveKey = makeTestOwnerKey();
 const alwaysApprove: AuthorizationClient = {
-  authorize: async () => ({ outcome: 'approved', reason: null, detail: null }),
-  recover: async () => ({ outcome: 'approved', reason: null, detail: null }),
+  authorize: async (req) => ({
+    outcome: 'approved',
+    reason: null,
+    detail: null,
+    certificate: issueTestCertificate(alwaysApproveKey.privateKey, {
+      version: 1,
+      authorizationId: randomUUID(),
+      paymentDigest: req.paymentDigest,
+      transactionDigest: req.transactionDigest,
+      transactionType: req.transactionType,
+      network: req.network,
+      sender: req.sender,
+      sponsor: req.sponsor,
+      recipient: req.recipient,
+      asset: req.asset,
+      amount: req.amount,
+      expiry: req.expiry,
+      energy: String(req.energy),
+      maxEnergy: '10000',
+      maxFeeMicroCcd: req.maxFeeMicroCcd,
+      policyVersion: 'test-v1',
+      issuedAt: Date.now(),
+    }),
+  }),
+  recover: async (req) => ({
+    outcome: 'approved',
+    reason: null,
+    detail: null,
+    certificate: issueTestCertificate(alwaysApproveKey.privateKey, {
+      version: 1,
+      authorizationId: randomUUID(),
+      paymentDigest: req.paymentDigest,
+      transactionDigest: req.transactionDigest,
+      transactionType: req.transactionType,
+      network: req.network,
+      sender: req.sender,
+      sponsor: req.sponsor,
+      recipient: req.recipient,
+      asset: req.asset,
+      amount: req.amount,
+      expiry: req.expiry,
+      energy: String(req.energy),
+      maxEnergy: '10000',
+      maxFeeMicroCcd: req.maxFeeMicroCcd,
+      policyVersion: 'test-v1',
+      issuedAt: Date.now(),
+    }),
+  }),
 };
 
 /** Test-only wire converter that passes its input through untouched. */
@@ -138,6 +204,45 @@ const passThroughConverter = (input: unknown, _policy: WireConversionPolicy): Wi
   ok: true,
   wire: input as SdkV1SignableTransaction,
 });
+
+/**
+ * Test-only wire converter for the sponsor-recipient test : passes
+ * its input through untouched EXCEPT for the sponsor shape — the x402
+ * `{address}` form becomes the SDK `{account}` form. The core must compute
+ * the transaction digest from the converted transaction before authorizing,
+ * and the SDK cannot parse the `{address}` form, so a pure pass-through can
+ * no longer reach the fee block. The converter's POLICY checks are still
+ * bypassed (that is the point of the seam); only the structural SDK shape
+ * is fixed. A mock placeholder sponsor is substituted with the same valid
+ * placeholder address the real converter uses, so the wire object stays
+ * SDK-compatible.
+ */
+const sdkFormConverter = (input: unknown, _policy: WireConversionPolicy): WireConversionResult => {
+  const tx = input as Record<string, unknown>;
+  const header = tx['header'] as Record<string, unknown>;
+  const sponsor = header['sponsor'] as Record<string, unknown>;
+  const sponsorValue = String(sponsor['address'] ?? sponsor['account']);
+  const payload = tx['payload'] as Record<string, unknown>;
+  // Same substitution the real converter makes for a mock placeholder.
+  const validPlaceholder = (v: string) =>
+    v === MOCK_SPONSOR ? '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8' : v;
+  return {
+    ok: true,
+    wire: {
+      ...tx,
+      header: {
+        ...header,
+        sponsor: { account: validPlaceholder(sponsorValue), numSignatures: 0 },
+      },
+      // The recipient is substituted ONLY in this wire object, so the SDK
+      // can parse it to compute the digest. The core's authorization and
+      // fee validation read the recipient from the ORIGINAL envelope
+      // payload (still MOCK_SPONSOR), so the boundary under test is
+      // unchanged: validateContext still sees recipient == sponsor.
+      payload: { ...payload, toAddress: validPlaceholder(String(payload['toAddress'] ?? '')) },
+    } as SdkV1SignableTransaction,
+  };
+};
 
 const coreWith = (opts = {}) => {
   const { signer } = opts.signer ? { signer: opts.signer } : countingSigner();
@@ -235,7 +340,7 @@ test('05. a fee above the configured cap is rejected before signing', async () =
   eq(r.success, false, 'refused');
   eq(r.errorReason, 'fee_validation_failed', 'reason');
   // The core response must name the ESTIMATED fee, never an actual fee: the
-  // cap binds an estimate-based policy (Task 10.1, Option B), so a bare
+  // cap binds an estimate-based policy (Option B), so a bare
   // "fee … exceeds cap" would wrongly imply the actual chain fee is bounded.
   ok(/estimated fee .* exceeds cap/.test(r.errorMessage), r.errorMessage);
   eq(counts.addSponsorSignature, 0, 'never signed');
@@ -322,7 +427,11 @@ test('08. invalid or missing cap configuration cannot silently disable the limit
   };
   const lowEnergy = await settleHttp({ FACILITATOR_MAX_ENERGY: '100' });
   eq(lowEnergy.success, false, 'low energy cap rejects over HTTP');
-  eq(lowEnergy.errorReason, 'authorization_rejected', 'energy reason');
+  // wire conversion runs BEFORE authorization (the authorization
+  // must bind the exact converted transaction), and the converter enforces
+  // the energy cap — so a low energy cap now surfaces at conversion, not
+  // at authorization. The payment is still refused before any signing.
+  eq(lowEnergy.errorReason, 'wire_conversion_failed', 'energy reason');
   const lowFee = await settleHttp({ FACILITATOR_MAX_FEE_MICROCCD: '1000000' });
   eq(lowFee.success, false, 'low fee cap rejects over HTTP');
   eq(lowFee.errorReason, 'fee_validation_failed', 'fee reason');
@@ -380,7 +489,7 @@ test('11. validateContext rejects a payment whose real recipient is the sponsor'
   // sponsor!=recipient check. The real converter and the authorization owner also
   // refuse it, so both are bypassed with test-only seams to isolate this boundary.
   const { signer, counts } = sponsorRecipientValidatingSigner();
-  const core = coreWith({ signer, authorization: alwaysApprove, wireConverter: passThroughConverter });
+  const core = coreWith({ signer, authorization: alwaysApprove, wireConverter: sdkFormConverter });
   const p = payloadFixture({ accepted: { payTo: MOCK_SPONSOR }, requirements: { payTo: MOCK_SPONSOR } });
   p.payload.signedTransaction.payload.toAddress = MOCK_SPONSOR;
   const r = await core.settle(envelope(p, p.accepted));

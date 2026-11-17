@@ -18,11 +18,16 @@ import { AccountTransactionV1 } from '@concordium/web-sdk/transactions';
 import { createHash } from 'node:crypto';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { paymentDigest, requirementsKey } from '../services/facilitator/src/store.js';
 import { GrpcConcordiumTransport } from '../services/facilitator/src/grpcConcordiumTransport.js';
 import { ConcordiumTransactionSubmitter } from '../services/facilitator/src/concordiumTransactionSubmitter.js';
 import type { ConcordiumGrpcClientLike } from '../services/facilitator/src/grpcConcordiumTransport.js';
 import { createMockSigner, type SponsorSigner } from '../services/facilitator/src/signer.js';
+import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
+import { convertV2ToSdkV1 } from '../services/facilitator/src/wireConverter.js';
+import { signingDigestOf, transactionEnergyOf } from '../services/facilitator/src/signingService.js';
+import { SIMPLE_TRANSFER_BASE_COST } from '../services/facilitator/src/energy.js';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const NOW = 1_800_000_000;
@@ -154,8 +159,31 @@ const tempDb = () => {
   };
 };
 
-const coreFor = (signer: SponsorSigner, db: string) =>
-  new FacilitatorCore({ network: CAIP2, signer, dbPath: db, now: () => NOW * 1000, busyTimeoutMs: 10_000 });
+const coreFor = (signer: SponsorSigner, db: string) => {
+  const store = new SqliteSettlementRepository(db, { now: () => NOW * 1000, busyTimeoutMs: 10_000 });
+  return new FacilitatorCore({
+    network: CAIP2,
+    signer,
+    dbPath: db,
+    now: () => NOW * 1000,
+    busyTimeoutMs: 10_000,
+    // same policy as the core default, but the authorization
+    // client is bound to the on-disk Owner-private repository so a
+    // durability-seeded approval (seedApproval) is visible to the core.
+    authorization: new LocalAuthorizationClient({
+      policy: {
+        network: CAIP2,
+        sponsor: signer.info().address,
+        maxEnergy: 1_000n,
+        maxExpiryOffsetSeconds: 600,
+        allowedAssets: ['CCD'],
+        policyVersion: 'local-v1',
+      },
+      repository: ownerRepoFor(db, store, () => NOW * 1000),
+      now: () => NOW * 1000,
+    }),
+  });
+};
 
 /**
  * The real mock signer (`createMockSigner`) with a submission counter. Used where the
@@ -226,6 +254,62 @@ const REQ_KEY = requirementsKey(
   { network: CAIP2, payTo: PAY_TO, amount: '250000', asset: 'CCD' },
   'agenttrust://resource/1004',
 );
+
+/**
+ * seed the durable approval the first attempt recorded before it
+ * signed the transaction and persisted the hash. A persisted hash implies a
+ * prior approval: the resumable path recovers that approval's certificate,
+ * and without one the resume fails closed. The approval is unconsumed (the
+ * mock signer never consumes), and it binds the exact converted transaction
+ * the core will authorize for — same conversion inputs the core uses, same
+ * policy as the core's default authorization client.
+ */
+async function seedApproval(dbPath: string, repo: SqliteSettlementRepository) {
+  const raw = signedTx();
+  const withPolicyEnergy = {
+    ...raw,
+    header: { ...raw.header, executionEnergyAmount: Number(SIMPLE_TRANSFER_BASE_COST) },
+  };
+  const conversion = convertV2ToSdkV1(withPolicyEnergy, {
+    network: CAIP2,
+    sponsorAddress: SPONSOR,
+    maxExecutionEnergy: 1_000,
+  });
+  if (!conversion.ok) throw new Error(`seed conversion failed: ${conversion.message}`);
+  const wire = conversion.wire;
+  const energy = transactionEnergyOf(wire);
+  if (energy === null) throw new Error('seed: no recomputed energy');
+  const owner = new LocalAuthorizationClient({
+    policy: {
+      network: CAIP2,
+      sponsor: SPONSOR,
+      maxEnergy: 1_000n,
+      maxExpiryOffsetSeconds: 600,
+      allowedAssets: ['CCD'],
+      policyVersion: 'local-v1',
+    },
+    repository: ownerRepoFor(dbPath, repo, () => NOW * 1000),
+    now: () => NOW * 1000,
+  });
+  // The durable gate requires the payment 'created' with a NULL hash.
+  repo.noteVerified(digestOf(), REQ_KEY);
+  const auth = await owner.authorize({
+    paymentDigest: digestOf(),
+    network: CAIP2,
+    version: 1,
+    sender: SENDER,
+    sponsor: SPONSOR,
+    recipient: PAY_TO,
+    asset: 'CCD',
+    amount: '250000',
+    expiry: NOW + 200,
+    energy,
+    transactionDigest: signingDigestOf(wire),
+    transactionType: 'transfer',
+    maxFeeMicroCcd: '10000000',
+  });
+  if (auth.outcome !== 'approved') throw new Error(`seed authorization failed: ${auth.outcome}/${auth.reason}`);
+}
 
 function seedBroadcast(repo: SqliteSettlementRepository, digest: string, hash: string, target: 'submitting' | 'outcome_unknown' | 'prepared') {
   repo.claim(digest, REQ_KEY);
@@ -505,6 +589,7 @@ test('10. no automatic resubmission after a transaction hash has been persisted'
     const hash = 'ad'.repeat(32);
     const c = countingMockSigner();
     const core = coreFor(c.signer, w.db);
+    await seedApproval(w.db, core.store as SqliteSettlementRepository);
     seedBroadcast(core.store as SqliteSettlementRepository, digestOf(), hash, 'prepared');
 
     // (a) recovery never selects `prepared` rows: the hash is durable but no claim was taken.

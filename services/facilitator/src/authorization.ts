@@ -3,8 +3,9 @@
  *
  * Two implementations:
  *   - `LocalAuthorizationClient`: test/mock only. Wraps the durable narrow-sponsor
- *     authorization boundary (MockNarrowSponsorSigner + repository). Used when no IPC
- *     socket is configured. NEVER used in production with a real signer.
+ *     authorization boundary (MockNarrowSponsorSigner + Owner-private
+ *     repository). Used when no IPC socket is configured. NEVER used in
+ *     production with a real signer.
  *   - `IpcAuthorizationClient`: production path. Talks to the Authorization Owner over
  *     the Unix socket using the agenttrust-authz v1 protocol. The facilitator never
  *     opens the authorization database.
@@ -16,8 +17,16 @@
  * No real signer, key, wallet, or signing is implemented here.
  */
 
-import type { SettlementRepository } from './repository.js';
+import type {
+  OwnerAuthorizationRepository,
+} from './ownerAuthorizationRepository.js';
 import type { SponsorPolicy } from './narrowSponsor.js';
+import {
+  generateOwnerAuthorizationKeyPair,
+  issueOwnerAuthorizationCertificate,
+  ownerAuthorizationPublicKeyHex,
+  type OwnerAuthorizationCertificate,
+} from './ownerAuthorization.js';
 
 export interface AuthorizationRequest {
   paymentDigest: string;
@@ -30,6 +39,12 @@ export interface AuthorizationRequest {
   amount: string;
   expiry: number;
   energy: bigint;
+  /** Concordium sponsor-sign digest of the exact transaction, 64-hex. */
+  transactionDigest: string;
+  /** raw payload type string of the transaction, e.g. 'transfer'. */
+  transactionType: string;
+  /** fee cap the authorization is issued under (microCCD), decimal string. */
+  maxFeeMicroCcd: string;
 }
 
 export type AuthorizationOutcome =
@@ -43,6 +58,13 @@ export interface AuthorizationResponse {
   outcome: AuthorizationOutcome;
   reason: string | null;
   detail: string | null;
+  /**
+   * the Owner's authorization certificate for the exact
+   * transaction, present only on approval. The facilitator forwards it
+   * opaquely to the signing service, which verifies it. A missing
+   * certificate on an approval fails closed downstream.
+   */
+  certificate?: OwnerAuthorizationCertificate | null;
 }
 
 export interface AuthorizationClient {
@@ -85,13 +107,65 @@ export interface AuthorizationClient {
  */
 export class LocalAuthorizationClient implements AuthorizationClient {
   private readonly policy: SponsorPolicy;
-  private readonly repo: SettlementRepository;
+  private readonly repo: OwnerAuthorizationRepository;
   private readonly now: () => number;
+  /**
+   * ephemeral Owner authorization keypair, generated per client.
+   * The mock client IS the Owner in tests, so it issues real certificates;
+   * the test configures the signing service with `authorizationPublicKeyHex()`.
+   * Production never uses this client.
+   */
+  private readonly keyPair = generateOwnerAuthorizationKeyPair();
 
-  constructor(deps: { policy: SponsorPolicy; repository: SettlementRepository; now?: () => number }) {
+  constructor(deps: { policy: SponsorPolicy; repository: OwnerAuthorizationRepository; now?: () => number }) {
     this.policy = deps.policy;
     this.repo = deps.repository;
     this.now = deps.now ?? (() => Date.now());
+  }
+
+  /** SPKI DER hex of this client's Owner public key (for the signing service). */
+  authorizationPublicKeyHex(): string {
+    return ownerAuthorizationPublicKeyHex(this.keyPair.publicKey);
+  }
+
+  /** Issue the certificate for an approved authorization record. */
+  private issueCertificate(input: {
+    authorizationId: string;
+    paymentDigest: string;
+    transactionDigest: string;
+    transactionType: string;
+    network: string;
+    sender: string;
+    sponsor: string;
+    recipient: string;
+    asset: string;
+    amount: string;
+    expiry: number;
+    energy: bigint;
+    maxFeeMicroCcd: string;
+  }): OwnerAuthorizationCertificate {
+    return issueOwnerAuthorizationCertificate(
+      {
+        version: 1,
+        authorizationId: input.authorizationId,
+        paymentDigest: input.paymentDigest,
+        transactionDigest: input.transactionDigest,
+        transactionType: input.transactionType,
+        network: input.network,
+        sender: input.sender,
+        sponsor: input.sponsor,
+        recipient: input.recipient,
+        asset: input.asset,
+        amount: input.amount,
+        expiry: input.expiry,
+        energy: String(input.energy),
+        maxEnergy: String(this.policy.maxEnergy),
+        maxFeeMicroCcd: input.maxFeeMicroCcd,
+        policyVersion: this.policy.policyVersion,
+        issuedAt: this.now(),
+      },
+      this.keyPair.privateKey,
+    );
   }
 
   async authorize(request: AuthorizationRequest): Promise<AuthorizationResponse> {
@@ -122,9 +196,20 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     if (request.expiry > nowSec + this.policy.maxExpiryOffsetSeconds) {
       return { outcome: 'rejected', reason: 'expiry_excessive', detail: `expiry ${request.expiry} > now+${this.policy.maxExpiryOffsetSeconds}` };
     }
+    // the transaction binding must be well-formed before any
+    // certificate can be issued for it.
+    if (!/^[0-9a-fA-F]{64}$/.test(request.transactionDigest)) {
+      return { outcome: 'rejected', reason: 'invalid_field', detail: 'transactionDigest is not 64-hex' };
+    }
+    if (typeof request.transactionType !== 'string' || request.transactionType.length === 0) {
+      return { outcome: 'rejected', reason: 'invalid_field', detail: 'transactionType is empty' };
+    }
+    if (!/^[0-9]+$/.test(request.maxFeeMicroCcd)) {
+      return { outcome: 'rejected', reason: 'invalid_field', detail: 'maxFeeMicroCcd is not a decimal string' };
+    }
 
     // The durable gate. This is the security boundary: state, hash, and prior approval.
-    let result: ReturnType<SettlementRepository['authorizeSignEvent']>;
+    let result: ReturnType<OwnerAuthorizationRepository['authorizeSignEvent']>;
     try {
       result = this.repo.authorizeSignEvent({
         paymentDigest: request.paymentDigest,
@@ -140,6 +225,11 @@ export class LocalAuthorizationClient implements AuthorizationClient {
         asset: request.asset,
         amount: request.amount,
         expiry: request.expiry,
+        // bind the exact transaction the approval covers.
+        transactionDigest: request.transactionDigest,
+        transactionType: request.transactionType,
+        maxEnergy: String(this.policy.maxEnergy),
+        maxFeeMicroCcd: request.maxFeeMicroCcd,
       });
     } catch (e) {
       return { outcome: 'rejected', reason: 'audit_write_failed', detail: (e as Error).message };
@@ -148,7 +238,27 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     if (!result.ok) {
       return { outcome: 'rejected', reason: result.reason, detail: `durable-state gate: ${result.reason}` };
     }
-    return { outcome: 'approved', reason: null, detail: null };
+    if (result.authorizationId === null) {
+      // The gate approved but issued no id — the approval cannot be
+      // certified, so it cannot authorize a signing. Fail closed.
+      return { outcome: 'rejected', reason: 'audit_write_failed', detail: 'approval recorded without an authorization id' };
+    }
+    const certificate = this.issueCertificate({
+      authorizationId: result.authorizationId,
+      paymentDigest: request.paymentDigest,
+      transactionDigest: request.transactionDigest,
+      transactionType: request.transactionType,
+      network: request.network,
+      sender: request.sender,
+      sponsor: request.sponsor,
+      recipient: request.recipient,
+      asset: request.asset,
+      amount: request.amount,
+      expiry: request.expiry,
+      energy: request.energy,
+      maxFeeMicroCcd: request.maxFeeMicroCcd,
+    });
+    return { outcome: 'approved', reason: null, detail: null, certificate };
   }
 
   /**
@@ -201,6 +311,15 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     if (ev === undefined) {
       return { outcome: 'unknown', reason: 'conflicting_evidence', detail: 'approval index missing' };
     }
+    // a consumed approval is spent: recovery must NOT re-issue a
+    // usable certificate for it. The caller fails closed and a fresh
+    // authorization can issue a new approval. A revoked approval is refused.
+    if (ev.consumed_at !== null) {
+      return { outcome: 'unknown', reason: 'authorization_consumed', detail: 'the durable approval was already consumed' };
+    }
+    if (ev.revoked_at !== null) {
+      return { outcome: 'rejected', reason: 'authorization_revoked', detail: 'the durable approval was revoked' };
+    }
     const mismatches: string[] = [];
     if (ev.network !== request.network) mismatches.push('network');
     if (ev.sender !== request.sender) mismatches.push('sender');
@@ -219,11 +338,46 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     else if (ev.amount !== request.amount) mismatches.push('amount');
     if (ev.expiry === null) mismatches.push('expiry (missing durable evidence)');
     else if (ev.expiry !== request.expiry) mismatches.push('expiry');
+    // the exact transaction binding. A NULL means the approval
+    // predates the binding and cannot be certified.
+    const legacyBinding =
+      ev.authorization_id === null ||
+      ev.transaction_digest === null ||
+      ev.transaction_type === null ||
+      ev.max_energy === null ||
+      ev.max_fee_microccd === null;
+    if (ev.authorization_id === null) mismatches.push('authorization_id (missing durable evidence)');
+    if (ev.transaction_digest === null) mismatches.push('transaction_digest (missing durable evidence)');
+    else if (ev.transaction_digest !== request.transactionDigest) mismatches.push('transaction_digest');
+    if (ev.transaction_type === null) mismatches.push('transaction_type (missing durable evidence)');
+    else if (ev.transaction_type !== request.transactionType) mismatches.push('transaction_type');
+    if (ev.max_energy === null) mismatches.push('max_energy (missing durable evidence)');
+    else if (ev.max_energy !== String(this.policy.maxEnergy)) mismatches.push('max_energy');
+    if (ev.max_fee_microccd === null) mismatches.push('max_fee_microccd (missing durable evidence)');
+    else if (ev.max_fee_microccd !== request.maxFeeMicroCcd) mismatches.push('max_fee_microccd');
     if (mismatches.length > 0) {
-      const reason = legacy ? 'legacy_context_missing' : 'context_mismatch';
+      const reason = legacy || legacyBinding ? 'legacy_context_missing' : 'context_mismatch';
       return { outcome: 'unknown', reason, detail: `does not match: ${mismatches.join(', ')}` };
     }
-    return { outcome: 'approved', reason: null, detail: 'durable approval verified against request context' };
+    // The approval matches and is live: re-issue its certificate (same
+    // authorization id — Ed25519 is deterministic, so the bytes are identical
+    // to the original issuance).
+    const certificate = this.issueCertificate({
+      authorizationId: ev.authorization_id as string,
+      paymentDigest: request.paymentDigest,
+      transactionDigest: ev.transaction_digest as string,
+      transactionType: ev.transaction_type as string,
+      network: ev.network,
+      sender: ev.sender,
+      sponsor: ev.sponsor,
+      recipient: ev.recipient,
+      asset: ev.asset as string,
+      amount: ev.amount as string,
+      expiry: ev.expiry as number,
+      energy: BigInt(ev.energy),
+      maxFeeMicroCcd: ev.max_fee_microccd as string,
+    });
+    return { outcome: 'approved', reason: null, detail: 'durable approval verified against request context', certificate };
   }
 }
 
@@ -258,6 +412,10 @@ export class IpcAuthorizationClient implements AuthorizationClient {
             amount: request.amount,
             expiry: request.expiry,
             energy: String(request.energy),
+            // the exact transaction the approval must cover.
+            transactionDigest: request.transactionDigest,
+            transactionType: request.transactionType,
+            maxFeeMicroCcd: request.maxFeeMicroCcd,
           },
         };
         conn.write(JSON.stringify(envelope) + '\n');
@@ -285,6 +443,24 @@ export class IpcAuthorizationClient implements AuthorizationClient {
         const valid: AuthorizationOutcome[] = ['approved', 'rejected', 'unknown', 'owner_unavailable', 'protocol_error'];
         if (!valid.includes(outcome)) {
           resolve({ outcome: 'protocol_error', reason: 'malformed_request', detail: 'unknown outcome' });
+          return;
+        }
+        // an approval without a certificate is unusable: the
+        // signing service cannot verify what the Owner approved. Fail closed
+        // here instead of letting the core reach the signer without evidence.
+        // A certificate on a non-approval is dropped, never forwarded.
+        if (outcome === 'approved') {
+          const cert = parsed.certificate as OwnerAuthorizationCertificate | null;
+          if (typeof cert !== 'object' || cert === null || Array.isArray(cert)) {
+            resolve({ outcome: 'protocol_error', reason: 'missing_certificate', detail: 'Owner approved without an authorization certificate' });
+            return;
+          }
+          resolve({
+            outcome,
+            reason: (parsed.reason as string | null) ?? null,
+            detail: (parsed.detail as string | null) ?? null,
+            certificate: cert,
+          });
           return;
         }
         resolve({
@@ -327,6 +503,10 @@ export class IpcAuthorizationClient implements AuthorizationClient {
             amount: request.amount,
             expiry: request.expiry,
             energy: String(request.energy),
+            // recovery must prove the same exact transaction.
+            transactionDigest: request.transactionDigest,
+            transactionType: request.transactionType,
+            maxFeeMicroCcd: request.maxFeeMicroCcd,
           },
         };
         conn.write(JSON.stringify(envelope) + '\n');
@@ -354,6 +534,17 @@ export class IpcAuthorizationClient implements AuthorizationClient {
           resolve({ outcome: 'protocol_error', reason: 'malformed_request', detail: 'unknown outcome' });
           return;
         }
+        // same certificate rule as authorize: a recovered approval
+        // without its certificate cannot be used for signing.
+        if (outcome === 'approved') {
+          const cert = parsed.certificate as OwnerAuthorizationCertificate | null;
+          if (typeof cert !== 'object' || cert === null || Array.isArray(cert)) {
+            resolve({ outcome: 'protocol_error', reason: 'missing_certificate', detail: 'Owner recovered an approval without an authorization certificate' });
+            return;
+          }
+          resolve({ outcome, reason: (parsed.reason as string | null) ?? null, detail: (parsed.detail as string | null) ?? null, certificate: cert });
+          return;
+        }
         resolve({ outcome, reason: (parsed.reason as string | null) ?? null, detail: (parsed.detail as string | null) ?? null });
       });
       conn.on('error', (e) => {
@@ -369,9 +560,11 @@ export class IpcAuthorizationClient implements AuthorizationClient {
   }
 
   /**
-   * Read-only readiness probe (F2/F6). Asks the owner for the identity of the
-   * shared database file it is actually using (resolved path + device + inode),
-   * so the facilitator can prove the owner authorizes against the same file.
+   * Read-only readiness probe (F2/F6). Asks the owner for the identity of
+   * the database file it is actually using (resolved path + device + inode),
+   * so the facilitator can prove the owner authorizes against a SEPARATE,
+   * Owner-private file (a match with the facilitator database
+   * is now a configuration error, not the expected state).
    * Creates no state on either side: no idempotency record, no sign event, no
    * approval. `reachable: false` covers a dead owner, a missing socket, a
    * timeout, and a malformed response.
@@ -401,11 +594,11 @@ export class IpcAuthorizationClient implements AuthorizationClient {
           return;
         }
         conn.end();
-        if (parsed.outcome !== 'ok' || typeof parsed.dbPath !== 'string' || typeof parsed.dbDev !== 'number' || typeof parsed.dbIno !== 'number') {
+        if (parsed.outcome !== 'ok' || typeof parsed.dbPath !== 'string' || typeof parsed.dbDev !== 'number' || typeof parsed.dbIno !== 'number' || typeof parsed.ownerUid !== 'number') {
           resolve({ reachable: false, reason: 'unexpected db_identity response' });
           return;
         }
-        resolve({ reachable: true, dbPath: parsed.dbPath, dbDev: parsed.dbDev, dbIno: parsed.dbIno });
+        resolve({ reachable: true, dbPath: parsed.dbPath, dbDev: parsed.dbDev, dbIno: parsed.dbIno, ownerUid: parsed.ownerUid });
       });
       conn.on('error', (e) => {
         clearTimeout(timer);
@@ -427,6 +620,8 @@ export interface OwnerDbIdentity {
   /** Device + inode of that file (after symlink resolution). */
   dbDev?: number;
   dbIno?: number;
+  /** UID of the Owner process itself (for the distinct-UID check). */
+  ownerUid?: number;
   /** Why the probe failed (unreachable only). Never contains secret material. */
   reason?: string;
 }

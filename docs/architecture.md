@@ -120,12 +120,12 @@ The gateway runs a full agent-wallet stack on top of trust and payment layers:
 
 ## Security findings (preserved)
 
-- **M1 (remediated in TASK34.4)**: `recordSignEvent()` was a public method on
+- **M1 (remediated)**: `recordSignEvent()` was a public method on
   `SettlementRepository` that could insert an `approved` event without passing the
   durable-state gate. **CLOSED** — removed from the public interface; a DB-level trigger
   (`trg_sign_events_approved_requires_created`) enforces it for every writer, including raw SQL.
   Test: `authorization-audit-remediation.test.mts` M1.1 asserts `recordSignEvent` is absent.
-- **M2 (remediated in TASK34.4)**: state-based rejections (`prepared`, `submitting`, ...)
+- **M2 (remediated)**: state-based rejections (`prepared`, `submitting`, ...)
   were not audited. **CLOSED** — every durable-state rejection is recorded as a `rejected`
   event in the same transaction; missing payments are audited in a separate `sign_attempts`
   table without inventing a payment row.

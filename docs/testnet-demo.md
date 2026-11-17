@@ -80,7 +80,7 @@ Executed against `grpc.testnet.concordium.com:20000` (read-only).
 - Agent Card: 2 777 bytes, SHA-256 `3f614404…` (on-chain metadata hash).
 - Trust verdict: `TRUSTED` (read-only, exit 0).
 
-### First controlled sponsored transaction (TASK 65)
+### First controlled sponsored transaction (sender-wallet verification)
 
 - Transaction hash: `c1029c57ae5d44b3c65870c86f363139fbbc2deaefd2a0a9e95534ae8a1bd67a`
 - Finalization status: `finalized`
@@ -90,7 +90,7 @@ Executed against `grpc.testnet.concordium.com:20000` (read-only).
 - Sponsor: `3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK`
 - Recipient: `3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB`
 
-### Second transaction (TASK 70)
+### Second transaction (testnet demo)
 
 - Transaction hash: `b472caa354f9c017cc7d6254fbe12ef8fc2bc0ee3c989a561c6cd9bf957220c2`
 - Block hash: `cf0b758b7c79350c3c4fe6458b298da15e1adde31b8eb29d4f19c18708db5022`

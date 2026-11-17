@@ -8,14 +8,20 @@
  * Run: npx tsx test/prebroadcast.test.mts
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { paymentDigest, requirementsKey } from '../services/facilitator/src/store.js';
 import { toSdkV1Transaction, computeTransactionHash } from '../services/facilitator/src/signer.js';
 import { canTransition, isTerminal } from '../services/facilitator/src/state.js';
+import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
+import { convertV2ToSdkV1 } from '../services/facilitator/src/wireConverter.js';
+import { signingDigestOf, transactionEnergyOf } from '../services/facilitator/src/signingService.js';
+import { SIMPLE_TRANSFER_BASE_COST } from '../services/facilitator/src/energy.js';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+import { ReadOnlySettlementStateReader, RepositorySettlementStateReader, SqliteOwnerAuthorizationRepository } from '../services/facilitator/src/ownerAuthorizationRepository.js';
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -28,6 +34,13 @@ const ok = (v: unknown, m: string) => check(m, Boolean(v));
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
+// W5's sponsor: the real sponsor testnet account (public address only —
+// no key, no signing, no broadcast; mock mode only simulates). It must be
+// a VALID Concordium account (the Owner launcher validates it with
+// AccountAddress.fromBase58) and DISTINCT from both sender and recipient
+// (the wire converter refuses sponsor == recipient, and the Owner refuses
+// sponsor == sender). PAY_TO cannot serve: it is the transfer recipient.
+const W5_SPONSOR = '3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK';
 // The fixture's sponsor must match the mock signer's policy sponsor, or the wire
 // converter refuses with `wrong_sponsor` before the signer is ever reached.
 const SPONSOR = '3mockSponsorPlaceholderNotARealAccountAddress0000';
@@ -71,8 +84,16 @@ function readLedger(path: string) {
 }
 const attempts = (path: string) => readLedger(path).filter(e => e.event === 'submit_attempt').length;
 
-async function startProc(env: Record<string, string>) {
-  const child = spawn(process.execPath, [SERVER], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+async function startProc(env: Record<string, string>, asUser?: string) {
+  // asUser: run the facilitator as another OS user (W5's recovery process
+  // runs as ubuntu so the Owner's SO_PEERCRED gate sees a non-root peer —
+  // the Owner refuses uid 0 outright). sudo strips the environment, so the
+  // full env is passed explicitly via `env`, the same shape the isolation
+  // suite uses for its Owner.
+  const fullEnv = { ...process.env, ...env };
+  const child = asUser
+    ? spawn('sudo', ['-u', asUser, 'env', ...Object.entries(fullEnv).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v as string}`), process.execPath, SERVER], { stdio: ['ignore', 'pipe', 'pipe'], detached: true })
+    : spawn(process.execPath, [SERVER], { env: fullEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '', err = '';
   child.stdout.on('data', d => (out += String(d)));
   child.stderr.on('data', d => (err += String(d)));
@@ -87,7 +108,15 @@ async function startProc(env: Record<string, string>) {
     };
     poll();
   });
-  return { url, child, exited, stop: async () => { if (child.exitCode === null) child.kill('SIGKILL'); await exited; } };
+  return { url, child, exited, stop: async () => {
+    if (child.exitCode === null) {
+      // A sudo-spawned child must be killed as a GROUP: killing sudo alone
+      // orphans the node server behind it.
+      if (asUser && child.pid !== undefined) { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } }
+      else child.kill('SIGKILL');
+    }
+    await exited;
+  } };
 }
 
 async function settle(url: string, body: unknown) {
@@ -104,6 +133,82 @@ const baseEnv = (w: ReturnType<typeof ws>) => ({
 });
 
 const repoAt = (db: string) => new SqliteSettlementRepository(db);
+
+// ── W5 Owner harness  ────────────────────────────────────────────
+// The recovery process recovers the durable approval through a REAL Owner
+// over IPC. The Owner runs as authowner (not the test UID): its launcher's
+// settlement-writable guard is active for a non-root Owner, so the
+// settlement file must be readable but not writable by that UID (see the
+// handover below). The facilitator UID comes from the same
+// TEST_FACILITATOR_UID convention as the IPC suites (default 1001 = ubuntu).
+const OWNER_SCRIPT = new URL('../scripts/authz-owner.mts', import.meta.url).pathname;
+const PEERCRED_BIN = new URL('../scripts/authz-peercred', import.meta.url).pathname;
+const FAC_UID = Number(process.env.TEST_FACILITATOR_UID ?? 1001);
+const OWNER_USER = 'authowner';
+
+// sudo helper for ownership changes the test UID cannot do itself
+// (chown to another UID needs root; CI runners and local root both have it).
+const sudo = (...args: string[]) => {
+  const r = spawnSync('sudo', args, { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`sudo ${args.join(' ')} failed: ${(r.stderr ?? '').trim()}`);
+};
+
+type OwnerProc = { proc: ReturnType<typeof spawn> };
+async function startW5Owner(ownerDir: string, sock: string, env: Record<string, string>): Promise<OwnerProc> {
+  // No signing-service UID is passed (argv[5] omitted): W5 has no signing
+  // service — the seed authorized in-process and the recovery uses
+  // `recover`, never `consume` — so consume is refused outright. Passing
+  // the facilitator UID as the signing-service UID would also trip the
+  // launcher's default refusal (signing-service UID must differ from the
+  // facilitator UID), and inventing a third UID for a service that does
+  // not exist would be a lie in the harness.
+  const proc = spawn('sudo', ['-u', OWNER_USER, 'env', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), 'npx', 'tsx', OWNER_SCRIPT, ownerDir, sock, String(FAC_UID)], {
+    stdio: ['ignore', 'pipe', 'pipe'], detached: true,
+  });
+  let ready = false;
+  let stderr = '';
+  let stdout = '';
+  proc.stderr.on('data', (c) => { stderr += c.toString(); });
+  proc.stdout.on('data', (c) => { stdout += c.toString(); });
+  await new Promise<void>((resolve) => {
+    const t = setTimeout(() => resolve(), 40000);
+    proc.stdout.on('data', (c) => { if (c.toString().includes('owner listening')) { ready = true; clearTimeout(t); resolve(); } });
+    proc.on('exit', () => { clearTimeout(t); resolve(); });
+  });
+  if (!ready) {
+    writeFileSync('/tmp/w5-owner-stderr.log', stderr);
+    writeFileSync('/tmp/w5-owner-stdout.log', stdout);
+    try {
+      const ownerLog = join(ownerDir, 'owner.log');
+      if (existsSync(ownerLog)) writeFileSync('/tmp/w5-owner-log-copy.log', readFileSync(ownerLog, 'utf8'));
+    } catch { /* owner.log may not exist yet */ }
+    throw new Error(`W5 owner failed to start: ${stderr.trim().split('\n').slice(-25).join(' | ')}`);
+  }
+  // The socket is created authowner-owned; the facilitator (ubuntu) connects
+  // through it — the SO_PEERCRED gate, not the file mode, is the boundary.
+  // The chmod must go through sudo: the test user is not the socket's
+  // owner (the Owner created it), so a direct chmod is EPERM. This was
+  // the real W5 failure in the previous run; the cleanup EACCES it
+  // reported was the secondary error from the finally masking it.
+  sudo('chmod', '666', sock);
+  return { proc };
+}
+async function stopW5Owner(o: OwnerProc) {
+  // Kill the whole process GROUP (detached spawn above): SIGTERM to the
+  // npx process alone never reaches the node child through the npx → sh →
+  // node chain, which is why earlier runs leaked Owner processes.
+  const pid = o.proc.pid;
+  if (pid !== undefined) { try { process.kill(-pid, 'SIGTERM'); } catch { o.proc.kill('SIGTERM'); } } else o.proc.kill('SIGTERM');
+  const exited = await new Promise<boolean>((resolve) => {
+    if (o.proc.exitCode !== null) return resolve(true);
+    const t = setTimeout(() => resolve(false), 10000);
+    o.proc.on('exit', () => { clearTimeout(t); resolve(true); });
+  });
+  if (!exited) {
+    if (pid !== undefined) { try { process.kill(-pid, 'SIGKILL'); } catch { o.proc.kill('SIGKILL'); } } else o.proc.kill('SIGKILL');
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
 
 // ═══ 1. hash binding ════════════════════════════════════════════════════
 
@@ -266,13 +371,111 @@ console.log('\n── W5. crash immediately after durable hash persistence, befo
   const w = ws();
   const repo = repoAt(w.db);
   const p = fixture();
-  const d = paymentDigest(p);
-  const k = requirementsKey(p.accepted, p.resource.url);
+  // W5 sponsors with W5_SPONSOR, not the mock placeholder. The
+  // real Owner validates EVERY request's sponsor against its policy
+  // sponsor (validateRequest: wrong_sponsor) and the launcher refuses a
+  // policy sponsor that is not a valid Concordium account — the placeholder
+  // is not one (it contains '0', outside the base58 alphabet). So the
+  // seed, the envelope, and the recovery facilitator's mock signer must all
+  // present the same valid sponsor (W5_SPONSOR); the recovery process gets
+  // it via FACILITATOR_MOCK_SPONSOR_ADDRESS below.
+  const p5 = JSON.parse(JSON.stringify(p)) as typeof p;
+  p5.payload.signedTransaction.header.sponsor.address = W5_SPONSOR;
+  // The core sources the authorization request's sponsor from
+  // requirements.extra.feePayer (not from the transaction header), so the
+  // feePayer must agree with the sponsor everywhere else, or the Owner
+  // rejects the recovery with wrong_sponsor. Both overrides land before
+  // the digest is computed, so the digest binds the W5 variant.
+  p5.accepted.extra.feePayer = W5_SPONSOR;
+  const d = paymentDigest(p5);
+  const k = requirementsKey(p5.accepted, p5.resource.url);
   let txHash = '';
+  // the seeded approval lives in an Owner-private database,
+  // and the recovery process recovers it through a REAL Owner process over
+  // IPC (the facilitator's in-memory default client could never see a
+  // durable approval). The Owner directory holds the private database and
+  // the authorization key; the socket lives in its own world-traversable
+  // directory so the facilitator UID can reach it.
+  const ownerDir = join(w.dir, 'owner');
+  mkdirSync(ownerDir, { mode: 0o700 });
+  const ownerDb = join(ownerDir, 'authz.db');
+  const ownerKey = generateOwnerAuthorizationKeyPair();
+  const ownerKeyFile = join(ownerDir, 'owner-key.pem');
+  writeFileSync(ownerKeyFile, ownerKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+  const sockDir = join(w.dir, 'sock');
+  mkdirSync(sockDir, { mode: 0o755 });
+  // The suite runs under umask 0007, so the mkdir above actually yields
+  // 0750 — the facilitator UID could not traverse to the socket (EACCES on
+  // connect). Set the mode explicitly, like the IPC suites do. The
+  // directory is owned by the Owner UID so it can create the socket inside.
+  // The chmod must go through sudo: after the chown above, the test user
+  // no longer owns the directory and a direct chmod is EPERM.
+  sudo('chown', OWNER_USER, sockDir);
+  sudo('chmod', '755', sockDir);
+  const sock = join(sockDir, 'authz.sock');
+  let ownerProc: OwnerProc | null = null;
   try {
     repo.noteVerified(d, k);
     repo.claim(d, k);
-    const signed = { ...p.payload.signedTransaction, signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: { 0: { 0: 'bb'.repeat(64) } } } };
+    // a persisted hash implies a prior approval: the first attempt
+    // authorized the exact transaction before signing it. Seed that approval
+    // (unconsumed — the mock signer never consumes) so the recovery process
+    // can recover its certificate; without it the resume fails closed. The
+    // approval binds the exact converted transaction the server will
+    // authorize for, under the server's default authorization policy.
+    {
+      const raw = p5.payload.signedTransaction;
+      const withPolicyEnergy = {
+        ...raw,
+        header: { ...raw.header, executionEnergyAmount: Number(SIMPLE_TRANSFER_BASE_COST) },
+      };
+      const conversion = convertV2ToSdkV1(withPolicyEnergy, {
+        network: CAIP2,
+        sponsorAddress: W5_SPONSOR,
+        maxExecutionEnergy: 1_000,
+      });
+      if (!conversion.ok) throw new Error(`W5 seed conversion failed: ${conversion.message}`);
+      const wire = conversion.wire;
+      const energy = transactionEnergyOf(wire);
+      if (energy === null) throw new Error('W5 seed: no recomputed energy');
+      // the approval lives in the Owner-private database, not
+      // the settlement database: the settlement repository no longer has
+      // (or creates) the authorization tables.
+      const ownerRepo = new SqliteOwnerAuthorizationRepository(ownerDb, new RepositorySettlementStateReader(repo), { now: () => Date.now() });
+      try {
+        const owner = new LocalAuthorizationClient({
+          policy: {
+            network: CAIP2,
+            sponsor: W5_SPONSOR,
+            maxEnergy: 1_000n,
+            maxExpiryOffsetSeconds: 600,
+            allowedAssets: ['CCD'],
+            policyVersion: 'local-v1',
+          },
+          repository: ownerRepo,
+          now: () => Date.now(),
+        });
+        const auth = await owner.authorize({
+          paymentDigest: d,
+          network: CAIP2,
+          version: 1,
+          sender: SENDER,
+          sponsor: W5_SPONSOR,
+          recipient: PAY_TO,
+          asset: 'CCD',
+          amount: '250000',
+          expiry: NOW + 200,
+          energy,
+          transactionDigest: signingDigestOf(wire),
+          transactionType: 'transfer',
+          maxFeeMicroCcd: '10000000',
+        });
+        if (auth.outcome !== 'approved') throw new Error(`W5 seed authorization failed: ${auth.outcome}/${auth.reason}`);
+      } finally {
+        ownerRepo.close();
+      }
+    }
+    const signed = { ...p5.payload.signedTransaction, signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: { 0: { 0: 'bb'.repeat(64) } } } };
     txHash = computeTransactionHash(signed);
     repo.prepare(d, txHash);
     // Crash now: hash is durable, nothing was submitted.
@@ -280,26 +483,79 @@ console.log('\n── W5. crash immediately after durable hash persistence, befo
     repo.close();
   }
 
+  // The Owner directory must be owned by the Owner UID (0700). This runs
+  // AFTER the seed above: the seed creates authz.db as the test UID, and
+  // the Owner cannot open a root-owned 0600 database. The key was written
+  // before the seed, so nothing here needs the test UID to write into the
+  // directory afterwards.
+  sudo('chown', '-R', OWNER_USER, ownerDir);
+  sudo('chmod', '700', ownerDir);
+
+  // Cross-UID handover for the recovery: the recovery facilitator runs as
+  // ubuntu (its store is the settlement database), so the workspace must be
+  // traversable and the database + submit ledger writable by that UID
+  // before it starts. The facilitator opens the database FIRST — it creates
+  // the WAL -shm as ubuntu-owned; the Owner (authowner) then reads it fine.
+  // Starting the Owner first would create an Owner-owned -shm the
+  // facilitator could not use.
+  chmodSync(w.dir, 0o777);
+  writeFileSync(w.ledger, '');
+  // The settlement database must be writable by the facilitator (ubuntu)
+  // and readable — but not writable — by the Owner (authowner): the Owner
+  // launcher refuses a settlement file writable by its UID. Owner-owned
+  // 0644 does all three (ubuntu writes as owner; authowner and the test
+  // read through the world-read bit). The recovery facilitator runs its
+  // store with the same fileMode so the WAL -shm it creates is readable
+  // by the Owner too.
+  sudo('chown', 'ubuntu', w.db);
+  sudo('chmod', '644', w.db);
+  chmodSync(w.ledger, 0o666);
+
   // Recovery process: the hash is there, the payment is prepared, and a settle must NOT
   // submit again — it reports pending with the durable identifier.
-  const proc = await startProc({ ...baseEnv(w), FACILITATOR_PROCESS_LABEL: 'recovery' });
+  // the mock signer must present the same valid sponsor the
+  // Owner's policy holds (W5_SPONSOR): without FACILITATOR_MOCK_SPONSOR_ADDRESS
+  // it would sponsor with the placeholder and the Owner would reject the
+  // recovery with wrong_sponsor.
+  const proc = await startProc({ ...baseEnv(w), FACILITATOR_PROCESS_LABEL: 'recovery', FACILITATOR_AUTHZ_SOCKET: sock, FACILITATOR_MOCK_SPONSOR_ADDRESS: W5_SPONSOR, FACILITATOR_DB_FILE_MODE: '0644' }, 'ubuntu');
   try {
-    const r = await settle(proc.url, envelope(p));
+    // the recovery process recovers the durable approval
+    // through the real Owner. The Owner's policy sponsor is W5_SPONSOR (a
+    // valid Concordium account); the seed approval binds the same sponsor,
+    // and only policyVersion must match the seed ('local-v1').
+    ownerProc = await startW5Owner(ownerDir, sock, {
+      AUTHZ_OWNER_LOG: join(ownerDir, 'owner.log'),
+      AUTHZ_OWNER_PEERCRED_BIN: PEERCRED_BIN,
+      AUTHZ_SPONSOR_ADDRESS: W5_SPONSOR,
+      AUTHZ_NETWORK: CAIP2,
+      AUTHZ_POLICY_VERSION: 'local-v1',
+      AUTHZ_DB_FILE: ownerDb,
+      AUTHZ_SETTLEMENT_DB_FILE: w.db,
+      AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+    });
+    const r = await settle(proc.url, envelope(p5));
     await new Promise(r2 => setTimeout(r2, 120));
     // Pre-broadcast persistence makes a prepared row resumable: a recovery process MAY take the claim and
     // submit. The invariant is at-most-one, not zero.
     eq(attempts(w.ledger), 1, 'exactly one submission total (by the recovery process)');
     eq(r.body.transaction, txHash, 'the durable hash is reported back');
 
-    const again = repoAt(w.db);
-    try {
-      eq(again.get(d)!.tx_hash, txHash, 'hash still durable');
-      ok(['outcome_unknown', 'prepared', 'submitting'].includes(again.get(d)!.state ?? ''), `state advanced: ${again.get(d)!.state}`);
-    } finally {
-      again.close();
-    }
+    // The settlement file is ubuntu-owned now; the test reads it through
+    // the read-only reader (a read-write open would fail for a non-owner).
+    const again = new ReadOnlySettlementStateReader(w.db);
+    const st = again.getPaymentState(d);
+    eq(st?.txHash, txHash, 'hash still durable');
+    ok(['outcome_unknown', 'prepared', 'submitting'].includes(st?.state ?? ''), `state advanced: ${st?.state}`);
   } finally {
     await proc.stop();
+    if (ownerProc) await stopW5Owner(ownerProc);
+    // The Owner directory is Owner-owned 0700 (chowned after the seed so
+    // the Owner can open its own database) and the socket directory is
+    // Owner-owned 0755. A non-root test user cannot scandir the first or
+    // unlink the socket inside the second, so rmSync in cleanup throws
+    // EACCES. Hand the whole temp dir back to the test UID first. Both
+    // processes are stopped by now, so nothing writes into it anymore.
+    sudo('chown', '-R', String(process.getuid()), w.dir);
     w.cleanup();
   }
 }

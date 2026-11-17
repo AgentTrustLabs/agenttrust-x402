@@ -1,9 +1,14 @@
 /**
  * Raw writer probe, run as a NON-owner OS user.
  *
- * Attempts to open the owner's SQLite database for writing and insert an approval.
- * Reports the exact OS/SQLite error so an OS permission failure can be distinguished
- * from an application-level authorization rejection.
+ * Attempts to open the owner's (Owner-private) SQLite database for writing
+ * and insert an approval. Reports the exact OS/SQLite error so an OS
+ * permission failure can be distinguished from an application-level
+ * authorization rejection.
+ *
+ * the target is the Owner-private database (`authz.db`,
+ * `authorizations` table). The settlement database no longer holds
+ * authorization records at all; a raw write there cannot fabricate one.
  *
  * Run (as a different user): npx tsx scripts/ipc-rawwriter.mts <db-path> <digest>
  */
@@ -36,7 +41,7 @@ try {
 
 try {
   db.exec(
-    `INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES ('${digest}', 1, 'approved', NULL, 'ccd:4221332d34e1694168c2a0c0b3fd0f27', 's', 'sp', 'r', '1', 'raw')`,
+    `INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES ('${digest}', 1, 'approved', NULL, 'ccd:4221332d34e1694168c2a0c0b3fd0f27', 's', 'sp', 'r', '1', 'raw')`,
   );
   console.log(JSON.stringify({ stage: 'insert', layer: 'OK', message: 'APPROVAL INSERTED BY RAW WRITER' }));
 } catch (e) {
@@ -45,7 +50,7 @@ try {
 
 try {
   const n = (
-    db.prepare("SELECT COUNT(*) AS n FROM sign_events WHERE payment_digest = ? AND decision = 'approved'").get(digest) as {
+    db.prepare("SELECT COUNT(*) AS n FROM authorizations WHERE payment_digest = ? AND decision = 'approved'").get(digest) as {
       n: number;
     }
   ).n;

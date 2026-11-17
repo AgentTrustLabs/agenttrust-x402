@@ -29,6 +29,7 @@ import {
   type SponsorSigner,
 } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import { GrpcConcordiumTransport } from '../services/facilitator/src/grpcConcordiumTransport.js';
 import { ConcordiumTransactionSubmitter } from '../services/facilitator/src/concordiumTransactionSubmitter.js';
@@ -109,7 +110,7 @@ const coreWith = (signer: SponsorSigner, db: string) =>
         allowedAssets: ['CCD'],
         policyVersion: 't521',
       },
-      repository: new SqliteSettlementRepository(db, { now: () => NOW * 1000 }),
+      repository: ownerRepoFor(db, new SqliteSettlementRepository(db, { now: () => NOW * 1000 }), () => NOW * 1000),
       now: () => NOW * 1000,
     }),
   } as never);

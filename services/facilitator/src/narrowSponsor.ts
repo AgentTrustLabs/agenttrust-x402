@@ -10,7 +10,7 @@
  * `{approved: true}` only when every policy holds. A future real signer MUST call this first
  * and MUST refuse to sign when it returns `{approved: false}`.
  *
- * This task implements only a **mock/no-op authorization backend**: no signature is produced,
+ * This module implements only a **mock/no-op authorization backend**: no signature is produced,
  * no `AccountSigner` is implemented, and no signing function is reachable.
  *
  * Fail-closed rules:
@@ -46,6 +46,19 @@ export interface SponsorAuthorizationRequest {
   energy: bigint;
   /** The AgentTrust payment digest (replay key). */
   paymentDigest: string;
+  /**
+   * the exact transaction the approval must cover. Supplied by the
+   * facilitator after wire conversion. The Owner binds these into the durable
+   * record and the certificate; the signing service verifies them against the
+   * transaction it parses. Absent only on legacy paths — an approval recorded
+   * without them cannot be issued as a certificate (fail closed).
+   */
+  /** Concordium sponsor-sign digest of the transaction, 64-hex. */
+  transactionDigest?: string;
+  /** Raw payload type string, e.g. 'transfer'. */
+  transactionType?: string;
+  /** Fee cap the authorization is issued under (microCCD), decimal string. */
+  maxFeeMicroCcd?: string;
   // `paymentState` was removed. It was accepted but never read, and the
   // durable database row is the only authoritative source for state. Callers must not be
   // able to assert a state.
@@ -84,6 +97,12 @@ export interface SponsorAuthorizationResult {
   approved: boolean;
   reason?: SponsorRejectionReason;
   detail?: string;
+  /**
+   * the authorization id the approval was recorded with, on
+   * approval. The Owner issues the certificate under this id; the signing
+   * service consumes it. Null/absent when not approved.
+   */
+  authorizationId?: string | null;
 }
 
 export interface SponsorPolicy {

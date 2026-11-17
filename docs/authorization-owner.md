@@ -18,7 +18,7 @@ only the payment digest, not the transaction itself.
 client payment ──► facilitator (uid 1001)
                       │ 1. validate → claim (shared DB, state `created`)
                       │ 2. sender verification (SDK, before authorization)
-                      │ 3. authorize ──► Authorization Owner (uid 1001)
+                      │ 3. authorize ──► Authorization Owner (uid 997, distinct from the facilitator)
                       │      │  SO_PEERCRED peer check (facilitator UID, never root)
                       │      │  strict v1 validation (no caller-supplied decision fields)
                       │      │  durable idempotency (requestId → outcome)
@@ -221,9 +221,12 @@ with a separate database would see every real payment as `unknown_payment`.
   (`db`, `-wal`, `-shm`) to `0600` on every open (the `-shm` file is
   recreated on each open, so a one-time chmod is not enough). The owner's
   private `idem.db` is `0600` as well. A deployment that shares the database
-  across two UIDs must use `0660` with a shared group instead (pass
-  `fileMode: 0o660` to the repository); the default `0600` is for the
-  single-UID deployment.
+  across two UIDs must use `0644` (pass
+  `fileMode: 0o644` to the repository, or `FACILITATOR_DB_FILE_MODE=0644`
+  on the facilitator); the default `0600` is for the
+  single-UID deployment. `0660` with a shared group does NOT work: the
+  Owner launcher refuses a settlement file writable by its UID, and
+  group-write plus Owner-in-group trips that guard.
 
 Payment lifecycle as the owner sees it: `created` → `approved` (sign event
 recorded) or `rejected` (sign event recorded, payment terminally rejected by
@@ -269,7 +272,7 @@ npx tsx scripts/authz-owner.mts <db-dir> <socket-path> <facilitator-uid>
 | `AUTHZ_POLICY_VERSION` | version recorded in sign events | `authz-prod-v1` |
 | `AUTHZ_DB_FILE` | authorization database file — **must be the facilitator's database file** | `/home/agenttrust/.agenttrust/facilitator.db` |
 | `AUTHZ_SEED_FIXTURES` | `1` seeds harness digests `a`..`e`; default is `0` (no seeding) — a production database must never receive fake payments; tests opt in explicitly | `0` |
-| `TASK348_LOG` | owner log path | e.g. `/home/agenttrust/.agenttrust/authz.log` |
+| `AUTHZ_OWNER_LOG` | owner log path | e.g. `/home/agenttrust/.agenttrust/authz.log` |
 | `CRASH_AT` | `1`..`5` — crash-injection point (verification only, never in production) | unset |
 
 Defaults (no variables set) preserve the original protocol-test harness
@@ -312,14 +315,22 @@ FACILITATOR_DB_PATH=/home/agenttrust/.agenttrust/facilitator.db  # same file as 
   facilitator UID, and UID 0 (root) is rejected even when it matches.
 - The socket is mode `0660`, owned by the service user; the database
   directory is `0700`.
-- Current deployment runs owner and facilitator as the same service user
-  (`agenttrust`, uid 1001). The peer check still rejects root and every
-  other UID, but a compromised facilitator process shares the owner's UID.
-  The recommended hardening for a multi-user deployment is a dedicated
-  owner user (e.g. `authowner`, uid 997, as the protocol tests use) with the
-  facilitator as the only other member of the socket's group; the owner
-  already takes the facilitator UID as an argument, so no code change is
-  needed to adopt it.
+- The Owner and the facilitator MUST run as distinct UIDs. This is
+  enforced on both sides, by default, with no opt-out in production:
+  the Owner launcher refuses to start when the facilitator UID equals
+  its own UID (or the signing-service UID equals the facilitator UID),
+  and the facilitator's real-mode startup probe (and `/healthz`) refuses
+  an Owner whose `db_identity` reports the facilitator's or the
+  signing-service's UID. A compromised facilitator that shares the
+  Owner's UID could read the Owner key and database no matter what the
+  file modes say, so same-UID deployment is a startup failure, not a
+  warning. Deploy three distinct UIDs: the Owner as a dedicated user
+  (e.g. `authowner`, uid 997, as the protocol tests use), the facilitator
+  as its own user, and the signing service as a third user (the isolation
+  suite uses `authsigner` for this role). The only exception is the
+  explicit test-harness opt-out `AUTHZ_ALLOW_SAME_UID_HARNESS=1`, for
+  suites that deliberately share one UID between the Owner and the
+  facilitator; it is never set in production.
 
 ## Operations
 
@@ -335,7 +346,7 @@ AUTHZ_NETWORK=ccd:4221332d34e1694168c2a0c0b3fd0f27 \
 AUTHZ_MAX_ENERGY=1000 AUTHZ_MAX_EXPIRY_OFFSET_SECONDS=600 \
 AUTHZ_ALLOWED_ASSETS=CCD AUTHZ_POLICY_VERSION=authz-prod-v1 \
 AUTHZ_DB_FILE=/home/agenttrust/.agenttrust/facilitator.db \
-AUTHZ_SEED_FIXTURES=0 TASK348_LOG=/home/agenttrust/.agenttrust/authz.log \
+AUTHZ_SEED_FIXTURES=0 AUTHZ_OWNER_LOG=/home/agenttrust/.agenttrust/authz.log \
 npx tsx scripts/authz-owner.mts /home/agenttrust/.agenttrust/authz-dir \
   /home/agenttrust/.agenttrust/authz.sock 1001
 ```

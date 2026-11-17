@@ -205,7 +205,7 @@ src/
               wallet skills, x402 client integration
   cli/        verify / commerce / registration entry points
 test/         70+ suites, offline
-scripts/      per-task verification + demo scripts
+scripts/      verification + demo scripts
 docs/         architecture, configuration, integration, testnet demo, real-payment demo
 ```
 

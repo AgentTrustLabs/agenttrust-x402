@@ -14,7 +14,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+import { seedSettlementDb } from './owner-authz-helper.mts';
+import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { requireFacilitatorProcess } from './os-identity.mts';
+
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { IpcAuthorizationClient } from '../services/facilitator/src/authorization.js';
@@ -25,8 +30,6 @@ const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const SPONSOR = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const RECIPIENT = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const OWNER_USER = 'authowner';
-const FACILITATOR_UID = 1001;
-const FACILITATOR_GID = 1002;
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -45,29 +48,52 @@ const run = (cmd: string, args: string[], as?: string, timeout = 30000) =>
     p.on('close', (code) => { clearTimeout(t); resolve({ code: code ?? -1, stdout: out.trim(), stderr: err.trim() }); });
   });
 
-const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
-const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
-if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`response-loss: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID} (uid=${uid}, groups=${gids.join(',')})`);
-  console.log('  run: sudo -u ubuntu npx tsx test/response-loss.test.mts');
-  process.exit(0);
-}
+const FACILITATOR_UID = requireFacilitatorProcess('response-loss');
 
 const base = mkdtempSync(join(tmpdir(), 't3413rl-'));
 const dbDir = join(base, 'ownerdb');
 const sock = join(base, 'authz.sock');
 const logPath = join(dbDir, 'owner.log');
 mkdirSync(dbDir, { mode: 0o700 });
+// the Owner needs an authorization-signing key. Ephemeral for this run.
+// Write it BEFORE chowning the dir to the Owner: a non-root test user
+// (CI runner) cannot write into a 0700 dir owned by another uid.
+const ownerKeyFile = join(dbDir, 'owner-key.pem');
+writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
 await run('chown', ['-R', `${OWNER_USER}:authclients`, base], 'root');
 await run('chmod', ['770', base], 'root');
 await run('chmod', ['700', dbDir], 'root');
+// the Owner never seeds the settlement database
+// (AUTHZ_SEED_FIXTURES was removed). Seed digests a..e directly, in a
+// SEPARATE directory the Owner can read (0644) but not write.
+const settlementDir = join(base, 'facdb');
+mkdirSync(settlementDir);
+// The Owner UID must traverse this directory: the test runs as root with
+// umask 0007, so a default mkdir is 0770 root:root and authowner cannot
+// reach the settlement file inside it.
+chmodSync(settlementDir, 0o755);
+const settlementDb = join(settlementDir, 'f.db');
+seedSettlementDb(settlementDb, ['a', 'b', 'c', 'd', 'e', 'f'].map((c) => c.repeat(64)), () => Date.now());
+// The Owner opens the settlement database read-only. A read-only open of a
+// WAL database must create the -shm wal-index when none exists, which needs
+// write access to the directory — the Owner UID has neither. Holding one
+// facilitator-side connection open keeps the -shm present (world-readable),
+// so the Owner's read-only reads work. In production the facilitator server
+// holds its store open for its lifetime, so this holds naturally; the Owner
+// still never opens the settlement database read-write.
+// fileMode 0644: the repository tightens db/-wal/-shm to 0600 on open by
+// default, which would lock the Owner UID out again. 0644 is test-only
+// (temp dir); production uses 0644 (see repository.ts F7).
+const settlementHolder = new SqliteSettlementRepository(settlementDb, { now: () => Date.now(), fileMode: 0o644 });
+void settlementHolder;
+
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const peercredBin = join(process.cwd(), 'scripts/authz-peercred');
 
 // ── 1. Start owner with CRASH_AT=4 (crash after commit + idempotency, before response) ──
 const startOwner = (crashAt: number) => {
-  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, 'AUTHZ_SEED_FIXTURES=1', 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const owner = spawn('sudo', ['-u', OWNER_USER, 'env', `AUTHZ_OWNER_LOG=${logPath}`, `AUTHZ_OWNER_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, `AUTHZ_DB_FILE=${join(dbDir, 'authz.db')}`, `AUTHZ_SETTLEMENT_DB_FILE=${settlementDb}`, `AUTHZ_AUTHORIZATION_KEY_FILE=${ownerKeyFile}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   let ownerErr = '';
   owner.stderr.on('data', (c) => (ownerErr += c));
@@ -94,6 +120,9 @@ const req = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest => 
   amount: '250000',
   expiry: EXPIRY,
   energy: 3000n,
+  transactionDigest: 'cd'.repeat(32),
+  transactionType: 'transfer',
+  maxFeeMicroCcd: '10000000',
   ...over,
 });
 

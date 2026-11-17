@@ -19,7 +19,7 @@ import { TESTNET } from '../src/core/types.js';
 
 const OWNER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const AGENT_URI = 'https://agenttrust.sabolabs.dev/.well-known/agent-card.json';
-const OUT = 'docs/evidence/task02';
+const OUT = 'docs/evidence/agent-card';
 
 async function main() {
   mkdirSync(OUT, { recursive: true });
@@ -169,7 +169,7 @@ async function main() {
 
   // ---- Manifest -----------------------------------------------------------
   const manifest = {
-    task: 'first real CIS-8004 registration',
+    purpose: 'first real CIS-8004 registration',
     network: 'testnet',
     caip2: TESTNET.caip2,
     generatedAt: new Date().toISOString(),
