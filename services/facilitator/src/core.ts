@@ -505,8 +505,8 @@ export class FacilitatorCore {
       // the two can never disagree about the fee model.
       const feeEstimate = derivedEnergy * ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG;
       if (feeEstimate > this.maxFeeMicroCcd) {
-        this.store.markFailed(digest, `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`);
-        return this.fail('fee_validation_failed', `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`, { digest });
+        this.store.markFailed(digest, `estimated fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`);
+        return this.fail('fee_validation_failed', `estimated fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`, { digest });
       }
       if (typeof this.signer.validateContext === 'function') {
         // The recipient validated here is the PAYEE of the signed transaction — the

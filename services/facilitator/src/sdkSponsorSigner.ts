@@ -97,7 +97,7 @@ export function validateSponsorContext(
     return `energy ${ctx.energy} exceeds cap ${opts.maxEnergy}`;
   }
   if (ctx.feeMicroCcd > opts.maxFeeMicroCcd) {
-    return `fee ${ctx.feeMicroCcd} exceeds cap ${opts.maxFeeMicroCcd}`;
+    return `estimated fee ${ctx.feeMicroCcd} exceeds cap ${opts.maxFeeMicroCcd}`;
   }
   const addrErr = validateSponsorAddress(ctx.sponsor);
   if (addrErr) return addrErr;

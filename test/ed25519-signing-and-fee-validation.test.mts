@@ -183,7 +183,7 @@ test('B02. validateContext rejects fee above cap', () => {
     { sponsorAddress: SPONSOR, network: NETWORK, maxEnergy: 100_000n, maxFeeMicroCcd: 1_000n },
     { network: NETWORK, sponsor: SPONSOR, recipient: RECIPIENT, energy: 300n, feeMicroCcd: 1_001n },
   );
-  ok(msg !== null && /fee .* exceeds cap/.test(msg), `rejected: ${String(msg)}`);
+  ok(msg !== null && /estimated fee .* exceeds cap/.test(msg), `rejected: ${String(msg)}`);
 });
 
 test('B03. validateContext rejects malformed/negative/unsafe values', () => {
@@ -228,7 +228,7 @@ test('B05. the pipeline invokes validateContext and fails closed on a fee breach
     getAccountInfo: inner.getAccountInfo,
     getTokenBalance: inner.getTokenBalance,
     getTokenDecimals: inner.getTokenDecimals,
-    validateContext: () => 'fee 99999999 exceeds cap 1000000',
+    validateContext: () => 'estimated fee 99999999 exceeds cap 1000000',
   };
   const core = new FacilitatorCore({
     network: NETWORK,

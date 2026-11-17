@@ -234,7 +234,10 @@ test('05. a fee above the configured cap is rejected before signing', async () =
   const r = await core.settle(envelope(p, p.accepted));
   eq(r.success, false, 'refused');
   eq(r.errorReason, 'fee_validation_failed', 'reason');
-  ok(/exceeds cap/.test(r.errorMessage), r.errorMessage);
+  // The core response must name the ESTIMATED fee, never an actual fee: the
+  // cap binds an estimate-based policy (Task 10.1, Option B), so a bare
+  // "fee … exceeds cap" would wrongly imply the actual chain fee is bounded.
+  ok(/estimated fee .* exceeds cap/.test(r.errorMessage), r.errorMessage);
   eq(counts.addSponsorSignature, 0, 'never signed');
   eq(counts.submitTransaction, 0, 'never submitted');
 });
