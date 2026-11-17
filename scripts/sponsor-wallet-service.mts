@@ -8,7 +8,7 @@
  *   FACILITATOR_NETWORK               CAIP-2 network
  *   FACILITATOR_SIGNING_SERVICE_UID   allowed peer UID
  *   FACILITATOR_MAX_ENERGY            optional: max energy (NRG) per signed tx (default 1000)
- *   FACILITATOR_MAX_FEE_MICROCCD      optional: max sponsor fee (microCCD) per signed tx (default 10000000)
+ *   FACILITATOR_MAX_FEE_MICROCCD      optional: max ESTIMATED sponsor fee (microCCD) per signed tx (default 10000000) — estimate-based policy only, not a guaranteed maximum actual chain fee (see energy.ts)
  *
  * Legacy positional form is still accepted for the tests:
  *   npx tsx scripts/sponsor-wallet-service.mts <socket> <sponsor> <network> <uid> <export-path>

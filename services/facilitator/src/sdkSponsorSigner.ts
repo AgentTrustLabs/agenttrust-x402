@@ -68,6 +68,10 @@ export function validateSponsorAddress(address: string): string | null {
 /**
  * Validate sponsor context before signing. Returns null on success, an error message
  * on failure. Pure function — no I/O, no signing.
+ *
+ * `ctx.feeMicroCcd` is an ESTIMATE (recomputed energy x the fixed estimate rate —
+ * see `energy.ts`), not a guaranteed maximum actual chain fee; the cap check here
+ * is therefore an estimate-based policy, and the energy cap is the hard bound.
  */
 export function validateSponsorContext(
   opts: Pick<SdkSponsorSignerOptions, 'sponsorAddress' | 'network' | 'maxEnergy' | 'maxFeeMicroCcd'>,

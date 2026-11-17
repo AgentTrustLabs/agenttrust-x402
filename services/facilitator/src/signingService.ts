@@ -16,6 +16,37 @@
  * properties of the transaction whose digest gets signed. The service signs the
  * RECOMPUTED digest, never the caller-supplied one.
  *
+ * Transfer-family validation covers BOTH transfer kinds the SDK can parse:
+ * `Transfer` and `TransferWithMemo` (same recipient + amount checks; the memo
+ * itself is opaque bytes committed by the digest). Every other transfer-family
+ * kind the protocol defines (`TransferWithSchedule`, `EncryptedAmountTransfer`,
+ * `TransferToEncrypted`, `TransferToPublic`, `EncryptedAmountTransferWithMemo`,
+ * `TransferWithScheduleAndMemo`) is NOT parseable by the installed SDK's
+ * `Payload.fromJSON` — `signableFromJSON` throws for them — so they are
+ * rejected as `invalid_transaction`, never silently accepted. Non-transfer
+ * payloads (DeployModule, InitContract, Update, UpdateCredentials, RegisterData,
+ * ConfigureDelegation, ConfigureBaker, TokenUpdate) carry no recipient/amount
+ * and pass this block by design; they still face the sponsor/sender/energy/
+ * fee/expiry checks.
+ *
+ * Fee check is an ESTIMATE-based policy, not a guaranteed maximum actual fee:
+ * the fee estimate is recomputed energy x `ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG`
+ * (see `energy.ts` for why no actual-fee guarantee is provable at this boundary).
+ * Energy caps are NOT weakened by this: the energy cap binds the recomputed
+ * energy directly, independent of the fee estimate.
+ *
+ * Replay handling is concurrency-safe: a requestId/fingerprint is RESERVED in the
+ * replay map (as a pending entry holding the in-flight promise) synchronously,
+ * before any asynchronous signing begins. A concurrent duplicate with the same
+ * fingerprint awaits the original result instead of signing twice; a concurrent
+ * duplicate with a different fingerprint is rejected with `request_id_reuse`
+ * without waiting. Completed entries return the original result; a signing
+ * failure is stored as a deterministic rejection, so a retry returns the same
+ * rejection and never re-signs. The pending promise is never rejected (every
+ * failure path resolves to a `SigningResponse`), so there are no unhandled
+ * rejections and no lock to deadlock on — the map entry is the only shared
+ * state, and it transitions pending → done exactly once.
+ *
  * What this does NOT prove (honest residual, inherent to the architecture):
  * - It does not prove "this is the transaction the Owner authorized" — the owner's
  *   approval lives in the facilitator's durable payment store, keyed by payment
@@ -49,7 +80,7 @@ import { sign as edSign, generateKeyPairSync } from 'node:crypto';
 import { AccountAddress, AccountTransactionType, Transaction } from '@concordium/web-sdk';
 import { AccountTransactionV1 } from '@concordium/web-sdk/transactions';
 import type { AccountSigner, AccountTransactionSignature } from '@concordium/web-sdk';
-import { SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
+import { ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
 
 // ─── protocol ─────────────────────────────────────────────────────────────
 
@@ -253,8 +284,20 @@ function expiryOf(value: unknown): bigint | null {
 }
 
 type BindingCheck =
-  | { ok: true; digest: string; energy: bigint; feeMicroCcd: bigint }
+  | { ok: true; digest: string; energy: bigint; estimatedFeeMicroCcd: bigint }
   | { ok: false; reason: string; detail: string };
+
+/**
+ * Transfer-family payload kinds, as parsed by the SDK. Both carry a
+ * `toAddress` recipient and a CCD `amount`, so both get the same signing-
+ * boundary validation. Any other transfer-family kind cannot be parsed by
+ * `Transaction.signableFromJSON` at all (the SDK's `Payload.fromJSON` switch
+ * has no case for it) and therefore fails earlier, as `invalid_transaction`.
+ */
+const TRANSFER_FAMILY_TYPES: ReadonlySet<AccountTransactionType> = new Set([
+  AccountTransactionType.Transfer,
+  AccountTransactionType.TransferWithMemo,
+]);
 
 /**
  * Validate that the requested digest is the hash of the given transaction, and
@@ -304,8 +347,11 @@ function checkTransactionBinding(
   if (senderAddr === sponsorAddr) {
     return { ok: false, reason: 'sender_equals_sponsor', detail: 'sender must not be the sponsor' };
   }
-  // Transfer payloads: recipient + amount are committed by the digest; validate them.
-  if (signable.payload.type === AccountTransactionType.Transfer) {
+  // Transfer-family payloads: recipient + amount are committed by the digest;
+  // validate them. Covers Transfer AND TransferWithMemo — the memo is opaque
+  // bytes already committed by the digest, so it needs no separate check.
+  // Non-transfer payloads have no recipient/amount and skip this block.
+  if (TRANSFER_FAMILY_TYPES.has(signable.payload.type)) {
     const to = (signable.payload as { toAddress?: unknown }).toAddress;
     if (to === undefined) {
       return { ok: false, reason: 'recipient_missing', detail: 'transfer has no recipient' };
@@ -337,17 +383,21 @@ function checkTransactionBinding(
   if (energy > maxEnergy) {
     return { ok: false, reason: 'energy_exceeds_cap', detail: `energy ${energy} exceeds cap ${maxEnergy}` };
   }
-  const feeMicroCcd = energy * SPONSOR_FEE_MICROCCD_PER_NRG;
+  // Fee — ESTIMATE-based policy only (see `energy.ts`): recomputed energy x the
+  // fixed estimate rate. This bounds the estimate, not the actual on-chain fee,
+  // which the service cannot know at signing time. The energy cap above binds
+  // the recomputed energy directly and is unaffected by the fee estimate.
+  const estimatedFeeMicroCcd = energy * ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG;
   const maxFee = opts.maxFeeMicroCcd ?? DEFAULT_SIGNING_MAX_FEE_MICROCCD;
-  if (feeMicroCcd > maxFee) {
-    return { ok: false, reason: 'fee_exceeds_cap', detail: `fee ${feeMicroCcd} exceeds cap ${maxFee}` };
+  if (estimatedFeeMicroCcd > maxFee) {
+    return { ok: false, reason: 'fee_exceeds_cap', detail: `estimated fee ${estimatedFeeMicroCcd} exceeds cap ${maxFee}` };
   }
   // Expiry — the transaction must still be alive when the service signs it.
   const expiry = expiryOf(unsigned.header.expiry);
   if (expiry === null || expiry * 1000n <= BigInt(nowMs)) {
     return { ok: false, reason: 'transaction_expired', detail: 'transaction expiry is in the past' };
   }
-  return { ok: true, digest, energy, feeMicroCcd };
+  return { ok: true, digest, energy, estimatedFeeMicroCcd };
 }
 
 /** Fingerprint of a request's signable content, for replay detection. */
@@ -399,7 +449,13 @@ export interface SigningServiceOptions {
   now?: () => number;
   /** Maximum energy (NRG) a signed transaction may carry. Default 1000. */
   maxEnergy?: bigint;
-  /** Maximum sponsor fee (microCCD) a signed transaction may cost. Default 10_000_000 (10 CCD). */
+  /**
+   * Maximum sponsor fee (microCCD) a signed transaction may cost, as an
+   * ESTIMATE-based policy (recomputed energy x the fixed estimate rate — see
+   * `energy.ts`). Default 10_000_000 (10 CCD). This is NOT a guaranteed maximum
+   * actual chain fee: passing the estimate does not prove the on-chain fee
+   * stays under the cap. The energy cap above is the hard bound.
+   */
   maxFeeMicroCcd?: bigint;
 }
 
@@ -414,7 +470,21 @@ export interface SigningService {
 
 export function createSigningService(opts: SigningServiceOptions): SigningService {
   const now = opts.now ?? (() => Date.now());
-  const replay = new Map<string, { response: SigningResponse; fingerprint: string }>();
+  /**
+   * Replay store. A `pending` entry is the concurrency reservation: it is
+   * written synchronously, before any `await`, so a second concurrent request
+   * with the same requestId can never slip past the check and reach the
+   * signer. It holds the in-flight promise so a same-content duplicate awaits
+   * the original result instead of signing twice. It transitions to `done`
+   * exactly once, holding the original response (including rejections — a
+   * retry after a failure returns the same deterministic rejection and never
+   * re-signs). Entries are never evicted in this service's lifetime; that is
+   * pre-existing behavior, not a new retention policy.
+   */
+  type ReplayEntry =
+    | { status: 'pending'; fingerprint: string; promise: Promise<SigningResponse> }
+    | { status: 'done'; fingerprint: string; response: SigningResponse };
+  const replay = new Map<string, ReplayEntry>();
 
   const peerCredOf = (conn: Socket): { uid: number; gid: number; pid: number } | null => {
     const handle = (conn as any)._handle;
@@ -429,6 +499,31 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
     } catch {
       return null;
     }
+  };
+
+  /**
+   * Binding + signing for one request. Pure work: validates the digest ↔
+   * transaction binding from the parsed transaction and signs the recomputed
+   * digest. NEVER touches the replay map — the caller (`doSign`) owns
+   * reservation and storage. Always resolves to a `SigningResponse`; it must
+   * never throw, so the pending reservation always transitions to `done`.
+   */
+  const runSign = async (req: SigningRequest): Promise<SigningResponse> => {
+    const rid = req.requestId;
+    // Digest ↔ transaction binding + field validation, from the parsed transaction.
+    const bound = checkTransactionBinding(req, opts, now());
+    if (!bound.ok) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: bound.reason, detail: bound.detail };
+    }
+    // Sign the RECOMPUTED digest, never the caller-supplied one. The Buffer view
+    // (not `.buffer.slice`) is passed, so the signer reads exactly these 32 bytes.
+    let signature: AccountTransactionSignature;
+    try {
+      signature = await opts.accountSigner.sign(Buffer.from(bound.digest, 'hex'));
+    } catch (e) {
+      return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'signer_error', detail: (e as Error).message };
+    }
+    return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'signed', signature, reason: null, detail: null };
   };
 
   const doSign = async (req: SigningRequest): Promise<SigningResponse> => {
@@ -446,35 +541,41 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
     }
     // Replay protection: the same requestId must carry the same signable content.
     // A reused requestId with DIFFERENT content is a protocol violation, not a replay.
+    // The reservation below is synchronous — everything up to `replay.set` runs
+    // without yielding — so two concurrent calls cannot both pass this check.
     const fingerprint = requestFingerprint(req);
     const prior = replay.get(rid);
     if (prior) {
       if (prior.fingerprint !== fingerprint) {
         return { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'protocol_error', signature: null, reason: 'request_id_reuse', detail: 'requestId already used with different content' };
       }
-      // Replayed request must return the original result.
-      return { ...prior.response, requestId: rid };
+      if (prior.status === 'done') {
+        // Replayed request must return the original result.
+        return { ...prior.response, requestId: rid };
+      }
+      // Same requestId + same fingerprint while the original is still in flight:
+      // await the original result. Do not sign twice.
+      return prior.promise;
     }
-    // Digest ↔ transaction binding + field validation, from the parsed transaction.
-    const bound = checkTransactionBinding(req, opts, now());
-    if (!bound.ok) {
-      const r: SigningResponse = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: bound.reason, detail: bound.detail };
-      replay.set(rid, { response: r, fingerprint });
-      return r;
-    }
-    // Sign the RECOMPUTED digest, never the caller-supplied one. The Buffer view
-    // (not `.buffer.slice`) is passed, so the signer reads exactly these 32 bytes.
-    let signature: AccountTransactionSignature;
+    // Reserve BEFORE any asynchronous signing begins. The entry is written
+    // synchronously, so any concurrent duplicate sees it immediately.
+    let resolvePending!: (r: SigningResponse) => void;
+    const pending = new Promise<SigningResponse>((resolve) => {
+      resolvePending = resolve;
+    });
+    replay.set(rid, { status: 'pending', fingerprint, promise: pending });
+    let result: SigningResponse;
     try {
-      signature = await opts.accountSigner.sign(Buffer.from(bound.digest, 'hex'));
+      result = await runSign(req);
     } catch (e) {
-      const r: SigningResponse = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'signer_error', detail: (e as Error).message };
-      replay.set(rid, { response: r, fingerprint });
-      return r;
+      // `runSign` is specified never to throw; this is defense-in-depth so a
+      // surprise throw (e.g. a throwing clock) still transitions the entry to
+      // `done` with a deterministic rejection instead of stranding waiters.
+      result = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'rejected', signature: null, reason: 'signer_error', detail: (e as Error).message ?? 'signing failed' };
     }
-    const r: SigningResponse = { protocolVersion: SIGNING_PROTOCOL_VERSION, requestId: rid, outcome: 'signed', signature, reason: null, detail: null };
-    replay.set(rid, { response: r, fingerprint });
-    return r;
+    replay.set(rid, { status: 'done', fingerprint, response: result });
+    resolvePending(result);
+    return result;
   };
 
   let server: ReturnType<typeof createServer> | null = null;

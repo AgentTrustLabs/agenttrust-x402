@@ -1,5 +1,5 @@
 /**
- * Signing-boundary regression tests (Task 10, protocol v2).
+ * Signing-boundary regression tests (Task 10, protocol v2; Task 10.1 findings).
  *
  * Proves the digest ↔ transaction binding at the signing-service boundary:
  * the service recomputes the digest from the transaction it parses and validates
@@ -8,6 +8,19 @@
  * rejected before any signing happens. Also proves the honest `simulated` flag:
  * mock/ledger signers declare simulated, the IPC signer declares real, and
  * FacilitatorCore propagates the signer's flag into its responses.
+ *
+ * Task 10.1 additions:
+ * - §D: TransferWithMemo gets the SAME recipient + amount validation as
+ *   Transfer (both are the SDK-parseable transfer family); unsupported
+ *   transfer-family kinds are rejected at parse time, never silently accepted.
+ * - §E: the fee cap is an ESTIMATE-based policy (Option B): the estimate basis
+ *   is pinned behaviorally, and the code documents that it is not a guaranteed
+ *   maximum actual chain fee.
+ * - §F: requestId replay handling is concurrency-safe — a reservation is made
+ *   synchronously before any async signing, so two simultaneous identical
+ *   requests sign exactly once, a same-ID different-content duplicate is
+ *   rejected, and retries (after success or after failure) are deterministic.
+ *   Concurrency is asserted with a gated signer + invocation counts, not sleeps.
  *
  * In-process fake signer only. No real signing, no key material, no broadcast.
  *
@@ -20,6 +33,8 @@ import { join } from 'node:path';
 import { eq, ok } from './helpers.mjs';
 import { createSigningService, createFakeSigner, IpcAccountSigner, signingDigestOf, validateSigningRequest } from '../services/facilitator/src/signingService.js';
 import type { SigningRequest } from '../services/facilitator/src/signingService.js';
+import type { AccountSigner } from '@concordium/web-sdk';
+import { ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from '../services/facilitator/src/energy.js';
 import { createIpcSponsorSigner } from '../services/facilitator/src/ipcSponsorSigner.js';
 import { createMockSigner, createLedgerSigner } from '../services/facilitator/src/signer.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
@@ -59,15 +74,74 @@ const fixtureTx = (over: Record<string, unknown> = {}) => {
   return { ...tx, ...over };
 };
 
-const makeService = (over: { maxEnergy?: bigint; maxFeeMicroCcd?: bigint } = {}) =>
+const makeService = (over: { maxEnergy?: bigint; maxFeeMicroCcd?: bigint; signer?: AccountSigner } = {}) =>
   createSigningService({
-    accountSigner: createFakeSigner({ signature: 'ff'.repeat(64) }),
+    accountSigner: over.signer ?? createFakeSigner({ signature: 'ff'.repeat(64) }),
     sponsorAddress: SPONSOR,
     network: NETWORK,
     allowedUid: 1001,
     now: () => NOW * 1000,
-    ...over,
+    ...(over.maxEnergy !== undefined ? { maxEnergy: over.maxEnergy } : {}),
+    ...(over.maxFeeMicroCcd !== undefined ? { maxFeeMicroCcd: over.maxFeeMicroCcd } : {}),
   });
+
+/** TransferWithMemo fixture: same sender/sponsor/recipient/amount as `fixtureTx`, plus a memo. */
+const memoTx = (over: Record<string, unknown> = {}) => {
+  const tx = {
+    version: 1,
+    header: {
+      sender: SENDER,
+      nonce: 7,
+      expiry: NOW + 200,
+      executionEnergyAmount: 300,
+      numSignatures: 1,
+      sponsor: { account: SPONSOR, numSignatures: 1 },
+    },
+    // Memo 'hello' as DataBlob JSON: word16 length prefix (0005) + utf8 hex.
+    payload: { type: 'transferWithMemo', toAddress: RECIPIENT, amount: '250000', memo: '000568656c6c6f' },
+    signatures: { sender: { 0: { 0: 'aa'.repeat(64) } }, sponsor: {} },
+  };
+  return { ...tx, ...over };
+};
+
+/**
+ * Controllable signer for concurrency tests: `sign()` blocks on a manual gate
+ * and counts invocations, so a test can assert "exactly one invocation while
+ * both requests are in flight" without any sleep or timing assumption.
+ */
+const makeGateSigner = () => {
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const signer: AccountSigner = {
+    async sign(_digest: ArrayBuffer) {
+      calls++;
+      await gate;
+      return { 0: { 0: 'ff'.repeat(64) } } as never;
+    },
+    getSignatureCount(): bigint {
+      return 1n;
+    },
+  };
+  return { signer, calls: () => calls, release };
+};
+
+/** Signer that always throws, counting invocations (failure-retry test). */
+const makeThrowingSigner = () => {
+  let calls = 0;
+  const signer: AccountSigner = {
+    async sign(_digest: ArrayBuffer) {
+      calls++;
+      throw new Error('boom: signer refused');
+    },
+    getSignatureCount(): bigint {
+      return 1n;
+    },
+  };
+  return { signer, calls: () => calls };
+};
 
 const validReq = (tx: unknown, over: Partial<SigningRequest> = {}): SigningRequest => {
   // The digest defaults to the transaction's recompute — but only when the
@@ -344,6 +418,167 @@ test('23. IPC waitForFinalization reports simulated: false', async () => {
   const res = await ipc.waitForFinalization('a'.repeat(64));
   eq(res.status, 'finalized', 'finalized');
   eq(res.simulated, false, 'waitForFinalization declares real');
+});
+
+// ── D. TransferWithMemo — same validation as Transfer (Task 10.1 P1) ───────
+
+test('24. valid TransferWithMemo signs (digest matches the transaction)', async () => {
+  const svc = makeService();
+  const res = await svc.sign(validReq(memoTx()));
+  check('24. signed', res.outcome === 'signed', res.reason ?? '');
+  eq(res.signature?.[0]?.[0], 'ff'.repeat(64), 'fake sig returned');
+});
+
+test('25. TransferWithMemo recipient equals sponsor → recipient_equals_sponsor', async () => {
+  const svc = makeService();
+  const tx = memoTx();
+  (tx.payload as Record<string, unknown>)['toAddress'] = SPONSOR;
+  const res = await svc.sign(validReq(tx));
+  check('25. rejected', res.outcome === 'rejected', res.reason ?? '');
+  eq(res.reason, 'recipient_equals_sponsor', 'reason');
+});
+
+test('26. TransferWithMemo recipient malformed → rejected (fail closed)', async () => {
+  const svc = makeService();
+  const tx = memoTx();
+  // Digest of the VALID tx: the request itself is well-formed, the transaction is not.
+  const digest = signingDigestOf(tx);
+  (tx.payload as Record<string, unknown>)['toAddress'] = 'not-an-address';
+  const res = await svc.sign(validReq(tx, { digest }));
+  check('26. rejected', res.outcome === 'rejected', res.reason ?? '');
+  // The SDK's parser rejects a malformed address before the service's own
+  // recipient check runs, so the observable reason is invalid_transaction.
+  eq(res.reason, 'invalid_transaction', 'reason');
+});
+
+test('27. TransferWithMemo recipient missing → rejected (fail closed)', async () => {
+  const svc = makeService();
+  const tx = memoTx();
+  const digest = signingDigestOf(tx);
+  delete (tx.payload as Record<string, unknown>)['toAddress'];
+  const res = await svc.sign(validReq(tx, { digest }));
+  check('27. rejected', res.outcome === 'rejected', res.reason ?? '');
+  eq(res.reason, 'invalid_transaction', 'reason');
+});
+
+test('28. TransferWithMemo amount zero → amount_invalid', async () => {
+  const svc = makeService();
+  const tx = memoTx();
+  (tx.payload as Record<string, unknown>)['amount'] = '0';
+  const res = await svc.sign(validReq(tx));
+  check('28. rejected', res.outcome === 'rejected', res.reason ?? '');
+  eq(res.reason, 'amount_invalid', 'reason');
+});
+
+test('29. TransferWithMemo invalid amount → rejected (fail closed)', async () => {
+  const svc = makeService();
+  const tx = memoTx();
+  const digest = signingDigestOf(tx);
+  (tx.payload as Record<string, unknown>)['amount'] = 'abc';
+  const res = await svc.sign(validReq(tx, { digest }));
+  check('29. rejected', res.outcome === 'rejected', res.reason ?? '');
+  // An unparseable amount fails SDK parsing before the service's amount check.
+  eq(res.reason, 'invalid_transaction', 'reason');
+});
+
+test('30. unsupported transfer-family payload → rejected, never silently accepted', async () => {
+  const svc = makeService();
+  // The SDK's Payload.fromJSON has no case for these kinds, so signableFromJSON
+  // throws and the service rejects as invalid_transaction — for BOTH variants.
+  for (const kind of ['transferWithSchedule', 'encryptedAmountTransfer']) {
+    const tx = memoTx();
+    const digest = signingDigestOf(tx);
+    (tx.payload as Record<string, unknown>)['type'] = kind;
+    const res = await svc.sign(validReq(tx, { digest }));
+    check(`30. ${kind} rejected`, res.outcome === 'rejected', res.reason ?? '');
+    eq(res.reason, 'invalid_transaction', 'reason');
+  }
+});
+
+// ── E. fee cap is an ESTIMATE-based policy (Task 10.1 P2, Option B) ─────────
+
+test('31. fee estimate basis is pinned: 635 NRG x 8000 microCCD/NRG = 5,080,000', async () => {
+  // The estimate rate is a fixed, documented ESTIMATE (see energy.ts), not a
+  // guaranteed maximum actual fee. This test pins the estimate arithmetic so a
+  // silent rate change cannot move the policy boundary.
+  eq(ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG, 8000n, 'estimate rate');
+  const atCap = makeService({ maxFeeMicroCcd: 5_080_000n });
+  const r1 = await atCap.sign(validReq(fixtureTx()));
+  check('31a. estimate exactly at cap signs', r1.outcome === 'signed', r1.reason ?? '');
+  const belowCap = makeService({ maxFeeMicroCcd: 5_079_999n });
+  const r2 = await belowCap.sign(validReq(fixtureTx()));
+  check('31b. estimate one microCCD over cap rejects', r2.outcome === 'rejected', r2.reason ?? '');
+  eq(r2.reason, 'fee_exceeds_cap', 'reason');
+  // The rejection detail must say "estimated fee" — the service must never
+  // present the estimate as the actual chain fee.
+  ok((r2.detail ?? '').startsWith('estimated fee '), `detail names the estimate: "${r2.detail ?? ''}"`);
+});
+
+// ── F. requestId replay is concurrency-safe (Task 10.1 P2) ──────────────────
+
+test('32. two simultaneous identical requests → exactly one signer invocation', async () => {
+  const gate = makeGateSigner();
+  const svc = makeService({ signer: gate.signer });
+  const req = validReq(fixtureTx(), { requestId: 'conc-32' });
+  const p1 = svc.sign(req);
+  // Same requestId + same content, fresh object: the fingerprint is content-based.
+  const p2 = svc.sign({ ...req });
+  // Both in flight, signer still gated: exactly one invocation, deterministically.
+  eq(gate.calls(), 1, 'one signer invocation while both in flight');
+  gate.release();
+  const [r1, r2] = await Promise.all([p1, p2]);
+  check('32. both signed', r1.outcome === 'signed' && r2.outcome === 'signed', `${r1.outcome}/${r2.outcome}`);
+  eq(gate.calls(), 1, 'still one invocation after completion');
+  eq(r1.signature?.[0]?.[0], r2.signature?.[0]?.[0], 'same signature');
+});
+
+test('33. two simultaneous requests, same ID but different transaction → one proceeds, one rejected', async () => {
+  const gate = makeGateSigner();
+  const svc = makeService({ signer: gate.signer });
+  const tx1 = fixtureTx();
+  const tx2 = fixtureTx();
+  (tx2.header as Record<string, unknown>)['nonce'] = 8;
+  const p1 = svc.sign(validReq(tx1, { requestId: 'conc-33' }));
+  const p2 = svc.sign(validReq(tx2, { requestId: 'conc-33' }));
+  // The second request sees the in-flight reservation with a different
+  // fingerprint and is rejected immediately — it never waits for the signer.
+  eq(gate.calls(), 1, 'one signer invocation while both in flight');
+  gate.release();
+  const [r1, r2] = await Promise.all([p1, p2]);
+  check('33a. first request signed', r1.outcome === 'signed', r1.reason ?? '');
+  check('33b. second request rejected', r2.outcome === 'protocol_error', r2.reason ?? '');
+  eq(r2.reason, 'request_id_reuse', 'reason');
+  eq(gate.calls(), 1, 'still one invocation after completion');
+});
+
+test('34. retry after completed signing → original result, no second signing', async () => {
+  const gate = makeGateSigner();
+  const svc = makeService({ signer: gate.signer });
+  const req = validReq(fixtureTx(), { requestId: 'conc-34' });
+  const p1 = svc.sign(req);
+  gate.release();
+  const r1 = await p1;
+  check('34a. first request signed', r1.outcome === 'signed', r1.reason ?? '');
+  const r2 = await svc.sign({ ...req });
+  check('34b. retry signed with original result', r2.outcome === 'signed', r2.reason ?? '');
+  eq(r1.signature?.[0]?.[0], r2.signature?.[0]?.[0], 'same signature');
+  eq(gate.calls(), 1, 'no second signer invocation on retry');
+});
+
+test('35. retry after signer failure → deterministic cached rejection, no second signing', async () => {
+  const throwing = makeThrowingSigner();
+  const svc = makeService({ signer: throwing.signer });
+  const req = validReq(fixtureTx(), { requestId: 'conc-35' });
+  const r1 = await svc.sign(req);
+  check('35a. first request rejected', r1.outcome === 'rejected', r1.reason ?? '');
+  eq(r1.reason, 'signer_error', 'reason');
+  const r2 = await svc.sign({ ...req });
+  check('35b. retry returns the same rejection', r2.outcome === 'rejected', r2.reason ?? '');
+  eq(r2.reason, 'signer_error', 'reason');
+  eq(r2.detail, r1.detail, 'same failure detail');
+  eq(throwing.calls(), 1, 'no second signer invocation on retry');
+  // Documented behavior: a failure is cached like any other outcome, so the
+  // retry is deterministic. A fresh signing attempt needs a fresh requestId.
 });
 
 /** Minimal x402 envelope whose signed transaction pays RECIPIENT via `sponsor`. */

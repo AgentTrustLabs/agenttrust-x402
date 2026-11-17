@@ -21,7 +21,7 @@ import { paymentDigest, requirementsKey } from './store.js';
 import { SqliteSettlementRepository, evidenceDigestOf, type SettlementRepository } from './repository.js';
 import type { AuthorizationClient, AuthorizationRequest } from './authorization.js';
 import { LocalAuthorizationClient } from './authorization.js';
-import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST, SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
+import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST, ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
 import { convertV2ToSdkV1 } from './wireConverter.js';
 import type { SenderVerificationResult } from './senderVerifier.js';
 import type { WireConversionPolicy, SdkV1SignableTransaction } from './wireConverter.js';
@@ -87,11 +87,13 @@ export interface CoreOptions {
    */
   maxWireEnergy?: number;
   /**
-   * Maximum sponsor fee (microCCD) accepted per settlement. Defaults to 10_000_000n
-   * (10 CCD). Enforced by the core itself, in the facilitator's own validation path,
-   * against the same conservative fee estimate handed to the signer — so the cap
-   * binds even when the signer omits validateContext (mock signers). Aligned with
-   * FACILITATOR_MAX_FEE_MICROCCD default (see config.ts).
+   * Maximum sponsor fee (microCCD) accepted per settlement, as an ESTIMATE-based
+   * policy (recomputed energy x the fixed estimate rate — see `energy.ts`).
+   * Defaults to 10_000_000n (10 CCD). This is NOT a guaranteed maximum actual
+   * chain fee. Enforced by the core itself, in the facilitator's own validation
+   * path, against the same conservative fee estimate handed to the signer — so
+   * the cap binds even when the signer omits validateContext (mock signers).
+   * Aligned with FACILITATOR_MAX_FEE_MICROCCD default (see config.ts).
    */
   maxFeeMicroCcd?: bigint;
   /**
@@ -491,11 +493,17 @@ export class FacilitatorCore {
     // The signer's own validateContext (real/IPC signers) then re-checks the same
     // estimate against the same configured cap — the two can never disagree.
     if (!resumableHash && derivedEnergy !== null) {
-      // Conservative fee estimate: energy * SPONSOR_FEE_MICROCCD_PER_NRG microCCD/NRG,
-      // slightly above the current measured Testnet rate (7939.534 microCCD/NRG).
-      // Integer-safe (bigint). The signing service re-derives the same estimate from the
-      // transaction it hashes, so the two can never disagree about the fee model.
-      const feeEstimate = derivedEnergy * SPONSOR_FEE_MICROCCD_PER_NRG;
+      // Fee estimate — ESTIMATE-based policy only (see `energy.ts`): energy x the
+      // fixed estimate rate, slightly above the measured Testnet rate
+      // (7939.534 microCCD/NRG). This is NOT a guaranteed maximum actual chain
+      // fee: the actual fee is energy x the chain's EUR-denominated energy price,
+      // which moves with the CCD/EUR exchange rate, and no current rate is
+      // available at this boundary. The cap therefore refuses transactions whose
+      // ESTIMATED fee exceeds it; passing the estimate does not prove the
+      // on-chain fee stays under the cap. Integer-safe (bigint). The signing
+      // service re-derives the same estimate from the transaction it hashes, so
+      // the two can never disagree about the fee model.
+      const feeEstimate = derivedEnergy * ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG;
       if (feeEstimate > this.maxFeeMicroCcd) {
         this.store.markFailed(digest, `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`);
         return this.fail('fee_validation_failed', `fee ${feeEstimate} exceeds cap ${this.maxFeeMicroCcd}`, { digest });
