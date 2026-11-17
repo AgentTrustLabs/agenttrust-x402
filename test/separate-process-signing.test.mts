@@ -92,8 +92,12 @@ const startOwner = async () => {
   // settlement connection stays open, so later seeds still write via
   // its file descriptor.
   chmodSync(ownerDb, 0o400);
+  // detached: the Owner runs as its own process GROUP. A signal to the
+  // direct `npx` child alone never reaches the `sh → tsx → node` chain
+  // beneath it, so the Owner node process survived every stop before this.
   const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/authz-owner.mts`, ownerBase, ownerSock, String(FACILITATOR_UID), String(FACILITATOR_UID)], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
     env: {
       ...process.env,
       AUTHZ_SPONSOR_ADDRESS: SPONSOR,
@@ -161,6 +165,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const startService = async (sock: string, allowedUid: number) => {
   const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-service.mts`, sock, SPONSOR, NETWORK, String(allowedUid)], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true, // own process group — see stopProc below
     // the service verifies Owner certificates and consumes them at
     // the Owner before signing.
     env: {
@@ -183,10 +188,28 @@ const startService = async (sock: string, allowedUid: number) => {
   return { proc, ready };
 };
 
+// Kill a spawned `npx tsx` chain as a whole. The old stop signalled only
+// the direct `npx` child: SIGTERM to it never reaches the `sh → tsx → node`
+// chain beneath it, so the service/Owner node process survived every stop
+// (dozens of leaked processes accumulated across runs). Spawns above use
+// `detached: true`, so the whole chain shares one process group and dies
+// together. Note `proc.killed` only reports that a signal was SENT, never
+// that the process exited — the old `if (!proc.killed)` SIGKILL branch
+// could never fire, so it is gone.
+const killGroup = async (proc: ReturnType<typeof spawn>, signal: NodeJS.Signals = 'SIGTERM') => {
+  const pid = proc.pid;
+  if (pid === undefined) { try { proc.kill(signal); } catch { /* already dead */ } return; }
+  try { process.kill(-pid, signal); } catch { try { proc.kill(signal); } catch { /* already dead */ } }
+};
+const waitExit = (proc: ReturnType<typeof spawn>, ms: number) => new Promise<boolean>((resolve) => {
+  if (proc.exitCode !== null) return resolve(true);
+  const t = setTimeout(() => resolve(false), ms);
+  proc.on('exit', () => { clearTimeout(t); resolve(true); });
+});
 const stopProc = async (proc: ReturnType<typeof spawn>) => {
-  proc.kill('SIGTERM');
-  await new Promise((r) => setTimeout(r, 500));
-  if (!proc.killed) proc.kill('SIGKILL');
+  await killGroup(proc, 'SIGTERM');
+  if (!(await waitExit(proc, 2000))) await killGroup(proc, 'SIGKILL');
+  await waitExit(proc, 2000);
 };
 
 const runClient = (sock: string, expectedUid: number, txFile: string, certFile?: string): Promise<{ ok: boolean; signature?: string; error?: string; pid?: number; uid?: number }> => {
@@ -335,8 +358,11 @@ test('08. stale socket replaced on restart', async () => {
   const { base, sock, txFile, certFile } = mkBase();
   await authorizeFixture(certFile);
   const s1 = await startService(sock, FACILITATOR_UID);
-  // kill without cleanup
-  s1.proc.kill('SIGKILL');
+  // kill without cleanup — the WHOLE service chain dies (group SIGKILL),
+  // which is what this test simulates: a crashed service, not a killed
+  // wrapper with its node child still serving the socket.
+  await killGroup(s1.proc, 'SIGKILL');
+  await waitExit(s1.proc, 2000);
   await sleep(500);
   // socket file may linger; service should handle it
   const s2 = await startService(sock, FACILITATOR_UID);
@@ -378,7 +404,7 @@ test('09. distinct PIDs prove process separation', async () => {
       }
     }
   } finally {
-    if (ownerProc) ownerProc.kill('SIGTERM');
+    if (ownerProc) await stopProc(ownerProc);
     try { ownerRepo.close(); } catch { /* already closed */ }
     rmSync(ownerBase, { recursive: true, force: true });
   }

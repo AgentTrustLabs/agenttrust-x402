@@ -83,6 +83,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type Server, type Socket } from 'node:net';
+import { lstatSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { sign as edSign, generateKeyPairSync } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
@@ -871,6 +872,18 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
 
   return {
     async listen(socketPath: string): Promise<void> {
+      // A crashed predecessor leaves its socket file behind; replace a
+      // STALE socket before listening, the way the Owner launchers do
+      // (scripts/authz-owner.mts): a socket file is removed, anything else
+      // at the path (symlink, regular file) refuses startup instead of
+      // being unlinked. Without this, restart after a crash fails
+      // EADDRINUSE and the stale file keeps refusing every new client.
+      let st: ReturnType<typeof lstatSync> | null = null;
+      try { st = lstatSync(socketPath); } catch { st = null; }
+      if (st !== null) {
+        if (!st.isSocket()) throw new Error(`refusing to listen: ${socketPath} exists and is not a socket`);
+        try { unlinkSync(socketPath); } catch { /* listen below reports */ }
+      }
       return new Promise<void>((resolve, reject) => {
         server = createServer((conn) => {
           let buf = '';

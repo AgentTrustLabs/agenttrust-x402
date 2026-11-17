@@ -542,6 +542,7 @@ if (!hasIpc) {
   const startService = async (allowedUid: number) => {
     const proc = spawn('npx', ['tsx', serviceScript, sock, SPONSOR, NETWORK, String(allowedUid)], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true, // own process group — stop() kills the whole chain
       env: {
         ...process.env,
         SIGNING_OWNER_PUBLIC_KEY: ownerKey.publicKeyHex,
@@ -567,12 +568,16 @@ if (!hasIpc) {
     return proc;
   };
 
-  /** SIGTERM, then wait for a real exit so the next service can bind the same path. */
+  /** SIGTERM the whole process group, then wait for a real exit so the next service can bind the same path.
+   * Signalling only the direct `npx` child left the `sh → tsx → node` chain alive behind it (the
+   * wrapper exits on SIGTERM; the service node does not), leaking one service per E test. Same
+   * group-kill shape as stopOwner above. */
   const stop = async (proc: ReturnType<typeof spawn>) => {
-    if (proc.exitCode === null && proc.signalCode === null) {
+    if (proc.exitCode === null && proc.signalCode === null && proc.pid !== undefined) {
       const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
-      proc.kill('SIGTERM');
-      await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 5_000))]);
+      try { process.kill(-proc.pid, 'SIGTERM'); } catch { proc.kill('SIGTERM'); }
+      const dead = await Promise.race([exited.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 5_000))]);
+      if (!dead) { try { process.kill(-proc.pid, 'SIGKILL'); } catch { proc.kill('SIGKILL'); } }
     }
     // Remove the socket path so the next service binds a fresh one and no client can reach a
     // service left over from an earlier test.
