@@ -60,13 +60,14 @@ const dbDir = join(base, 'ownerdb');
 const sock = join(base, 'authz.sock');
 const logPath = join(dbDir, 'owner.log');
 mkdirSync(dbDir, { mode: 0o700 });
+// Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
+// Write it BEFORE chowning the dir to the Owner: a non-root test user
+// (CI runner) cannot write into a 0700 dir owned by another uid.
+const ownerKeyFile = join(dbDir, 'owner-key.pem');
+writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
 await run('chown', ['-R', `${OWNER_USER}:authclients`, base], 'root');
 await run('chmod', ['770', base], 'root');
 await run('chmod', ['700', dbDir], 'root');
-// Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
-const ownerKeyFile = join(dbDir, 'owner-key.pem');
-writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-await run('chown', [`${OWNER_USER}:authclients`, ownerKeyFile], 'root');
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const peercredBin = join(process.cwd(), 'scripts/authz-peercred');
