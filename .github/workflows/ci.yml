@@ -146,6 +146,15 @@ jobs:
       - name: Typecheck (root)
         run: npm run typecheck
 
+      # The production signing launcher (scripts/sponsor-wallet-service.mts)
+      # is NOT covered by the root tsconfig (src/**/*.ts only), which is how
+      # it shipped without ownerAuthorization. tsconfig.launcher.json checks
+      # it plus its focused regression test; this step makes that check part
+      # of the gate. It runs from the repo root with the installed
+      # dependencies and fails the job on any error (no continue-on-error).
+      - name: Typecheck (launcher)
+        run: npm run typecheck:launcher
+
       - name: Build (root)
         run: npm run build
 
