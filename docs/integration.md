@@ -206,7 +206,7 @@ verification. The provider gate was validated read-only against live Testnet
 verified locally against fake facilitator + fake chain
 (`test/http-x402-resource-server.test.mts`, 19/19).
 
-What remains for a live run (all outside this task's authorization):
+What remains for a live run (all outside the current authorization):
 
 1. **Re-provision the deployment** (services are down after the VM
    replacement) — needs separate operator authorization.

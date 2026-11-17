@@ -49,7 +49,7 @@
  *
  * What this does NOT prove (honest residual, inherent to the architecture):
  * - It does not prove "the Owner authorized THIS transaction" by itself —
- *   that is what the Task 11 authorization certificate + consume step prove
+ *   that is what the  authorization certificate + consume step prove
  *   (see `ownerAuthorization.ts`): the request must carry an Owner-signed
  *   certificate binding the exact transaction, and the service consumes that
  *   authorization at the Owner before signing. What remains assumed, not
@@ -63,7 +63,7 @@
  *   submission, not by this service. (The certificate DOES bind the network
  *   the Owner authorized, so a wrong-network certificate fails the binding.)
  *
- * Protocol v3 (Task 11): every sign request MUST carry an Owner authorization
+ * Protocol v3 : every sign request MUST carry an Owner authorization
  * certificate (`authorization`) and the payment digest it belongs to
  * (`paymentDigest`). The service verifies the certificate's signature against
  * the Owner's configured public key, compares every bound field against the
@@ -125,7 +125,7 @@ export interface SigningRequest {
   sponsor: string; // base58check sponsor address
   network: string; // CAIP-2
   /**
-   * Task 11 — the Owner's authorization certificate for the exact
+   * the Owner's authorization certificate for the exact
    * transaction. REQUIRED. The service verifies its signature against the
    * Owner's configured public key and compares every bound field against
    * the parsed transaction before signing anything. A request without a
@@ -134,7 +134,7 @@ export interface SigningRequest {
    */
   authorization: unknown;
   /**
-   * Task 11 — the AgentTrust payment digest the authorization belongs to.
+   * the AgentTrust payment digest the authorization belongs to.
    * REQUIRED, 64-hex. The service requires the certificate's paymentDigest
    * to equal it, so a certificate issued for one payment cannot authorize
    * a transaction for another.
@@ -191,7 +191,7 @@ export function validateSigningRequest(req: unknown): { ok: true; value: Signing
   if (typeof r.network !== 'string' || r.network.length === 0) {
     return { ok: false, reason: 'invalid_network' };
   }
-  // Task 11 — the authorization certificate is REQUIRED. Its signature and
+  // the authorization certificate is REQUIRED. Its signature and
   // field binding are verified in runSign, after the transaction binding;
   // here the request is rejected early if the evidence is absent entirely.
   if (r.authorization === undefined) {
@@ -232,7 +232,7 @@ export function signingDigestOf(transaction: unknown): string {
  * unsigned header's energy amount). Returns null when the transaction
  * cannot be parsed or carries no energy.
  *
- * Task 11: the facilitator MUST authorize (and fee) on THIS value, not on
+ * the facilitator MUST authorize (and fee) on THIS value, not on
  * `deriveEnergyExposure`'s JSON-length estimate. The two disagree (596 vs
  * 635 NRG for the standard transfer: the estimate counts only the header's
  * signature count and measures the payload as JSON text, while the chain
@@ -364,7 +364,7 @@ type BindingCheck =
       digest: string;
       energy: bigint;
       estimatedFeeMicroCcd: bigint;
-      /** Parsed fields, for the authorization-certificate binding (Task 11). */
+      /** Parsed fields, for the authorization-certificate binding . */
       sender: string;
       sponsor: string;
       /** Transfer-family recipient, or null for non-transfer payloads. */
@@ -513,7 +513,7 @@ function checkTransactionBinding(
 }
 
 /**
- * Task 11 — verify the Owner authorization certificate against the parsed
+ * verify the Owner authorization certificate against the parsed
  * transaction. The signature is checked first (a forged or tampered
  * certificate fails here, before any field is trusted), then every bound
  * field is compared against the transaction the service parsed and the
@@ -664,7 +664,7 @@ export interface SigningServiceOptions {
    */
   maxFeeMicroCcd?: bigint;
   /**
-   * Task 11 — Owner authorization verification. REQUIRED: the service cannot
+   * Owner authorization verification. REQUIRED: the service cannot
    * sign without it, and `createSigningService` throws when it is absent.
    * `publicKey` is the Owner's authorization public key (SPKI DER hex or a
    * KeyObject) — the service verifies certificate signatures against it and
@@ -688,11 +688,11 @@ export interface SigningService {
 
 export function createSigningService(opts: SigningServiceOptions): SigningService {
   const now = opts.now ?? (() => Date.now());
-  // Task 11 — the Owner authorization verifier is REQUIRED. Fail closed at
+  // the Owner authorization verifier is REQUIRED. Fail closed at
   // construction: a service built without it could never verify evidence, so
   // it must not exist. The public key is parsed once, here.
   if (!opts.ownerAuthorization || typeof opts.ownerAuthorization.consume?.consume !== 'function') {
-    throw new Error('createSigningService: ownerAuthorization with a consume client is required (Task 11)');
+    throw new Error('createSigningService: ownerAuthorization with a consume client is required');
   }
   let ownerPublicKey: KeyObject;
   try {
@@ -747,7 +747,7 @@ export function createSigningService(opts: SigningServiceOptions): SigningServic
    * reservation and storage. Always resolves to a `SigningResponse`; it must
    * never throw, so the pending reservation always transitions to `done`.
    *
-   * Order matters (Task 11): a rejected authorization NEVER reaches the
+   * Order matters : a rejected authorization NEVER reaches the
    * signing operation. Certificate verification and field binding run before
    * consumption, and consumption runs before signing. A consume failure
    * discards the request without signing.
@@ -957,14 +957,14 @@ export interface IpcAccountSignerOptions {
    */
   transaction?: unknown;
   /**
-   * Task 11 — the Owner's authorization certificate for the bound transaction.
+   * the Owner's authorization certificate for the bound transaction.
    * REQUIRED to sign: the service verifies it and consumes the authorization
    * before signing. Without it the client refuses client-side, and the
    * service would reject the request as `authorization_missing`.
    */
   authorization?: OwnerAuthorizationCertificate;
   /**
-   * Task 11 — the AgentTrust payment digest the authorization belongs to.
+   * the AgentTrust payment digest the authorization belongs to.
    * REQUIRED to sign (with `authorization`): the service requires the
    * certificate's paymentDigest to equal it.
    */
@@ -1005,7 +1005,7 @@ export class IpcAccountSigner {
     if (this.transaction === undefined) {
       throw new Error('IpcAccountSigner: no transaction bound — refusing to sign a bare digest');
     }
-    // Task 11 — no Owner authorization evidence, no signing. The service
+    // no Owner authorization evidence, no signing. The service
     // would reject the request, but refusing here keeps an unevidenced
     // request from ever crossing the socket.
     if (this.authorization === undefined || this.paymentDigest === undefined) {

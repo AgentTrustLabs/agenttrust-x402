@@ -29,8 +29,8 @@ export const SIMPLE_TRANSFER_BASE_COST = 300n;
  * signing service so both enforce the SAME fee model: the core estimates the fee
  * before signing, the service re-derives it from the transaction it hashed.
  *
- * ESTIMATE ONLY — this is NOT a guaranteed maximum actual chain fee (Option B,
- * Task 10.1). Evidence:
+ * ESTIMATE ONLY — this is NOT a guaranteed maximum actual chain fee (Option B).
+ * Evidence:
  * - The installed SDK exposes no energy-rate / fee-calculation API: there is no
  *   `getEnergyRate` or fee-from-energy helper anywhere in `@concordium/web-sdk`
  *   (only unrelated baker-commission fields). Nothing in the repo can query a

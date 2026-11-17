@@ -1,7 +1,7 @@
 /**
  * Packaging and clean-checkout reliability regressions.
  *
- * Covers the four defects fixed in this task:
+ * Covers the four defects fixed in this change:
  *   F1  npm run build emits dist/
  *   F2  npm test builds first; run.mjs explains the prerequisite
  *   F3  the demo fails visibly when the compiled server is missing

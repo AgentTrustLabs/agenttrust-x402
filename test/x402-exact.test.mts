@@ -467,7 +467,7 @@ test('malformed payloads are rejected without touching the facilitator', async (
   eq(fac.calls.length, 0, 'facilitator never contacted');
 });
 
-// ─── invariants the task calls out explicitly ────────────────────────────
+// ─── invariants the spec calls out explicitly ────────────────────────────
 
 test('failed verification never reaches settlement', async () => {
   for (const mode of ['invalid', 'throw'] as const) {

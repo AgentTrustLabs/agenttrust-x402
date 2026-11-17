@@ -1,7 +1,7 @@
 /**
  * Package metadata and publication-readiness regressions.
  *
- * Guards the properties this task fixed, so packaging cannot silently drift back:
+ * Guards the properties this change fixed, so packaging cannot silently drift back:
  *
  *   F4  every declared script runs (no script points at a missing file)
  *   F5  no entry point (`exports`/`main`/`module`/`types`/`bin`) points at a

@@ -89,7 +89,7 @@ withFileLock(${JSON.stringify(file)}, { timeoutMs: 2000 }, () => {
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
 
-// ─── the bug the task describes ──────────────────────────────────────────
+// ─── the bug this change describes ──────────────────────────────────────────
 
 test('A1. an active writer is protected beyond the stale threshold', async () => {
   const { file } = tmp();

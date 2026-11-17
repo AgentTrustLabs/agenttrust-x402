@@ -4,7 +4,7 @@
  * Proves the service contract: validation, SO_PEERCRED, replay, wrong sponsor/network,
  * signer failure, and that only valid requests reach the fake signer.
  *
- * Protocol v3 (since Task 11): every request carries the signable transaction and the service
+ * Protocol v3 (since ): every request carries the signable transaction and the service
  * recomputes the digest from it — a request whose digest does not match its
  * transaction is rejected before any signing happens — and an Owner
  * authorization certificate for the exact transaction, which the service
@@ -50,7 +50,7 @@ const test = (name: string, fn: () => Promise<void> | void) => tests.push([name,
 
 const makeService = (over: { fakeSig?: string; behaviour?: 'sign-ok' | 'sign-throws' | 'sign-hangs' } = {}) => {
   const signer = createFakeSigner({ signature: over.fakeSig ?? 'ff'.repeat(64), behaviour: over.behaviour });
-  // Task 11: the service cannot sign without Owner authorization evidence.
+  // the service cannot sign without Owner authorization evidence.
   return createSigningService({
     accountSigner: signer,
     sponsorAddress: SPONSOR,
@@ -66,7 +66,7 @@ const ownerKey = makeTestOwnerKey();
 
 const validReq = (over: Partial<SigningRequest> = {}): SigningRequest => {
   const { authorization, paymentDigest, ...rest } = over;
-  // Task 11 (protocol v3): every request carries an Owner authorization
+  // Protocol v3: every request carries an Owner authorization
   // certificate for the exact fixture transaction.
   const cert = authorization ?? issueTestCertificate(ownerKey.privateKey, certFieldsForTx(fixtureTx, {
     paymentDigest: paymentDigest ?? PAYMENT_DIGEST,

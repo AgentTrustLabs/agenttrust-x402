@@ -9,6 +9,7 @@
  */
 
 import { eq, ok } from './helpers.mjs';
+import { requireFacilitatorProcess } from './os-identity.mts';
 import { createSigningService, createFakeSigner, IpcAccountSigner, signingDigestOf } from '../services/facilitator/src/signingService.js';
 import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx, fakeConsumedClient } from './owner-authz-helper.mjs';
 import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
@@ -65,15 +66,7 @@ const check = (name: string, pass: boolean, detail = '') => {
 const tests: Array<[string, () => Promise<void> | void]> = [];
 const test = (name: string, fn: () => Promise<void> | void) => tests.push([name, fn]);
 
-const FACILITATOR_UID = 1001;
-const FACILITATOR_GID = 1002;
-
-const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
-const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
-if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`ipc-signing: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
-  process.exit(0);
-}
+const FACILITATOR_UID = requireFacilitatorProcess('ipc-signing');
 
 const base = mkdtempSync(join(tmpdir(), 't43ipc-'));
 const dbDir = join(base, 'svc');

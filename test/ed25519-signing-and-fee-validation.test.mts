@@ -11,7 +11,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Socket } from 'node:net';
 import { generateKeyPairSync, randomUUID, sign as edSign } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, ok } from './helpers.mjs';
@@ -21,7 +21,7 @@ import { IpcAccountSigner, probeSigningService, signingDigestOf } from '../servi
 import { digestHexToArrayBuffer } from '../src/ipc/digest.js';
 import { createSdkSponsorSigner, validateSponsorContext } from '../services/facilitator/src/sdkSponsorSigner.js';
 import type { OwnerAuthorizationCertificate } from '../services/facilitator/src/ownerAuthorization.js';
-import { certFieldsForTx, issueTestCertificate, makeTestOwner, makeTestOwnerKey, recomputedEnergyOf } from './owner-authz-helper.mts';
+import { certFieldsForTx, issueTestCertificate, makeTestOwner, makeTestOwnerKey, ownerRepoFor, recomputedEnergyOf } from './owner-authz-helper.mts';
 import { GrpcAccountInfoProvider } from '../services/facilitator/src/grpcAccountInfoProvider.js';
 import { makeFakeAccountInfo } from '../services/facilitator/src/senderVerifier.js';
 import { startFacilitator } from '../services/facilitator/src/server.js';
@@ -163,7 +163,7 @@ test('A03. the private seed never appears in any IPC request', async () => {
     });
   });
   try {
-    // Task 11 — the client refuses to send a request without authorization
+    // the client refuses to send a request without authorization
     // evidence, so carry a directly-issued test certificate (no Owner
     // process: the raw server never consumes it). The certificate carries
     // no key material.
@@ -257,7 +257,7 @@ test('B05. the pipeline invokes validateContext and fails closed on a fee breach
     now: () => NOW * 1000,
     authorization: new LocalAuthorizationClient({
       policy: { network: NETWORK, sponsor: SPONSOR, maxEnergy: 100_000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 't48' },
-      repository: repo,
+      repository: ownerRepoFor(join(db, 'f.db'), repo, () => NOW * 1000),
       now: () => NOW * 1000,
     }),
   });
@@ -301,7 +301,7 @@ test('B06. the pipeline does not call validateContext when the signer omits it',
     now: () => NOW * 1000,
     authorization: new LocalAuthorizationClient({
       policy: { network: NETWORK, sponsor: SPONSOR, maxEnergy: 100_000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 't48' },
-      repository: repo,
+      repository: ownerRepoFor(join(db, 'f.db'), repo, () => NOW * 1000),
       now: () => NOW * 1000,
     }),
   });
@@ -416,7 +416,7 @@ if (!hasIpc) {
   const sock = join(base, 'sign.sock');
   const serviceScript = `${process.cwd()}/scripts/signing-service.mts`;
 
-  // ── Task 11 Owner (suite-scoped) ─────────────────────────────────────────
+  // ──  Owner (suite-scoped) ─────────────────────────────────────────
   // The signing service consumes every authorization at a REAL Owner process
   // before signing, so the E tests run one. Certificates are issued
   // in-process by `testOwner`'s LocalAuthorizationClient against the SAME
@@ -447,10 +447,20 @@ if (!hasIpc) {
     if (ownerProc !== null) return Promise.resolve();
     if (ownerStarting !== null) return ownerStarting;
     ownerStarting = (async () => {
-      const ownerDir = join(base, 'e-owner');
-      mkdirSync(ownerDir, { mode: 0o700 });
+      // the Owner process serves consume from the SAME
+      // Owner-private database the in-process testOwner writes
+      // certificates to, so the Owner directory IS testOwner.ownerDir
+      // and AUTHZ_DB_FILE is testOwner.ownerDbPath. The settlement DB
+      // (testOwner.dbPath) lives in the parent dir — a different
+      // directory, as the launcher requires.
+      const ownerDir = testOwner.ownerDir;
       const ownerKeyFile = join(ownerDir, 'owner-key.pem');
       writeFileSync(ownerKeyFile, ownerKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+      // Same-UID harness: present the settlement file read-only at Owner
+      // startup so the launcher's writable guard passes. testOwner's
+      // settlement connection stays open, so later seeds write via its
+      // file descriptor.
+      chmodSync(testOwner.dbPath, 0o400);
       const proc = spawn('npx', ['tsx', ownerScript, ownerDir, ownerSock, String(FACILITATOR_UID), String(FACILITATOR_UID)], {
         env: {
           ...process.env,
@@ -460,9 +470,13 @@ if (!hasIpc) {
           AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
           AUTHZ_ALLOWED_ASSETS: 'CCD',
           AUTHZ_POLICY_VERSION: 't48',
-          AUTHZ_DB_FILE: testOwner.dbPath,
-          AUTHZ_SEED_FIXTURES: '0',
+          AUTHZ_DB_FILE: testOwner.ownerDbPath,
+          AUTHZ_SETTLEMENT_DB_FILE: testOwner.dbPath,
           AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+          // Same-UID harness: the Owner runs as the test process here, so
+          // the launcher's default distinct-UID refusal is opted out
+          // explicitly (test-only, never set in production).
+          AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
@@ -513,7 +527,7 @@ if (!hasIpc) {
   };
 
   const startService = async (socketPath: string, allowedUid: number, key?: TestKey) => {
-    // Task 11 — the service refuses to start without the Owner verifier, so
+    // the service refuses to start without the Owner verifier, so
     // the Owner must be up (and its public key known) before the service.
     await ensureOwner();
     const env = { ...process.env };
@@ -573,7 +587,7 @@ if (!hasIpc) {
         maxFeeMicroCcd: 10_000_000n,
         timeoutMs: 5_000,
       });
-      // Task 11 — one fresh single-use authorization for this exact transaction.
+      // one fresh single-use authorization for this exact transaction.
       const auth = await authorizeOnce();
       const signed = (await signer.addSponsorSignature(sponsoredTx(1), {
         authorization: auth.certificate,
@@ -632,7 +646,7 @@ if (!hasIpc) {
     const { sock: esock, rm: erm } = tmpsock('e04');
     const proc = await startService(esock, FACILITATOR_UID, key);
     try {
-      // Task 11 — the authorization is bound to the CORRECT sponsor/network,
+      // the authorization is bound to the CORRECT sponsor/network,
       // so both wrong-identity requests are refused by the service before
       // consumption; the certificate is never spent by either rejection.
       const auth = await authorizeOnce();
@@ -666,7 +680,7 @@ if (!hasIpc) {
     try {
       let msg = '';
       try {
-        // Task 11 — the client must carry authorization evidence to reach the
+        // the client must carry authorization evidence to reach the
         // peer check at all; without it the refusal would be client-side.
         const auth = await authorizeOnce();
         await createIpcSponsorSigner({
@@ -683,7 +697,7 @@ if (!hasIpc) {
 
   test('E06. timeout, crash, and connection failure all fail closed', async () => {
     const key = generateTestKey();
-    // Task 11 — the raw-socket cases need authorization evidence to get past
+    // the raw-socket cases need authorization evidence to get past
     // the client-side refusal; the evidence is never consumed here (no real
     // service), so one authorization covers all four sub-cases.
     const auth = await authorizeOnce();
@@ -741,7 +755,7 @@ if (!hasIpc) {
       });
       try {
         const tx = sponsoredTx(1);
-        // Task 11 — the request must carry the Owner authorization evidence.
+        // the request must carry the Owner authorization evidence.
         const auth = await authorizeOnce(tx);
         await new IpcAccountSigner({
           socketPath: rsock, expectedUid: FACILITATOR_UID, sponsorAddress: SPONSOR,
@@ -775,7 +789,7 @@ if (!hasIpc) {
     const proc = await startService(esock, FACILITATOR_UID, key);
     try {
       // Sign several times; the key must never appear in any response or log line.
-      // Task 11 — each sign consumes one authorization, so each call carries a
+      // each sign consumes one authorization, so each call carries a
       // fresh single-use certificate for the same transaction.
       const signer = createIpcSponsorSigner({
         sponsorAddress: SPONSOR, network: NETWORK, socketPath: esock,

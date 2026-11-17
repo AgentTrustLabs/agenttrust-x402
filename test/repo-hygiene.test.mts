@@ -1,7 +1,7 @@
 /**
  * Repository hygiene: ignore rules and evidence integrity.
  *
- * Guards the two properties this task is responsible for, so they cannot silently
+ * Guards the two properties this change is responsible for, so they cannot silently
  * regress:
  *
  *   1. `.gitignore` excludes dependencies, build output, local secrets and runtime
@@ -107,7 +107,7 @@ test('05. source, tests, docs, lockfile and evidence remain addable', () => {
     'test/mcp-interface.test.mts',
     'test/fixtures/cis8004-module-schema.bin',
     'docs/integration.md',
-    'docs/evidence/task02/agent-card.v2.json',
+    'docs/evidence/agent-card/agent-card.v2.json',
     'docs/evidence/commerce-audit/audit-trail.jsonl',
     'evidence/healthz.json',
     'sign/tx-manifest.json',
@@ -150,7 +150,7 @@ test('06. a real-tree staging dry run stages no generated artifact', () => {
     eq(list.filter(f => f.startsWith('dist/')).length, 0, 'no dist staged');
 
     // Evidence and the labelled placeholder survive.
-    ok(list.some(f => f.startsWith('docs/evidence/task02/')), 'task02 evidence staged');
+    ok(list.some(f => f.startsWith('docs/evidence/agent-card/')), 'agent-card evidence staged');
     ok(list.some(f => f === 'evidence/healthz.json'), 'root evidence staged');
     ok(list.includes('sign/tx-manifest.json'), 'the labelled placeholder is still tracked');
     ok(list.includes('package-lock.json'), 'lockfile staged');
@@ -182,13 +182,13 @@ test('07. every committed evidence file is still on disk and parses where JSON',
       }
     }
   }
-  // 82 files at the time of this task: 72 under docs/evidence, 10 under evidence/.
+  // 82 files at the time of this change: 72 under docs/evidence, 10 under evidence/.
   // The floor guards against accidental deletion, not against growth.
   ok(count >= 82, `evidence inventory is intact (${count} files)`);
 });
 
 test('08. the registry evidence a test reads is present', () => {
-  for (const f of ['docs/evidence/task02/registration-manifest.json', 'docs/evidence/task02/repin-manifest.v2.json']) {
+  for (const f of ['docs/evidence/agent-card/registration-manifest.json', 'docs/evidence/agent-card/repin-manifest.v2.json']) {
     ok(existsSync(join(ROOT, f)), `${f} exists`);
   }
 });

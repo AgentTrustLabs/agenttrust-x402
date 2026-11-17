@@ -217,7 +217,7 @@ Verified 2026-11-11 ~09:17 WIB. All values below are public on-chain data.
 | DB consistency | 1 payment / 1 settlement / 1 approved sign event |
 | Idempotent replay | same hash, `idempotentReplay: true` |
 
-Earlier controlled transactions (TASK65, TASK70) are documented in
+Earlier controlled transactions (the sender-wallet verification and testnet demo work) are documented in
 [`docs/testnet-demo.md`](testnet-demo.md); this payment is the first one settled through
 the production three-service deployment.
 
@@ -246,7 +246,7 @@ the production three-service deployment.
 ## Links
 
 - Runbook: [`docs/demo-runbook.md`](demo-runbook.md)
-- Testnet demo (mock commerce + TASK65/70 evidence): [`docs/testnet-demo.md`](testnet-demo.md)
+- Testnet demo (mock commerce + sender-wallet/testnet-demo evidence): [`docs/testnet-demo.md`](testnet-demo.md)
 - Authorization Owner: [`docs/authorization-owner.md`](authorization-owner.md)
 - Configuration: [`docs/configuration.md`](configuration.md)
 - Architecture: [`docs/architecture.md`](architecture.md)

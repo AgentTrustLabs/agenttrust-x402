@@ -1,5 +1,5 @@
 /**
- * Owner-authorization-binding regression tests (Task 11).
+ * Owner-authorization-binding regression tests .
  *
  * Proves the transaction-specific Owner authorization boundary:
  * - A valid Owner approval for the exact transaction signs, and the
@@ -32,6 +32,7 @@ import { createSigningService, signingDigestOf } from '../services/facilitator/s
 import type { SigningRequest } from '../services/facilitator/src/signingService.js';
 import type { AccountSigner } from '@concordium/web-sdk';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { RepositorySettlementStateReader, SqliteOwnerAuthorizationRepository } from '../services/facilitator/src/ownerAuthorizationRepository.js';
 import { repositoryConsumeClient, makeTestOwner, makeTestOwnerKey, issueTestCertificate, certFieldsForTx, recomputedEnergyOf } from './owner-authz-helper.mjs';
 import type { TestOwner } from './owner-authz-helper.mjs';
 import type { OwnerAuthorizationCertificate } from '../services/facilitator/src/ownerAuthorization.js';
@@ -169,7 +170,7 @@ test('01. valid Owner approval for the exact transaction signs and is consumed o
     const res = await s.svc.sign(signReq(tx, cert));
     check('01a. signed', res.outcome === 'signed', res.reason ?? '');
     eq(s.counting.calls(), 1, 'signer invoked exactly once');
-    const row = s.owner.repo.authorizationById(cert.authorizationId);
+    const row = s.owner.ownerRepo.authorizationById(cert.authorizationId);
     ok(row !== undefined && row.consumed_at !== null, 'approval is consumed in the durable record');
   } finally {
     s.close();
@@ -303,7 +304,7 @@ test('08. revoked authorization is rejected before signing', async () => {
   try {
     const tx = fixtureTx();
     const cert = await s.authorizeTx(tx);
-    const revoked = s.owner.repo.revokeAuthorization(cert.authorizationId);
+    const revoked = s.owner.ownerRepo.revokeAuthorization(cert.authorizationId);
     ok(revoked.ok, 'revoke succeeds');
     const res = await s.svc.sign(signReq(tx, cert));
     check('08a. rejected', res.outcome === 'rejected', res.reason ?? '');
@@ -390,13 +391,20 @@ test('12. database failure fails closed; reopening the database recovers', async
     const cert = await s.authorizeTx(tx);
     // The Owner database dies (closed repo): consumption throws, the
     // service fails closed as owner_unavailable, the signer never runs.
-    s.owner.repo.close();
+    s.owner.ownerRepo.close();
     const r1 = await s.svc.sign(signReq(tx, cert));
     check('12a. closed database fails closed', r1.outcome === 'owner_unavailable', `${r1.outcome}/${r1.reason ?? '-'}`);
     eq(s.counting.calls(), 0, 'signer never invoked while the database is down');
-    // Recovery: reopen the SAME database file. The approval row survived
-    // (it was never consumed), so the same certificate now signs.
+    // Recovery: reopen the SAME Owner-private database file. The
+    // approval row survived (it was never consumed), so the same
+    // certificate now signs. the consume client reads the
+    // Owner repository, with the settlement repo only as a state reader.
     const repo2 = new SqliteSettlementRepository(s.owner.dbPath, { now: () => NOW * 1000 });
+    const ownerRepo2 = new SqliteOwnerAuthorizationRepository(
+      s.owner.ownerDbPath,
+      new RepositorySettlementStateReader(repo2),
+      { now: () => NOW * 1000 },
+    );
     try {
       const counting2 = makeCountingSigner();
       const svc2 = createSigningService({
@@ -407,13 +415,14 @@ test('12. database failure fails closed; reopening the database recovers', async
         now: () => NOW * 1000,
         ownerAuthorization: {
           publicKey: s.owner.authorization.authorizationPublicKeyHex(),
-          consume: repositoryConsumeClient(repo2),
+          consume: repositoryConsumeClient(ownerRepo2),
         },
       });
       const r2 = await svc2.sign(signReq(tx, cert));
       check('12b. reopened database signs', r2.outcome === 'signed', r2.reason ?? '');
       eq(counting2.calls(), 1, 'recovered service signed exactly once');
     } finally {
+      try { ownerRepo2.close(); } catch { /* already closed */ }
       repo2.close();
     }
   } finally {

@@ -1,6 +1,9 @@
 /**
- * Test helper: migrate the owner's sign_events table.
+ * Test helper: migrate the owner's authorizations table.
  * Used to force an audit-write failure. Runs as the owner user only.
+ *
+ * the table is `authorizations` in the Owner-private database;
+ * the settlement database holds no authorization table to rename.
  *
  * Run: npx tsx scripts/ipc-migrate.mts <db-path> <rename|restore>
  */
@@ -15,8 +18,8 @@ if (!dbPath || !action) {
 }
 const db = new DatabaseSync(dbPath);
 try {
-  if (action === 'rename') db.exec('ALTER TABLE sign_events RENAME TO sign_events_bak');
-  else db.exec('ALTER TABLE sign_events_bak RENAME TO sign_events');
+  if (action === 'rename') db.exec('ALTER TABLE authorizations RENAME TO authorizations_bak');
+  else db.exec('ALTER TABLE authorizations_bak RENAME TO authorizations');
   console.log(`migration ${action} ok`);
 } catch (e) {
   console.error(`migration ${action} failed: ${(e as Error).message}`);

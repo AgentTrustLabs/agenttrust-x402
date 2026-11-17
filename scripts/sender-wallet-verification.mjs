@@ -7,8 +7,8 @@ const SPONSOR = "3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK";
 const TESTNET_GENESIS = "4221332d34e1694168c2a0c0b3fd0f273809612cb13d000d5c2e00e85f50f796"; // genesis hash
 const CAIP2 = "ccd:4221332d34e1694168c2a0c0b3fd0f27";
 
-const path = process.env.TASK65_SENDER_WALLET_FILE;
-if (!path) { console.error("BLOCKED: TASK65_SENDER_WALLET_FILE unset"); process.exit(2); }
+const path = process.env.SENDER_WALLET_FILE;
+if (!path) { console.error("BLOCKED: SENDER_WALLET_FILE unset"); process.exit(2); }
 
 // File metadata only (no contents printed).
 const st = statSync(path);

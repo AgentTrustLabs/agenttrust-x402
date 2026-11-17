@@ -14,6 +14,7 @@ import { eq, ok } from './helpers.mjs';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -58,7 +59,7 @@ const request = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest
   amount: '250000',
   expiry: NOW + 200,
   energy: 700n,
-  // Task 11 — the authorization binds the exact transaction and fee policy.
+  // the authorization binds the exact transaction and fee policy.
   transactionDigest: 'cd'.repeat(32),
   transactionType: 'transfer',
   maxFeeMicroCcd: '10000000',
@@ -75,7 +76,8 @@ test('01. a matching durable approval recovers as approved', async () => {
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified('a'.repeat(64), 'k');
   repo.claim('a'.repeat(64), 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
 
   const first = await client.authorize(request());
   check('first authorize approved', first.outcome === 'approved', first.outcome);
@@ -91,7 +93,8 @@ test('01. a matching durable approval recovers as approved', async () => {
 test('02. no durable decision recovers as unknown', async () => {
   const { dir, db, rm } = mk();
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   const recovered = await client.recover(request());
   check('recovery returns unknown', recovered.outcome === 'unknown', recovered.outcome);
   eq(recovered.reason, 'no_durable_decision', 'reason');
@@ -112,7 +115,8 @@ for (const [field, value] of [
     const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
     repo.noteVerified('a'.repeat(64), 'k');
     repo.claim('a'.repeat(64), 'k');
-    const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+    const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
     await client.authorize(request());
     const recovered = await client.recover(request({ [field]: value } as Partial<AuthorizationRequest>));
     ok(recovered.outcome !== 'approved', `${field} mismatch → ${recovered.outcome}`);
@@ -126,7 +130,8 @@ test('03b. recovery with mismatched energy is not approved', async () => {
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified('a'.repeat(64), 'k');
   repo.claim('a'.repeat(64), 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   await client.authorize(request());
   const recovered = await client.recover(request({ energy: 999n }));
   ok(recovered.outcome !== 'approved', `energy mismatch → ${recovered.outcome}`);
@@ -141,7 +146,8 @@ test('04. recovery for a different digest does not report the first payment appr
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified('a'.repeat(64), 'k');
   repo.claim('a'.repeat(64), 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   await client.authorize(request());
   const recovered = await client.recover(request({ paymentDigest: 'b'.repeat(64) }));
   check('different digest → unknown', recovered.outcome === 'unknown', `${recovered.outcome}/${recovered.reason}`);
@@ -156,7 +162,8 @@ test('05. a durable rejection recovers as rejected', async () => {
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified('a'.repeat(64), 'k');
   repo.claim('a'.repeat(64), 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   // Force a policy rejection (energy over cap).
   const denied = await client.authorize(request({ energy: 99_999n }));
   check('authorization rejected', denied.outcome === 'rejected', denied.outcome);
@@ -174,13 +181,14 @@ test('06. recovery never creates, modifies, or deletes a record', async () => {
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified('a'.repeat(64), 'k');
   repo.claim('a'.repeat(64), 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
   await client.authorize(request());
-  const before = repo.signEvents('a'.repeat(64)).length;
+  const before = ownerRepo.signEvents('a'.repeat(64)).length;
 
   await client.recover(request());
   await client.recover(request());
-  const after = repo.signEvents('a'.repeat(64)).length;
+  const after = ownerRepo.signEvents('a'.repeat(64)).length;
 
   eq(after, before, 'no new records after repeated recovery');
   eq(after, 1, 'exactly one authorization record');
@@ -204,12 +212,13 @@ test('07. settlement recovers exactly once when a prior approval matches', async
     getTokenDecimals: (t: string) => inner.getTokenDecimals(t),
   };
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
   const core = new FacilitatorCore({
     network: CAIP2,
     signer,
     dbPath: db,
     now: () => NOW * 1000,
-    authorization: new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 }),
+    authorization: new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 }),
   });
 
   const payload = {
@@ -248,7 +257,7 @@ test('08. a caller claiming approval does not drive recovery', async () => {
   // unknown for a payment that has no record, even though a caller would like it approved.
   const { dir, db, rm } = mk();
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const local = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
+  const local = new LocalAuthorizationClient({ policy, repository: ownerRepoFor(db, repo, () => NOW * 1000), now: () => NOW * 1000 });
   const recovered = await local.recover(request({ paymentDigest: 'c'.repeat(64) }));
   ok(recovered.outcome !== 'approved', `no durable record → ${recovered.outcome}`);
   eq(recovered.reason, 'no_durable_decision', 'reason is no_durable_decision');

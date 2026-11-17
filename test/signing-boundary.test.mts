@@ -1,5 +1,5 @@
 /**
- * Signing-boundary regression tests (Task 10, protocol v3 since Task 11; Task 10.1 findings).
+ * Signing-boundary regression tests (protocol v3).
  *
  * Proves the digest ↔ transaction binding at the signing-service boundary:
  * the service recomputes the digest from the transaction it parses and validates
@@ -9,7 +9,7 @@
  * mock/ledger signers declare simulated, the IPC signer declares real, and
  * FacilitatorCore propagates the signer's flag into its responses.
  *
- * Task 10.1 additions:
+ * Additional coverage:
  * - §D: TransferWithMemo gets the SAME recipient + amount validation as
  *   Transfer (both are the SDK-parseable transfer family); unsupported
  *   transfer-family kinds are rejected at parse time, never silently accepted.
@@ -84,7 +84,7 @@ const makeService = (over: { maxEnergy?: bigint; maxFeeMicroCcd?: bigint; signer
     network: NETWORK,
     allowedUid: 1001,
     now: () => NOW * 1000,
-    // Task 11: the service cannot sign without Owner authorization evidence.
+    // the service cannot sign without Owner authorization evidence.
     // Tests carry a certificate issued by an ephemeral test keypair, and a
     // consume client that always reports 'consumed' — the consume semantics
     // themselves are covered by the owner-authorization-binding suite.
@@ -161,7 +161,7 @@ const validReq = (tx: unknown, over: Partial<SigningRequest> = {}): SigningReque
   // caller does not supply one. A test that mutates the transaction AFTER
   // computing a valid digest must not recompute it here (it would throw).
   const { digest, authorization, paymentDigest, ...rest } = over;
-  // Task 11 (protocol v3): every request carries an Owner authorization
+  // Protocol v3: every request carries an Owner authorization
   // certificate for the exact transaction it asks to sign. The certificate
   // is built from the transaction AS GIVEN, so a test that mutates the
   // transaction (bad recipient, zero amount) still carries a matching
@@ -399,7 +399,7 @@ test('18. client refuses a digest that does not match the bound transaction', as
     network: NETWORK,
     timeoutMs: 300,
     transaction: tx,
-    // Task 11: the authorization guard runs before the digest check, so a
+    // the authorization guard runs before the digest check, so a
     // valid certificate is needed to reach the digest binding.
     authorization: issueTestCertificate(ownerKey.privateKey, certFieldsForTx(tx, {
       paymentDigest: PAYMENT_DIGEST,
@@ -419,7 +419,7 @@ test('18. client refuses a digest that does not match the bound transaction', as
   ok(/does not match the bound transaction/i.test(msg), `refused: "${msg}"`);
 });
 
-test('18b. client refuses without Owner authorization (Task 11)', async () => {
+test('18b. client refuses without Owner authorization ', async () => {
   const client = new IpcAccountSigner({
     socketPath: '/tmp/does-not-exist.sock',
     expectedUid: 1001,
@@ -505,7 +505,7 @@ test('23. IPC waitForFinalization reports simulated: false', async () => {
   eq(res.simulated, false, 'waitForFinalization declares real');
 });
 
-// ── D. TransferWithMemo — same validation as Transfer (Task 10.1 P1) ───────
+// ── D. TransferWithMemo — same validation as Transfer  ───────
 
 test('24. valid TransferWithMemo signs (digest matches the transaction)', async () => {
   const svc = makeService();
@@ -580,7 +580,7 @@ test('30. unsupported transfer-family payload → rejected, never silently accep
   }
 });
 
-// ── E. fee cap is an ESTIMATE-based policy (Task 10.1 P2, Option B) ─────────
+// ── E. fee cap is an ESTIMATE-based policy  ─────────
 
 test('31. fee estimate basis is pinned: 635 NRG x 8000 microCCD/NRG = 5,080,000', async () => {
   // The estimate rate is a fixed, documented ESTIMATE (see energy.ts), not a
@@ -599,7 +599,7 @@ test('31. fee estimate basis is pinned: 635 NRG x 8000 microCCD/NRG = 5,080,000'
   ok((r2.detail ?? '').startsWith('estimated fee '), `detail names the estimate: "${r2.detail ?? ''}"`);
 });
 
-// ── F. requestId replay is concurrency-safe (Task 10.1 P2) ──────────────────
+// ── F. requestId replay is concurrency-safe  ──────────────────
 
 test('32. two simultaneous identical requests → exactly one signer invocation', async () => {
   const gate = makeGateSigner();
@@ -608,7 +608,7 @@ test('32. two simultaneous identical requests → exactly one signer invocation'
   const p1 = svc.sign(req);
   // Same requestId + same content, fresh object: the fingerprint is content-based.
   const p2 = svc.sign({ ...req });
-  // Task 11: the consume step awaits the Owner before signing, so the signer
+  // the consume step awaits the Owner before signing, so the signer
   // invocation happens one microtask hop after the calls — flush the queue
   // before asserting. The gate is never released here, so no signer call
   // can complete; the assertion stays deterministic.
@@ -631,7 +631,7 @@ test('33. two simultaneous requests, same ID but different transaction → one p
   (tx2.header as Record<string, unknown>)['nonce'] = 8;
   const p1 = svc.sign(validReq(tx1, { requestId: 'conc-33' }));
   const p2 = svc.sign(validReq(tx2, { requestId: 'conc-33' }));
-  // Task 11: the consume step awaits the Owner before signing — flush the
+  // the consume step awaits the Owner before signing — flush the
   // microtask queue before asserting (see test 32).
   await Promise.resolve();
   await Promise.resolve();

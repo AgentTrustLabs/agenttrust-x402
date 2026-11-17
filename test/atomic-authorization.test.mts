@@ -9,6 +9,7 @@
 
 import { MockNarrowSponsorSigner } from '../services/facilitator/src/narrowSponsorMock.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -42,8 +43,10 @@ function mk() {
   const dir = mkdtempSync(join(tmpdir(), 't342-'));
   return { dir, db: join(dir, 'f.db'), rm: () => rmSync(dir, { recursive: true, force: true }) };
 }
-const signerAt = (db: string) =>
-  new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+const signerAt = (db: string) => {
+  const repo = new SqliteSettlementRepository(db);
+  return new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepoFor(db, repo, () => NOW_MS), now: () => NOW_MS });
+};
 
 /** Drive a payment to a given durable state. */
 function drive(db: string, digest: string, target: 'created' | 'prepared' | 'submitting' | 'outcome_unknown' | 'observed' | 'finalized' | 'rejected' | 'recovery_unavailable') {
@@ -153,7 +156,8 @@ test('12. concurrent authorization + prepare() from separate processes → no st
   writeFileSync(worker, `
 import { MockNarrowSponsorSigner } from ${JSON.stringify(join(import.meta.dirname, '../services/facilitator/src/narrowSponsorMock.ts'))};
 import { SqliteSettlementRepository } from ${JSON.stringify(join(import.meta.dirname, '../services/facilitator/src/repository.ts'))};
-const s = new MockNarrowSponsorSigner({ policy: { network: '${CAIP2}', sponsor: '${SPONSOR}', maxEnergy: 10000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 'v342' }, repository: new SqliteSettlementRepository(${JSON.stringify(db)}), now: () => ${NOW_MS} });
+import { ownerRepoFor } from ${JSON.stringify(join(import.meta.dirname, './owner-authz-helper.mts'))};
+const s = new MockNarrowSponsorSigner({ policy: { network: '${CAIP2}', sponsor: '${SPONSOR}', maxEnergy: 10000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 'v342' }, repository: ownerRepoFor(${JSON.stringify(db)}, new SqliteSettlementRepository(${JSON.stringify(db)}), () => ${NOW_MS}), now: () => ${NOW_MS} });
 const r = await s.authorize({ network: '${CAIP2}', version: 1, sender: '${SENDER}', sponsor: '${SPONSOR}', recipient: '${RECIPIENT}', asset: 'CCD', amount: '250000', expiry: ${NOW + 200}, energy: 3000n, paymentDigest: '${'a'.repeat(64)}' });
 console.log('RESULT:' + JSON.stringify(r));
 `);
@@ -174,7 +178,7 @@ console.log('RESULT:' + JSON.stringify(r));
   // Whatever the interleaving, the invariant holds: no approval for a payment that now has a
   // durable hash, and at most one approved event ever exists.
   const check1 = new SqliteSettlementRepository(db);
-  const approvedEvents = check1.signEvents('a'.repeat(64)).filter(e => e.decision === 'approved').length;
+  const approvedEvents = ownerRepoFor(db, check1, () => NOW_MS).signEvents('a'.repeat(64)).filter(e => e.decision === 'approved').length;
   const row = check1.get('a'.repeat(64));
   check1.close();
   check('at most one approval recorded', approvedEvents <= 1, `approved=${approvedEvents}`);
@@ -202,7 +206,8 @@ test('13. two concurrent authorizations in separate processes: exactly one appro
     writeFileSync(f, `
 import { MockNarrowSponsorSigner } from ${JSON.stringify(join(import.meta.dirname, '../services/facilitator/src/narrowSponsorMock.ts'))};
 import { SqliteSettlementRepository } from ${JSON.stringify(join(import.meta.dirname, '../services/facilitator/src/repository.ts'))};
-const s = new MockNarrowSponsorSigner({ policy: { network: '${CAIP2}', sponsor: '${SPONSOR}', maxEnergy: 10000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 'v342' }, repository: new SqliteSettlementRepository(${JSON.stringify(db)}), now: () => ${NOW_MS} });
+import { ownerRepoFor } from ${JSON.stringify(join(import.meta.dirname, './owner-authz-helper.mts'))};
+const s = new MockNarrowSponsorSigner({ policy: { network: '${CAIP2}', sponsor: '${SPONSOR}', maxEnergy: 10000n, maxExpiryOffsetSeconds: 600, allowedAssets: ['CCD'], policyVersion: 'v342' }, repository: ownerRepoFor(${JSON.stringify(db)}, new SqliteSettlementRepository(${JSON.stringify(db)}), () => ${NOW_MS}), now: () => ${NOW_MS} });
 const r = await s.authorize({ network: '${CAIP2}', version: 1, sender: '${SENDER}', sponsor: '${SPONSOR}', recipient: '${RECIPIENT}', asset: 'CCD', amount: '250000', expiry: ${NOW + 200}, energy: 3000n, paymentDigest: '${'a'.repeat(64)}' });
 console.log('RESULT:' + JSON.stringify(r));
 `);
@@ -222,7 +227,7 @@ console.log('RESULT:' + JSON.stringify(r));
   eq(approvedCount, 1, 'exactly one process approved');
 
   const repo = new SqliteSettlementRepository(db);
-  const approvedEvents = repo.signEvents('a'.repeat(64)).filter(e => e.decision === 'approved').length;
+  const approvedEvents = ownerRepoFor(db, repo, () => NOW_MS).signEvents('a'.repeat(64)).filter(e => e.decision === 'approved').length;
   repo.close();
   eq(approvedEvents, 1, 'exactly one approved event in the database');
   rm();
@@ -244,8 +249,11 @@ test('15. audit write failure → no approval', async () => {
   const { db, rm } = mk();
   drive(db, 'a'.repeat(64), 'created');
   const repo = new SqliteSettlementRepository(db);
-  repo['db'].exec('DROP TABLE sign_events');
-  const s = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => NOW_MS });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
+  // the audit tables live in the Owner-private database; dropping
+  // `authorizations` there must fail the authorization closed (audit_write_failed).
+  ownerRepo['db'].exec('DROP TABLE authorizations');
+  const s = new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepo, now: () => NOW_MS });
   const r = await s.authorize(req('a'.repeat(64)));
   eq(r.approved, false, 'rejected');
   eq(r.reason, 'audit_write_failed', 'audit_write_failed');
@@ -256,20 +264,22 @@ test('16. database rollback → no partial authorization event', async () => {
   const { db, rm } = mk();
   drive(db, 'a'.repeat(64), 'created');
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   // Force a failure AFTER the gate passes by making the INSERT violate the partial unique
   // index: pre-insert an approved row with a different payment, then make this one collide.
   // Simplest deterministic path: drop the FK target mid-transaction is not possible; instead
   // verify the tx wrapper rolls back by throwing from inside a wrapped call.
+  // the audit tables live in the Owner-private database.
   let threw = false;
   try {
-    repo['tx'](() => {
-      repo['db'].prepare("INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    ownerRepo['tx'](() => {
+      ownerRepo['db'].prepare("INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)")
         .run('a'.repeat(64), NOW_MS, 'approved', null, CAIP2, SENDER, SPONSOR, RECIPIENT, '1', 'v342');
       throw new Error('simulated failure after insert');
     });
   } catch { threw = true; }
   eq(threw, true, 'the transaction threw');
-  eq(repo.signEvents('a'.repeat(64)).length, 0, 'no partial event survived the rollback');
+  eq(ownerRepo.signEvents('a'.repeat(64)).length, 0, 'no partial event survived the rollback');
   rm();
 });
 
@@ -277,13 +287,15 @@ test('17. rolled-back authorization leaves the payment authorizable', async () =
   const { db, rm } = mk();
   drive(db, 'a'.repeat(64), 'created');
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   try {
-    repo['tx'](() => {
-      repo['db'].prepare("INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    ownerRepo['tx'](() => {
+      ownerRepo['db'].prepare("INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version) VALUES (?,?,?,?,?,?,?,?,?,?)")
         .run('a'.repeat(64), NOW_MS, 'approved', null, CAIP2, SENDER, SPONSOR, RECIPIENT, '1', 'v342');
       throw new Error('boom');
     });
   } catch { /* expected */ }
+  ownerRepo.close();
   repo.close();
   const r = await signerAt(db).authorize(req('a'.repeat(64)));
   eq(r.approved, true, 'a rolled-back attempt does not block a later valid one');

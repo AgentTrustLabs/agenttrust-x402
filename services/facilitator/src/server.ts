@@ -15,6 +15,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { statSync, realpathSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { ConcordiumGRPCNodeClient, credentials } from '@concordium/web-sdk/nodejs';
 import { loadConfig, ConfigurationError } from './config.js';
 import { GrpcAccountInfoProvider } from './grpcAccountInfoProvider.js';
@@ -166,44 +167,91 @@ export function inspectWalletFile(path: string): WalletFileInspection {
 }
 
 /**
- * F2/F6 — Authorization Owner readiness + shared-database identity.
+ * F2/F6 — Authorization Owner readiness + storage separation .
  *
- * The owner and the facilitator must authorize against the SAME SQLite file.
- * The owner reports the resolved path + device + inode of the file it opened
- * (db_identity: read-only, creates no state); this compares them with the
- * facilitator's own database file. A mismatch means the owner would authorize
- * against the wrong database — the durable gate would be blind to the
- * facilitator's payments, so startup fails closed. An unreachable owner does
- * not fail startup (the owner may legitimately start after the facilitator),
- * but readiness stays unhealthy until it appears.
+ * The owner and the facilitator must authorize against DIFFERENT SQLite
+ * files in DIFFERENT directories, owned by different UIDs. The owner
+ * reports the resolved path + device + inode of the Owner-private file it
+ * opened (db_identity: read-only, creates no state); this compares them
+ * with the facilitator's own settlement database file. A MATCH means the
+ * shared-database configuration survived — the facilitator could rewrite
+ * Owner authorization state — so startup fails closed. An unreachable
+ * owner does not fail startup (the owner may legitimately start after
+ * the facilitator), but readiness stays unhealthy until it appears.
  *
- * Only the file identity is compared and logged (device + inode + resolved
+ * Only file identity is compared and logged (device + inode + resolved
  * path). No payment data, digest, or decision ever leaves either process here.
  */
-async function checkOwnerDbIdentity(
+async function checkOwnerDbSeparation(
   authorization: IpcAuthorizationClient,
   facilitatorDbPath: string,
   timeoutMs: number,
-): Promise<{ reachable: boolean; matches: boolean; ownerDbPath?: string; reason?: string }> {
+  signingServiceUid: number | null = null,
+): Promise<{ reachable: boolean; separated: boolean; ownerDbPath?: string; reason?: string }> {
   const probe = await authorization.probeDbIdentity(timeoutMs);
-  if (!probe.reachable) return { reachable: false, matches: false, reason: probe.reason };
-  let own: { dev: number; ino: number };
+  if (!probe.reachable) return { reachable: false, separated: false, reason: probe.reason };
+  let own: { dev: number; ino: number; dir: string };
   try {
     const resolved = realpathSync(facilitatorDbPath);
     const st = statSync(resolved);
-    own = { dev: st.dev, ino: st.ino };
+    own = { dev: st.dev, ino: st.ino, dir: dirname(resolved) };
   } catch (e) {
-    return { reachable: true, matches: false, ownerDbPath: probe.dbPath, reason: `cannot stat facilitator database: ${(e as Error)?.message ?? e}` };
+    return { reachable: true, separated: false, ownerDbPath: probe.dbPath, reason: `cannot stat facilitator database: ${(e as Error)?.message ?? e}` };
   }
-  const matches = probe.dbDev === own.dev && probe.dbIno === own.ino;
-  return {
-    reachable: true,
-    matches,
-    ownerDbPath: probe.dbPath,
-    reason: matches
-      ? undefined
-      : `owner database (dev=${probe.dbDev} ino=${probe.dbIno}) is not the facilitator database (dev=${own.dev} ino=${own.ino})`,
-  };
+  const ownerPath = probe.dbPath;
+  if (ownerPath === undefined || probe.dbDev === undefined || probe.dbIno === undefined) {
+    return { reachable: true, separated: false, ownerDbPath: ownerPath, reason: 'owner db_identity response is missing the database identity' };
+  }
+  // Same file (same device + inode) is the shared-database configuration.
+  if (probe.dbDev === own.dev && probe.dbIno === own.ino) {
+    return {
+      reachable: true,
+      separated: false,
+      ownerDbPath: ownerPath,
+      reason: 'owner database IS the facilitator database (shared file) — run the the storage migration',
+    };
+  }
+  // Same directory is not separation either: a directory the facilitator
+  // can write lets it replace or relink the Owner file.
+  if (dirname(ownerPath) === own.dir) {
+    return {
+      reachable: true,
+      separated: false,
+      ownerDbPath: ownerPath,
+      reason: `owner database lives in the facilitator database directory (${own.dir})`,
+    };
+  }
+  // Distinct UIDs are part of separation, not a separate concern: a
+  // facilitator that shares the Owner's UID can read the Owner key and
+  // database no matter what the file modes say. The Owner process reports
+  // its own UID in db_identity; a missing UID means the deployment cannot
+  // be verified, so it fails closed too.
+  if (probe.ownerUid === undefined) {
+    return {
+      reachable: true,
+      separated: false,
+      ownerDbPath: ownerPath,
+      reason: 'owner db_identity response is missing the owner UID — cannot verify UID separation',
+    };
+  }
+  const facilitatorUid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (facilitatorUid !== null && probe.ownerUid === facilitatorUid) {
+    return {
+      reachable: true,
+      separated: false,
+      ownerDbPath: ownerPath,
+      reason: 'owner runs as the facilitator UID — run the Owner as a distinct user',
+    };
+  }
+  if (signingServiceUid !== null && probe.ownerUid === signingServiceUid) {
+    return {
+      reachable: true,
+      separated: false,
+      ownerDbPath: ownerPath,
+      reason: 'owner runs as the signing-service UID — run the Owner as a distinct user',
+    };
+  }
+  return { reachable: true, separated: true, ownerDbPath: ownerPath };
 }
 
 /**
@@ -299,11 +347,20 @@ export async function startFacilitator(
         ? createLedgerSigner({
             ledgerPath: config.submitLedgerPath,
             network: config.network,
+            // same mock-sponsor override as the plain mock
+            // signer below (W5's recovery process counts submissions
+            // through the ledger, so it takes this branch).
+            ...(config.mockSponsorAddress ? { placeholderAddress: config.mockSponsorAddress } : {}),
             ...(config.processLabel ? { label: config.processLabel } : {}),
             ...(behaviour ? { behaviour } : {}),
           })
         : createMockSigner({
             network: config.network,
+            // mock-mode test hook (see config): lets a mock-mode
+            // facilitator present a valid sponsor address so a real Owner
+            // can authorize its simulated settlements (prebroadcast W5).
+            // Unset, the mock signer derives its own placeholder as before.
+            ...(config.mockSponsorAddress ? { placeholderAddress: config.mockSponsorAddress } : {}),
             ...(behaviour ? { behaviour } : {}),
           });
   // When an Authorization Owner socket is configured, the facilitator speaks the
@@ -372,6 +429,7 @@ export async function startFacilitator(
     network: config.network,
     signer,
     dbPath: config.dbPath,
+    ...(config.dbFileMode !== null ? { dbFileMode: config.dbFileMode } : {}),
     ...(authorization ? { authorization } : {}),
     ...(senderVerifier ? { senderVerifier } : {}),
     busyTimeoutMs: config.busyTimeoutMs,
@@ -391,21 +449,21 @@ export async function startFacilitator(
 
   // F2/F6 — startup probe of the Authorization Owner (real mode only). Runs
   // after the core opened the database, so the facilitator's file exists and
-  // its identity is stable. A reachable owner on a DIFFERENT database fails
-  // startup (fail-closed): authorizing against the wrong file would split the
-  // audit trail and blind the durable gate. An unreachable owner does not fail
+  // its identity is stable. A reachable owner on a SHARED database (or in the
+  // same directory) fails startup (fail-closed): the facilitator could
+  // rewrite Owner authorization state. An unreachable owner does not fail
   // startup — it makes readiness unhealthy until it appears (see /healthz).
   if (config.mode === 'real' && authorization) {
-    const check = await checkOwnerDbIdentity(authorization, config.dbPath, 10_000);
-    if (check.reachable && !check.matches) {
+    const check = await checkOwnerDbSeparation(authorization, config.dbPath, 10_000, config.signingServiceUid);
+    if (check.reachable && !check.separated) {
       throw new ConfigurationError(
-        `authorization owner database mismatch: ${check.reason} (owner db: ${check.ownerDbPath ?? 'unknown'})`,
+        `authorization owner database not separated: ${check.reason} (owner db: ${check.ownerDbPath ?? 'unknown'})`,
       );
     }
     if (check.reachable) {
       const resolved = realpathSync(config.dbPath);
       const st = statSync(resolved);
-      console.log(`authorization owner reachable; shared database ${resolved} (dev=${st.dev} ino=${st.ino})`);
+      console.log(`authorization owner reachable; separate owner database ${check.ownerDbPath} (facilitator db ${resolved} dev=${st.dev} ino=${st.ino})`);
     } else {
       console.log(`WARNING: authorization owner unreachable at startup (${check.reason}); readiness will report unhealthy until it appears`);
     }
@@ -431,14 +489,14 @@ export async function startFacilitator(
 
       if (method === 'GET' && url === '/healthz') {
         // F6: in real mode, readiness reflects the Authorization Owner live: the
-        // probe checks reachability AND that the owner is on this facilitator's
-        // database file. A dead owner, or one restarted on the wrong database,
-        // makes readiness unhealthy (503). The probe is read-only and creates no
-        // approval, signature, or settlement. Mock mode has no external owner;
-        // the in-process local client is always reachable.
+        // probe checks reachability AND storage separation . A dead
+        // owner, or one restarted on a shared database, makes readiness
+        // unhealthy (503). The probe is read-only and creates no approval,
+        // signature, or settlement. Mock mode has no external owner; the
+        // in-process local client is always reachable.
         if (config.mode === 'real' && authorization) {
-          const check = await checkOwnerDbIdentity(authorization, config.dbPath, 2000);
-          const reachable = check.reachable && check.matches;
+          const check = await checkOwnerDbSeparation(authorization, config.dbPath, 2000, config.signingServiceUid);
+          const reachable = check.reachable && check.separated;
           json(res, reachable ? 200 : 503, {
             ok: reachable,
             mode: config.mode,

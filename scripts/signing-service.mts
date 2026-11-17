@@ -8,7 +8,7 @@
  * The key is supplied out-of-band by the test process via the environment. It is never
  * logged, never written to disk by this script, and never appears in any output.
  *
- * Task 11: the service verifies an Owner authorization certificate and consumes
+ * the service verifies an Owner authorization certificate and consumes
  * the authorization at the Owner before signing. The Owner's public key, socket
  * and UID are REQUIRED (exit 2 when unset) — a service without them cannot
  * verify authorization evidence and must not start.
@@ -31,12 +31,12 @@ if (!socketPath || !sponsor || !network || !allowedUidRaw) {
 }
 const allowedUid = Number(allowedUidRaw);
 
-// Task 11 — Owner authorization verification is required, not optional.
+// Owner authorization verification is required, not optional.
 const ownerPublicKey = process.env['SIGNING_OWNER_PUBLIC_KEY'];
 const ownerSocket = process.env['SIGNING_OWNER_SOCKET'];
 const ownerUidRaw = process.env['SIGNING_OWNER_UID'];
 if (!ownerPublicKey || !ownerSocket || !ownerUidRaw) {
-  console.error('refusing to start: SIGNING_OWNER_PUBLIC_KEY, SIGNING_OWNER_SOCKET and SIGNING_OWNER_UID are required (Task 11)');
+  console.error('refusing to start: SIGNING_OWNER_PUBLIC_KEY, SIGNING_OWNER_SOCKET and SIGNING_OWNER_UID are required ');
   process.exit(2);
 }
 const ownerConsume = new IpcOwnerConsumeClient({ socketPath: ownerSocket, ownerUid: Number(ownerUidRaw) });

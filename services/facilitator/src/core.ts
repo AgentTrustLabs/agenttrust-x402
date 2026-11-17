@@ -21,6 +21,10 @@ import { paymentDigest, requirementsKey } from './store.js';
 import { SqliteSettlementRepository, evidenceDigestOf, type SettlementRepository } from './repository.js';
 import type { AuthorizationClient, AuthorizationRequest } from './authorization.js';
 import { LocalAuthorizationClient } from './authorization.js';
+import {
+  RepositorySettlementStateReader,
+  SqliteOwnerAuthorizationRepository,
+} from './ownerAuthorizationRepository.js';
 import { SIMPLE_TRANSFER_BASE_COST, ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
 import { convertV2ToSdkV1 } from './wireConverter.js';
 import { signingDigestOf, transactionEnergyOf } from './signingService.js';
@@ -75,6 +79,8 @@ export interface CoreOptions {
   dieAt?: 'after-claim' | 'after-sponsor-sign' | 'after-hash' | 'after-persist' | 'before-submit' | 'after-submit';
   /** Path to the SQLite file. Defaults to :memory: for tests. */
   dbPath?: string;
+  /** Permission bits for the settlement database file (and WAL/-shm). Defaults to 0600. */
+  dbFileMode?: number;
   authorization?: AuthorizationClient;
   /**
    * Sponsor energy cap for the authorization boundary. Defaults to 1_000n.
@@ -156,10 +162,12 @@ export class FacilitatorCore {
       new SqliteSettlementRepository(opts.dbPath ?? ':memory:', {
         now: this.now,
         ...(opts.busyTimeoutMs !== undefined ? { busyTimeoutMs: opts.busyTimeoutMs } : {}),
+        ...(opts.dbFileMode !== undefined ? { fileMode: opts.dbFileMode } : {}),
       });
     // The authorization boundary. When none is injected, fall back to the local
-    // mock-only client bound to this facilitator's own store and the mock signer's placeholder
-    // sponsor. An explicit client (e.g. IpcAuthorizationClient) is required for production.
+    // mock-only client bound to an ephemeral in-memory Owner-private repository
+    // and a read-only view of this facilitator's own store. An explicit client
+    // (e.g. IpcAuthorizationClient) is required for production.
     this.authorization =
       opts.authorization ??
       new LocalAuthorizationClient({
@@ -171,13 +179,17 @@ export class FacilitatorCore {
           allowedAssets: ['CCD'],
           policyVersion: 'local-v1',
         },
-        repository: this.store,
+        repository: new SqliteOwnerAuthorizationRepository(
+          ':memory:',
+          new RepositorySettlementStateReader(this.store),
+          { now: this.now },
+        ),
         now: this.now,
       });
     // Wire conversion policy. The energy cap mirrors the authorization cap; the
     // authoritative energy VALUE comes from the SDK recomputation
     // (`transactionEnergyOf`), never from the client — and never from the
-    // JSON-length estimate either (Task 11: it disagrees with the recomputation).
+    // JSON-length estimate either (it disagrees with the recomputation).
     this.maxWireEnergy = opts.maxWireEnergy ?? 1_000;
     // Fee cap. Same default as FACILITATOR_MAX_FEE_MICROCCD (10 CCD); the server
     // passes the configured value. Enforced in settle() before signing.
@@ -309,7 +321,7 @@ export class FacilitatorCore {
     // durable gate. It RECOVERS that approval instead (below): recovery re-validates
     // the approval against the exact transaction context and re-issues its
     // certificate. A consumed approval cannot be recovered — the payment is
-    // then stuck in `prepared` until an operator intervenes (see the Task 11
+    // then stuck in `prepared` until an operator intervenes (see the
     // report's known limitations).
     // ── Sender signature verification (BEFORE authorization) ────────────────
     // ORDER: validate → claim → SENDER VERIFY → authorize → recover → convert → signer.
@@ -331,12 +343,12 @@ export class FacilitatorCore {
     // decision.
     // ── Wire conversion (BEFORE authorization) ────────────────────────────────
     // ORDER: validate → claim → sender-verify → CONVERT → authorize → signer →
-    // hash → submit. (Task 11: conversion moved BEFORE the authorization
+    // hash → submit. (conversion moved BEFORE the authorization
     // boundary.) The authorization must bind the EXACT transaction — its digest
     // and type exist only after conversion — so a conversion failure fails
     // closed here: the signer is never invoked and no authorization is recorded.
     // The converter receives the policy-derived energy, never a client-supplied value.
-    // Task 11 — conversion runs on the RESUMABLE path too: the bare envelope
+    // conversion runs on the RESUMABLE path too: the bare envelope
     // transaction is V2-shaped (no executionEnergyAmount, sponsor as
     // `{address}`), which the SDK cannot parse, so no digest or energy could
     // be computed from it. Converting first makes the authorization bind the
@@ -381,7 +393,7 @@ export class FacilitatorCore {
     // canonical transaction the authorization binds, so the digest the
     // signing service recomputes is the digest the Owner certified.
     //
-    // Task 11: the energy is the SDK-RECOMPUTED energy of that exact
+    // the energy is the SDK-RECOMPUTED energy of that exact
     // transaction (`transactionEnergyOf`), on BOTH paths. The resumable path
     // needs it too: recovery re-validates the durable approval against the
     // full transaction context, and the energy is part of that context. It
@@ -412,7 +424,7 @@ export class FacilitatorCore {
     // ── Authorization boundary ────────────────────────────────────────────────
     // The Owner must explicitly approve THIS exact transaction: the
     // authorization is bound to the transaction digest, sender, sponsor,
-    // recipient, amount, network, type, energy and fee policy (Task 11).
+    // recipient, amount, network, type, energy and fee policy .
     // The approval is recorded durably BEFORE the signer is invoked, and the
     // certificate the Owner issues is the verifiable evidence the signing
     // service verifies and consumes before signing.
@@ -437,7 +449,7 @@ export class FacilitatorCore {
       amount: String(acceptedAny['amount']),
       expiry: Number(header['expiry']),
       energy: txEnergy,
-      // Task 11: the authorization binds the exact transaction.
+      // the authorization binds the exact transaction.
       transactionDigest: txDigest,
       transactionType: txType,
       maxFeeMicroCcd: String(this.maxFeeMicroCcd),
@@ -543,7 +555,7 @@ export class FacilitatorCore {
       }
     }
 
-    // Task 11: an approval without a certificate is a gap, not an approval.
+    // an approval without a certificate is a gap, not an approval.
     // The signing service verifies and consumes the certificate; without it
     // there is no verifiable authorization evidence to hand the signer.
     if (!certificate) {
@@ -626,7 +638,7 @@ export class FacilitatorCore {
     }
 
     const signerInput = converted ?? payload.payload;
-    // Task 11: the Owner authorization certificate and its payment digest
+    // the Owner authorization certificate and its payment digest
     // ride with the signing call. A real signer forwards both to the signing
     // service, which verifies and consumes the authorization before signing.
     // The digest passed here is the digest of the exact transaction above —

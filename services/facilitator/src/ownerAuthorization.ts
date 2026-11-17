@@ -1,7 +1,7 @@
 /**
- * Owner authorization evidence — the transaction-specific binding Task 11 adds.
+ * Owner authorization evidence — the transaction-specific binding  adds.
  *
- * The gap (Task 10 honest residual): the signing service proved "the digest it
+ * The gap ( honest residual): the signing service proved "the digest it
  * signs is the hash of the transaction it validated", but it could NOT prove
  * "this is the transaction the Owner authorized". The facilitator's word that
  * the Owner approved a transaction was the only link, and the signing service
@@ -39,8 +39,9 @@
  *     readable ONLY by the Owner's UID (0600, owned by that UID). If the
  *     Owner and the facilitator run as the SAME UID, the facilitator can
  *     read the key and forge certificates — the binding is void. Production
- *     MUST run the Owner as a distinct UID from the facilitator (see
- *     `AUTHZ_REQUIRE_DISTINCT_OWNER_UID` in scripts/authz-owner.mts).
+ *     MUST run the Owner as a distinct UID from the facilitator (enforced
+ *     by default in scripts/authz-owner.mts and by the facilitator's
+ *     real-mode storage-separation check in services/facilitator/src/server.ts).
  *   - The consume step's security rests on the Owner's socket being
  *     reachable ONLY by its configured UIDs and on the Owner's database
  *     being writable ONLY by the Owner and the facilitator processes that

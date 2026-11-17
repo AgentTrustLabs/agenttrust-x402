@@ -1,5 +1,5 @@
 /**
- * Regression tests for the Task 08 settlement-path fixes.
+ * Regression tests for the  settlement-path fixes.
  *
  * Defect 1 — the signed transaction's recipient was never bound to the payment
  * requirement's payTo: a payload whose signed `toAddress` differed from `payTo`
@@ -78,7 +78,7 @@ const envelope = (paymentPayload, paymentRequirements) => ({
   paymentRequirements,
 });
 
-/** The energy the core authorizes/fees on for the standard fixture: the SDK recomputation of the converted transaction (Task 11 — the certificate binds the recomputed energy, not the JSON-length estimate, which reads 596 for this fixture). */
+/** The energy the core authorizes/fees on for the standard fixture: the SDK recomputation of the converted transaction (the certificate binds the recomputed energy, not the JSON-length estimate, which reads 596 for this fixture). */
 const FIXTURE_ENERGY = (() => {
   const signed = payloadFixture().payload.signedTransaction as Record<string, unknown>;
   const withPolicyEnergy = {
@@ -142,7 +142,7 @@ function sponsorRecipientValidatingSigner() {
   return { signer, counts };
 }
 
-/** Test-only authorization client that approves every request (Task 11: an
+/** Test-only authorization client that approves every request (an
  * approval must carry a certificate, so this seam issues a real one from the
  * request's own bound fields, signed by an ephemeral test key. The mock
  * signer never verifies it, so the seam still isolates the boundary under
@@ -206,7 +206,7 @@ const passThroughConverter = (input: unknown, _policy: WireConversionPolicy): Wi
 });
 
 /**
- * Test-only wire converter for the sponsor-recipient test (Task 11): passes
+ * Test-only wire converter for the sponsor-recipient test : passes
  * its input through untouched EXCEPT for the sponsor shape — the x402
  * `{address}` form becomes the SDK `{account}` form. The core must compute
  * the transaction digest from the converted transaction before authorizing,
@@ -340,7 +340,7 @@ test('05. a fee above the configured cap is rejected before signing', async () =
   eq(r.success, false, 'refused');
   eq(r.errorReason, 'fee_validation_failed', 'reason');
   // The core response must name the ESTIMATED fee, never an actual fee: the
-  // cap binds an estimate-based policy (Task 10.1, Option B), so a bare
+  // cap binds an estimate-based policy (Option B), so a bare
   // "fee … exceeds cap" would wrongly imply the actual chain fee is bounded.
   ok(/estimated fee .* exceeds cap/.test(r.errorMessage), r.errorMessage);
   eq(counts.addSponsorSignature, 0, 'never signed');
@@ -427,7 +427,7 @@ test('08. invalid or missing cap configuration cannot silently disable the limit
   };
   const lowEnergy = await settleHttp({ FACILITATOR_MAX_ENERGY: '100' });
   eq(lowEnergy.success, false, 'low energy cap rejects over HTTP');
-  // Task 11: wire conversion runs BEFORE authorization (the authorization
+  // wire conversion runs BEFORE authorization (the authorization
   // must bind the exact converted transaction), and the converter enforces
   // the energy cap — so a low energy cap now surfaces at conversion, not
   // at authorization. The payment is still refused before any signing.

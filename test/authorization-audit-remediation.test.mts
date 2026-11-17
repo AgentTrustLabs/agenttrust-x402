@@ -15,6 +15,7 @@
 
 import { MockNarrowSponsorSigner } from '../services/facilitator/src/narrowSponsorMock.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -59,8 +60,10 @@ const mk = () => {
   const dir = mkdtempSync(join(tmpdir(), 't344-'));
   return { dir, db: join(dir, 'f.db'), rm: () => rmSync(dir, { recursive: true, force: true }) };
 };
-const signerAt = (db: string) =>
-  new MockNarrowSponsorSigner({ policy: POLICY, repository: new SqliteSettlementRepository(db), now: () => NOW_MS });
+const signerAt = (db: string) => {
+  const repo = new SqliteSettlementRepository(db);
+  return new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepoFor(db, repo, () => NOW_MS), now: () => NOW_MS });
+};
 
 function drive(
   db: string,
@@ -121,17 +124,30 @@ console.log('── M1: no public approval-insertion API ──');
   } catch (e) {
     err = (e as Error).message;
   }
-  const approved = repo.signEvents(d).filter(e => e.decision === 'approved').length;
-  check('M1.2 raw approved INSERT on a prepared payment is refused by the DB trigger', err !== null && approved === 0, err ? 'trigger fired' : 'INSERT SUCCEEDED');
+  const approved = ownerRepoFor(db, repo, () => NOW_MS).signEvents(d).filter(e => e.decision === 'approved').length;
+  check('M1.2 raw approved INSERT on a prepared payment is refused (no authorization table in the settlement DB)', err !== null && approved === 0, err ? 'no such table' : 'INSERT SUCCEEDED');
   repo.close();
   rm();
 }
 
 {
-  // Raw SQL on a payment that does not exist at all.
+  // (a) The Owner gate refuses authorize for a payment that does not exist.
   const { db, rm } = mk();
   const d = D('z');
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
+  const r = await signerAt(db).authorize(req(d));
+  const attempts = ownerRepo.signAttempts(d);
+  check(
+    'M1.3a authorize for a missing payment is refused by the Owner gate (unknown_payment, audited)',
+    r.approved === false && r.reason === 'unknown_payment' && attempts.length === 1 &&
+      attempts[0].decision === 'rejected' && attempts[0].reason === 'unknown_payment',
+    `${r.reason ?? ''} / ${attempts.length} attempt(s)`,
+  );
+  // (b) A raw approval INSERT for that missing payment is refused because
+  // the settlement database has no authorization table at all. The
+  // OS-level refusal (facilitator UID cannot write the Owner database) is
+  // proven by the owner-storage-isolation suite.
   const { DatabaseSync } = await import('node:sqlite');
   let err: string | null = null;
   try {
@@ -143,7 +159,8 @@ console.log('── M1: no public approval-insertion API ──');
   } catch (e) {
     err = (e as Error).message;
   }
-  check('M1.3 raw approved INSERT for a missing payment is refused', err !== null && repo.signEvents(d).length === 0, err ? 'trigger fired' : 'INSERT SUCCEEDED');
+  check('M1.3b raw approved INSERT for a missing payment is refused (no authorization table)', err !== null && /no such table/i.test(err), err ?? 'INSERT SUCCEEDED');
+  ownerRepo.close();
   repo.close();
   rm();
 }
@@ -213,7 +230,7 @@ for (const [state, reason] of [
   const d = D('c');
   const repo = new SqliteSettlementRepository(db);
   const r = await signerAt(db).authorize(req(d));
-  const attempts = repo.signAttempts(d);
+  const attempts = ownerRepoFor(db, repo, () => NOW_MS).signAttempts(d);
   check(
     'M2 missing payment → audited unknown_payment, no payment row invented',
     r.approved === false && r.reason === 'unknown_payment' && attempts.length === 1 &&
@@ -290,18 +307,20 @@ console.log('\n── audit write failure fails closed ──');
   const d = D('a');
   drive(db, d, 'created');
   const repo = new SqliteSettlementRepository(db);
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
   // Make the audit write fail at runtime without touching the payment row.
-  repo['db'].exec('ALTER TABLE sign_events RENAME TO sign_events_bak');
-  const s = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => NOW_MS });
+  // the audit tables live in the Owner-private database.
+  ownerRepo['db'].exec('ALTER TABLE authorizations RENAME TO authorizations_bak');
+  const s = new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepo, now: () => NOW_MS });
   const r = await s.authorize(req(d));
   check(
     'audit write failure → audit_write_failed, never approved',
     r.approved === false && r.reason === 'audit_write_failed',
     JSON.stringify(r),
   );
-  repo['db'].exec('ALTER TABLE sign_events_bak RENAME TO sign_events');
+  ownerRepo['db'].exec('ALTER TABLE authorizations_bak RENAME TO authorizations');
   // The failure must also not have left an approval behind.
-  const approved = repo.signEvents(d).filter(e => e.decision === 'approved').length;
+  const approved = ownerRepo.signEvents(d).filter(e => e.decision === 'approved').length;
   check('no approval survived an audit write failure', approved === 0, `${approved} approved`);
   repo.close();
   rm();
@@ -316,14 +335,15 @@ console.log('\n── rollback leaves no partial event ──');
   const d = D('a');
   drive(db, d, 'created');
   const repo = new SqliteSettlementRepository(db);
-  repo['db'].exec('ALTER TABLE sign_events RENAME TO sign_events_bak');
-  const s = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => NOW_MS });
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW_MS);
+  ownerRepo['db'].exec('ALTER TABLE authorizations RENAME TO authorizations_bak');
+  const s = new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepo, now: () => NOW_MS });
   await s.authorize(req(d));
-  repo['db'].exec('ALTER TABLE sign_events_bak RENAME TO sign_events');
-  const all = repo.signEvents(d);
-  check('failed transaction left zero sign_events rows', all.length === 0, `${all.length} row(s)`);
+  ownerRepo['db'].exec('ALTER TABLE authorizations_bak RENAME TO authorizations');
+  const all = ownerRepo.signEvents(d);
+  check('failed transaction left zero authorization rows', all.length === 0, `${all.length} row(s)`);
   // And a subsequent valid attempt still succeeds.
-  const ok = await new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => NOW_MS }).authorize(req(d));
+  const ok = await new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepo, now: () => NOW_MS }).authorize(req(d));
   check('a later attempt still succeeds after the failed one', ok.approved === true, JSON.stringify(ok));
   repo.close();
   rm();
@@ -345,6 +365,7 @@ console.log('\n── cross-process exactly-once (two OS processes, one DB) ─�
 import { writeFileSync } from 'node:fs';
 import { MockNarrowSponsorSigner } from '${process.cwd()}/services/facilitator/src/narrowSponsorMock.js';
 import { SqliteSettlementRepository } from '${process.cwd()}/services/facilitator/src/repository.js';
+import { ownerRepoFor } from '${process.cwd()}/test/owner-authz-helper.mts';
 const POLICY = ${JSON.stringify({ ...POLICY, maxEnergy: '10000' })};
 POLICY.maxEnergy = 10000n;
 const request = {
@@ -353,7 +374,7 @@ const request = {
   energy: 3000n, paymentDigest: '${d}',
 };
 const repo = new SqliteSettlementRepository(process.argv[2]);
-const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => ${NOW_MS} });
+const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: ownerRepoFor(process.argv[2], repo, () => ${NOW_MS}), now: () => ${NOW_MS} });
 const r = await signer.authorize(request);
 writeFileSync(process.argv[3], JSON.stringify(r));
 repo.close();
@@ -379,7 +400,7 @@ repo.close();
   const outs = await Promise.all([run(1), run(2)]);
   const parsed = outs.map((o) => JSON.parse(o) as { approved: boolean; reason?: string });
   const repo = new SqliteSettlementRepository(db);
-  const ev = repo.signEvents(d);
+  const ev = ownerRepoFor(db, repo, () => NOW_MS).signEvents(d);
   const approved = ev.filter((e) => e.decision === 'approved').length;
   check('two OS processes → exactly one approval', approved === 1 && parsed.filter((p) => p.approved).length === 1, `${approved} approved`);
   check(

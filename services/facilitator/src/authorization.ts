@@ -3,8 +3,9 @@
  *
  * Two implementations:
  *   - `LocalAuthorizationClient`: test/mock only. Wraps the durable narrow-sponsor
- *     authorization boundary (MockNarrowSponsorSigner + repository). Used when no IPC
- *     socket is configured. NEVER used in production with a real signer.
+ *     authorization boundary (MockNarrowSponsorSigner + Owner-private
+ *     repository). Used when no IPC socket is configured. NEVER used in
+ *     production with a real signer.
  *   - `IpcAuthorizationClient`: production path. Talks to the Authorization Owner over
  *     the Unix socket using the agenttrust-authz v1 protocol. The facilitator never
  *     opens the authorization database.
@@ -16,7 +17,9 @@
  * No real signer, key, wallet, or signing is implemented here.
  */
 
-import type { SettlementRepository } from './repository.js';
+import type {
+  OwnerAuthorizationRepository,
+} from './ownerAuthorizationRepository.js';
 import type { SponsorPolicy } from './narrowSponsor.js';
 import {
   generateOwnerAuthorizationKeyPair,
@@ -36,11 +39,11 @@ export interface AuthorizationRequest {
   amount: string;
   expiry: number;
   energy: bigint;
-  /** Task 11 — Concordium sponsor-sign digest of the exact transaction, 64-hex. */
+  /** Concordium sponsor-sign digest of the exact transaction, 64-hex. */
   transactionDigest: string;
-  /** Task 11 — raw payload type string of the transaction, e.g. 'transfer'. */
+  /** raw payload type string of the transaction, e.g. 'transfer'. */
   transactionType: string;
-  /** Task 11 — fee cap the authorization is issued under (microCCD), decimal string. */
+  /** fee cap the authorization is issued under (microCCD), decimal string. */
   maxFeeMicroCcd: string;
 }
 
@@ -56,7 +59,7 @@ export interface AuthorizationResponse {
   reason: string | null;
   detail: string | null;
   /**
-   * Task 11 — the Owner's authorization certificate for the exact
+   * the Owner's authorization certificate for the exact
    * transaction, present only on approval. The facilitator forwards it
    * opaquely to the signing service, which verifies it. A missing
    * certificate on an approval fails closed downstream.
@@ -104,17 +107,17 @@ export interface AuthorizationClient {
  */
 export class LocalAuthorizationClient implements AuthorizationClient {
   private readonly policy: SponsorPolicy;
-  private readonly repo: SettlementRepository;
+  private readonly repo: OwnerAuthorizationRepository;
   private readonly now: () => number;
   /**
-   * Task 11 — ephemeral Owner authorization keypair, generated per client.
+   * ephemeral Owner authorization keypair, generated per client.
    * The mock client IS the Owner in tests, so it issues real certificates;
    * the test configures the signing service with `authorizationPublicKeyHex()`.
    * Production never uses this client.
    */
   private readonly keyPair = generateOwnerAuthorizationKeyPair();
 
-  constructor(deps: { policy: SponsorPolicy; repository: SettlementRepository; now?: () => number }) {
+  constructor(deps: { policy: SponsorPolicy; repository: OwnerAuthorizationRepository; now?: () => number }) {
     this.policy = deps.policy;
     this.repo = deps.repository;
     this.now = deps.now ?? (() => Date.now());
@@ -193,7 +196,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     if (request.expiry > nowSec + this.policy.maxExpiryOffsetSeconds) {
       return { outcome: 'rejected', reason: 'expiry_excessive', detail: `expiry ${request.expiry} > now+${this.policy.maxExpiryOffsetSeconds}` };
     }
-    // Task 11 — the transaction binding must be well-formed before any
+    // the transaction binding must be well-formed before any
     // certificate can be issued for it.
     if (!/^[0-9a-fA-F]{64}$/.test(request.transactionDigest)) {
       return { outcome: 'rejected', reason: 'invalid_field', detail: 'transactionDigest is not 64-hex' };
@@ -206,7 +209,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     }
 
     // The durable gate. This is the security boundary: state, hash, and prior approval.
-    let result: ReturnType<SettlementRepository['authorizeSignEvent']>;
+    let result: ReturnType<OwnerAuthorizationRepository['authorizeSignEvent']>;
     try {
       result = this.repo.authorizeSignEvent({
         paymentDigest: request.paymentDigest,
@@ -222,7 +225,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
         asset: request.asset,
         amount: request.amount,
         expiry: request.expiry,
-        // Task 11 — bind the exact transaction the approval covers.
+        // bind the exact transaction the approval covers.
         transactionDigest: request.transactionDigest,
         transactionType: request.transactionType,
         maxEnergy: String(this.policy.maxEnergy),
@@ -308,7 +311,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     if (ev === undefined) {
       return { outcome: 'unknown', reason: 'conflicting_evidence', detail: 'approval index missing' };
     }
-    // Task 11 — a consumed approval is spent: recovery must NOT re-issue a
+    // a consumed approval is spent: recovery must NOT re-issue a
     // usable certificate for it. The caller fails closed and a fresh
     // authorization can issue a new approval. A revoked approval is refused.
     if (ev.consumed_at !== null) {
@@ -335,7 +338,7 @@ export class LocalAuthorizationClient implements AuthorizationClient {
     else if (ev.amount !== request.amount) mismatches.push('amount');
     if (ev.expiry === null) mismatches.push('expiry (missing durable evidence)');
     else if (ev.expiry !== request.expiry) mismatches.push('expiry');
-    // Task 11 — the exact transaction binding. A NULL means the approval
+    // the exact transaction binding. A NULL means the approval
     // predates the binding and cannot be certified.
     const legacyBinding =
       ev.authorization_id === null ||
@@ -409,7 +412,7 @@ export class IpcAuthorizationClient implements AuthorizationClient {
             amount: request.amount,
             expiry: request.expiry,
             energy: String(request.energy),
-            // Task 11 — the exact transaction the approval must cover.
+            // the exact transaction the approval must cover.
             transactionDigest: request.transactionDigest,
             transactionType: request.transactionType,
             maxFeeMicroCcd: request.maxFeeMicroCcd,
@@ -442,7 +445,7 @@ export class IpcAuthorizationClient implements AuthorizationClient {
           resolve({ outcome: 'protocol_error', reason: 'malformed_request', detail: 'unknown outcome' });
           return;
         }
-        // Task 11 — an approval without a certificate is unusable: the
+        // an approval without a certificate is unusable: the
         // signing service cannot verify what the Owner approved. Fail closed
         // here instead of letting the core reach the signer without evidence.
         // A certificate on a non-approval is dropped, never forwarded.
@@ -500,7 +503,7 @@ export class IpcAuthorizationClient implements AuthorizationClient {
             amount: request.amount,
             expiry: request.expiry,
             energy: String(request.energy),
-            // Task 11 — recovery must prove the same exact transaction.
+            // recovery must prove the same exact transaction.
             transactionDigest: request.transactionDigest,
             transactionType: request.transactionType,
             maxFeeMicroCcd: request.maxFeeMicroCcd,
@@ -531,7 +534,7 @@ export class IpcAuthorizationClient implements AuthorizationClient {
           resolve({ outcome: 'protocol_error', reason: 'malformed_request', detail: 'unknown outcome' });
           return;
         }
-        // Task 11 — same certificate rule as authorize: a recovered approval
+        // same certificate rule as authorize: a recovered approval
         // without its certificate cannot be used for signing.
         if (outcome === 'approved') {
           const cert = parsed.certificate as OwnerAuthorizationCertificate | null;
@@ -557,9 +560,11 @@ export class IpcAuthorizationClient implements AuthorizationClient {
   }
 
   /**
-   * Read-only readiness probe (F2/F6). Asks the owner for the identity of the
-   * shared database file it is actually using (resolved path + device + inode),
-   * so the facilitator can prove the owner authorizes against the same file.
+   * Read-only readiness probe (F2/F6). Asks the owner for the identity of
+   * the database file it is actually using (resolved path + device + inode),
+   * so the facilitator can prove the owner authorizes against a SEPARATE,
+   * Owner-private file (a match with the facilitator database
+   * is now a configuration error, not the expected state).
    * Creates no state on either side: no idempotency record, no sign event, no
    * approval. `reachable: false` covers a dead owner, a missing socket, a
    * timeout, and a malformed response.
@@ -589,11 +594,11 @@ export class IpcAuthorizationClient implements AuthorizationClient {
           return;
         }
         conn.end();
-        if (parsed.outcome !== 'ok' || typeof parsed.dbPath !== 'string' || typeof parsed.dbDev !== 'number' || typeof parsed.dbIno !== 'number') {
+        if (parsed.outcome !== 'ok' || typeof parsed.dbPath !== 'string' || typeof parsed.dbDev !== 'number' || typeof parsed.dbIno !== 'number' || typeof parsed.ownerUid !== 'number') {
           resolve({ reachable: false, reason: 'unexpected db_identity response' });
           return;
         }
-        resolve({ reachable: true, dbPath: parsed.dbPath, dbDev: parsed.dbDev, dbIno: parsed.dbIno });
+        resolve({ reachable: true, dbPath: parsed.dbPath, dbDev: parsed.dbDev, dbIno: parsed.dbIno, ownerUid: parsed.ownerUid });
       });
       conn.on('error', (e) => {
         clearTimeout(timer);
@@ -615,6 +620,8 @@ export interface OwnerDbIdentity {
   /** Device + inode of that file (after symlink resolution). */
   dbDev?: number;
   dbIno?: number;
+  /** UID of the Owner process itself (for the distinct-UID check). */
+  ownerUid?: number;
   /** Why the probe failed (unreachable only). Never contains secret material. */
   reason?: string;
 }

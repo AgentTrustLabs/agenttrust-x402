@@ -2,7 +2,7 @@
  * Local sponsor wallet secret loading (synthetic fixtures only).
  *
  * No real wallet material is used. SDK parser/builder are exercised via test
- * doubles where the task requires, and with a synthetic in-memory export where
+ * doubles where the spec requires, and with a synthetic in-memory export where
  * a real-ish shape is needed.
  */
 
@@ -241,7 +241,7 @@ console.log('\n── 8. integration with the signing service (test double) ─�
     parseWallet: () => syntheticExport as never,
     buildAccountSigner: () => doubleSigner() as never,
   });
-  // Task 11: the service cannot sign without Owner authorization evidence.
+  // the service cannot sign without Owner authorization evidence.
   const ownerKey = makeTestOwnerKey();
   const svc = createSigningService({
     accountSigner: signer as never,

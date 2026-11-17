@@ -14,7 +14,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Socket } from 'node:net';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, realpathSync, existsSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, statSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq, notOk, ok } from './helpers.mjs';
@@ -27,14 +27,23 @@ import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { LocalAuthorizationClient, IpcAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { SponsorSigner, AddSponsorSignatureOptions } from '../services/facilitator/src/signer.js';
-import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx } from './owner-authz-helper.mjs';
+import { makeTestOwnerKey, issueTestCertificate, certFieldsForTx, ownerRepoFor } from './owner-authz-helper.mjs';
+import { facilitatorUid, authclientsGid } from './os-identity.mts';
 
 const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const RECIPIENT = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const FACILITATOR_UID = 1001;
-const FACILITATOR_GID = 1002;
-const SVC_UID = 1001; // the harness runs as this same UID
+// The facilitator UID / authclients GID are resolved at runtime (see
+// os-identity.mts): on GitHub-hosted runners uid 1001 is the `runner`
+// user, so `ubuntu` gets a free UID and `authclients` a free GID. The
+// hardcoded 1001/1002 only ever matched a local login.
+const FACILITATOR_UID = facilitatorUid() ?? 1001;
+const FACILITATOR_GID = authclientsGid() ?? 1002;
+// The signing service runs as the facilitator user in this harness, so
+// its UID is the facilitator UID — never this process's UID directly:
+// config rejects UID 0 outright, and a hardcoded number would go stale
+// the same way the old 1001 did on runners where ubuntu is not 1001.
+const SVC_UID = FACILITATOR_UID;
 const WRONG_UID = 1005;
 const NOW = 1_800_000_000;
 
@@ -119,7 +128,7 @@ const ipcSignerFor = (sock: string, timeoutMs = 600) =>
     network: NETWORK,
     timeoutMs,
     transaction: envelope().paymentPayload.payload.signedTransaction,
-    // Task 11: the client refuses to send a request without Owner
+    // the client refuses to send a request without Owner
     // authorization evidence. These transport tests use a certificate
     // issued by an ephemeral test keypair for the envelope transaction;
     // the raw stub servers never validate it — it only gets the request
@@ -171,7 +180,7 @@ const envelope = () => {
   return { x402Version: 2, paymentPayload: payload, paymentRequirements: payload.accepted };
 };
 
-// Task 11 — one payment digest and one ephemeral Owner keypair for the
+// one payment digest and one ephemeral Owner keypair for the
 // whole suite. `envelopeCert()` issues a certificate for the envelope
 // transaction, so signing requests carry the authorization evidence the
 // client-side guard requires. Transport tests (B02/D01–D05) send it to raw
@@ -327,7 +336,7 @@ test('B02. a valid config builds a SponsorSigner that signs REMOTELY, not locall
     eq(signer.info().network, NETWORK, 'network');
     let message = '';
     try {
-      // Task 11: the signing call carries the Owner authorization evidence.
+      // the signing call carries the Owner authorization evidence.
       await signer.addSponsorSignature(envelope().paymentPayload.payload, {
         authorization: envelopeCert(),
         paymentDigest: PAYMENT_DIGEST,
@@ -503,8 +512,14 @@ test('F02. settlement stays disabled by default (guardSettlement)', async () => 
   eq((g as { code: string }).code, 'SETTLEMENT_DISABLED', 'code');
 });
 
-// ═══ E. cross-process (uid 1001 + authclients group) ════════════════════════
+// ═══ E. cross-process (facilitator UID + authclients group) ══════════════════
 
+// The E section is the cross-process security coverage (real Owner +
+// signing service over IPC). It must EXECUTE, not skip: a run that
+// never exercised it is a false green for this suite, so a missing
+// identity fails the suite (exit 3, SKIPPED) instead of silently
+// dropping the section. run.mjs invokes this suite as ubuntu, which is
+// the identity the section needs.
 const hasIpc =
   typeof process.getuid === 'function' &&
   process.getuid() === FACILITATOR_UID &&
@@ -512,11 +527,11 @@ const hasIpc =
   process.getgroups().includes(FACILITATOR_GID);
 
 if (!hasIpc) {
-  console.log(`\n[SKIP] cross-process tests need uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
+  console.log(`\n[SKIP] cross-process tests need the facilitator UID (${FACILITATOR_UID}) + authclients group (${FACILITATOR_GID}) — run: sudo -u ubuntu npx tsx test/facilitator-sponsor-signer-wiring.test.mts`);
 } else {
   const base = mkdtempSync(join(tmpdir(), 't46-ipc-'));
   const sock = join(base, 'sign.sock');
-  // Task 11: the signing service verifies Owner certificates and consumes
+  // the signing service verifies Owner certificates and consumes
   // them at the Owner. The service is started with this keypair's public
   // key and the Owner socket; E02 runs a real Owner on `ownerSock`, the
   // other E tests only need the env set (no consume ever happens there).
@@ -577,7 +592,7 @@ if (!hasIpc) {
 
   const countedSigner = (inner: SponsorSigner, calls: { sign: number }): SponsorSigner => ({
     info: inner.info,
-    // Task 11: forward the per-call signing options (the Owner certificate
+    // forward the per-call signing options (the Owner certificate
     // and payment digest) — dropping them would make the inner IPC signer
     // refuse client-side before any socket activity.
     addSponsorSignature: async (tx: unknown, opts?: AddSponsorSignatureOptions) => {
@@ -591,8 +606,13 @@ if (!hasIpc) {
     getTokenDecimals: inner.getTokenDecimals,
   });
 
-  /** Start a real Owner process on `ownerSock` (Task 11, for E02). */
+  /** Start a real Owner process on `ownerSock` (, for E02). */
   const startOwner = async (dbPath: string) => {
+    // same-UID harness (see separate-process-signing) — present
+    // the settlement file read-only at Owner startup so the launcher's
+    // writable guard passes. The core's store connection is opened BEFORE
+    // this (see E02), so later writes go through its file descriptor.
+    chmodSync(dbPath, 0o400);
     const ownerDir = join(base, 'e02-owner');
     mkdirSync(ownerDir, { mode: 0o700 });
     const ownerKeyFile = join(ownerDir, 'owner-key.pem');
@@ -606,9 +626,13 @@ if (!hasIpc) {
         AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
         AUTHZ_ALLOWED_ASSETS: 'CCD',
         AUTHZ_POLICY_VERSION: 't46',
-        AUTHZ_DB_FILE: dbPath,
-        AUTHZ_SEED_FIXTURES: '0',
+        AUTHZ_DB_FILE: join(ownerDir, 'authz.db'),
+        AUTHZ_SETTLEMENT_DB_FILE: dbPath,
         AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+        // Same-UID harness: the Owner runs as the test process here, so
+        // the launcher's default distinct-UID refusal is opted out
+        // explicitly (test-only, never set in production).
+        AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
@@ -638,7 +662,10 @@ if (!hasIpc) {
     }
   };
 
-  const localAuth = (repo: SqliteSettlementRepository) =>
+  // the local client authorizes against the Owner-private
+  // repository; the settlement repo only supplies payment state. The
+  // caller passes the settlement db path alongside the repo.
+  const localAuth = (repo: SqliteSettlementRepository, dbPath: string) =>
     new LocalAuthorizationClient({
       policy: {
         network: NETWORK,
@@ -648,7 +675,7 @@ if (!hasIpc) {
         allowedAssets: ['CCD'],
         policyVersion: 't46',
       },
-      repository: repo,
+      repository: ownerRepoFor(dbPath, repo, () => NOW * 1000),
       now: () => NOW * 1000,
     });
 
@@ -672,7 +699,7 @@ if (!hasIpc) {
   });
 
   test('E02. the facilitator obtains a fake sponsor signature through the IPC path', async () => {
-    // Task 11: the full Owner chain — a real Owner process issues the
+    // the full Owner chain — a real Owner process issues the
     // certificate (shared DB with the core) and the signing service
     // consumes it there before signing. The core authorizes through the
     // real Owner client, not the local mock.
@@ -687,8 +714,6 @@ if (!hasIpc) {
     const env = envelope();
     (env.paymentPayload.payload.signedTransaction.header as Record<string, unknown>)['expiry'] = realNowSec + 200;
     const repo = new SqliteSettlementRepository(join(base, 'e02.db'), { now: () => Date.now() });
-    const ownerProc = await startOwner(join(base, 'e02.db'));
-    const proc = await startService(FACILITATOR_UID);
     const calls = { sign: 0 };
     const core = new FacilitatorCore({
       network: NETWORK,
@@ -697,6 +722,11 @@ if (!hasIpc) {
       now: () => Date.now(),
       authorization: new IpcAuthorizationClient(ownerSock),
     });
+    // the core's store connection must be open BEFORE the
+    // settlement file is presented read-only at Owner startup (startOwner
+    // chmods it 0400); later writes go through the open descriptor.
+    const ownerProc = await startOwner(join(base, 'e02.db'));
+    const proc = await startService(FACILITATOR_UID);
     try {
       const res = await core.settle(env);
       eq(calls.sign, 1, 'sponsor signer called once');
@@ -732,7 +762,7 @@ if (!hasIpc) {
     try {
       let message = '';
       try {
-        // Task 11: the request carries the Owner authorization evidence, so
+        // the request carries the Owner authorization evidence, so
         // it reaches the service — which then refuses on the peer UID.
         await ipc(FACILITATOR_UID, 3_000).addSponsorSignature(envelope().paymentPayload.payload, {
           authorization: envelopeCert(),
@@ -760,7 +790,7 @@ if (!hasIpc) {
         calls.verify++;
         return { ok: false, reason: 'invalid_signature' } as never;
       },
-      authorization: localAuth(repo),
+      authorization: localAuth(repo, join(base, 'e05.db')),
     });
     try {
       const res = await core.settle(envelope());
@@ -783,7 +813,7 @@ if (!hasIpc) {
     ok(proc.exitCode !== null || proc.signalCode !== null, 'service process exited');
     let message = '';
     try {
-      // Task 11: the request carries the Owner authorization evidence, so
+      // the request carries the Owner authorization evidence, so
       // the failure is the dead socket — not the client-side guard.
       await signer.addSponsorSignature(envelope().paymentPayload.payload, {
         authorization: envelopeCert(),
@@ -821,6 +851,14 @@ const fakeNode = () => ({
 });
 
 /** A stub Authorization Owner that answers db_identity with a fixed identity. */
+const OWNER_UID = (() => {
+  // The stub simulates a real deployment: the Owner runs as its own user
+  // (authowner), distinct from the facilitator and the signing service.
+  // The facilitator's real-mode separation check requires that UID.
+  const r = spawnSync('id', ['-u', 'authowner'], { encoding: 'utf8' });
+  const n = r.status === 0 ? Number((r.stdout ?? '').trim()) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : 997;
+})();
 const stubOwner = async (sock: string, identity: { dev: number; ino: number; path: string }) =>
   rawServer(sock, (conn) => {
     let buf = '';
@@ -836,7 +874,7 @@ const stubOwner = async (sock: string, identity: { dev: number; ino: number; pat
         return;
       }
       if (req.operation === 'db_identity') {
-        conn.write(JSON.stringify({ protocolVersion: 1, requestId: req.requestId, outcome: 'ok', dbPath: identity.path, dbDev: identity.dev, dbIno: identity.ino }) + '\n');
+        conn.write(JSON.stringify({ protocolVersion: 1, requestId: req.requestId, outcome: 'ok', dbPath: identity.path, dbDev: identity.dev, dbIno: identity.ino, ownerUid: OWNER_UID }) + '\n');
       } else {
         conn.write(JSON.stringify({ protocolVersion: 1, requestId: req.requestId, outcome: 'protocol_error', reason: 'unknown_operation' }) + '\n');
       }
@@ -870,9 +908,34 @@ const realEnvF = (w: ReturnType<typeof fws>) =>
     FACILITATOR_NODE_PORT: '1',
   });
 
-test('F01. owner on the same database → startup succeeds, /healthz reports ownerReachable', async () => {
+test('F01. owner on the same database → startup fails closed (shared file)', async () => {
+  // the same file is the shared-database configuration and must
+  // refuse startup; the healthy case moved to F02 (separate database).
   const w = fws('same');
   const identity = dbIdentityOf(w.db);
+  const sign = await dummySigningService(w.signSock);
+  const owner = await stubOwner(w.authzSock, identity);
+  try {
+    let message = '';
+    try {
+      await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    ok(/shared file|not separated/i.test(message), `startup refused: "${message}"`);
+  } finally {
+    await owner.close();
+    await sign.close();
+    w.cleanup();
+  }
+});
+
+test('F02. owner on a different database in a different directory → startup succeeds, /healthz reports ownerReachable', async () => {
+  // a separate Owner database file in its own directory is the
+  // required configuration; the failure case moved to F01 (same file).
+  const w = fws('different');
+  const other = fws('other');
+  const identity = dbIdentityOf(other.db); // a different file, different directory
   const sign = await dummySigningService(w.signSock);
   const owner = await stubOwner(w.authzSock, identity);
   let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
@@ -886,27 +949,6 @@ test('F01. owner on the same database → startup succeeds, /healthz reports own
     eq(h.ownerReachable, true, 'owner reachable');
   } finally {
     if (f) await f.close();
-    await owner.close();
-    await sign.close();
-    w.cleanup();
-  }
-});
-
-test('F02. owner on a different database → startup fails closed', async () => {
-  const w = fws('different');
-  const other = fws('other');
-  const identity = dbIdentityOf(other.db); // a different file
-  const sign = await dummySigningService(w.signSock);
-  const owner = await stubOwner(w.authzSock, identity);
-  try {
-    let message = '';
-    try {
-      await startFacilitator(realEnvF(w), { nodeClient: fakeNode() as never });
-    } catch (e) {
-      message = (e as Error).message;
-    }
-    ok(/database mismatch/i.test(message), `startup refused: "${message}"`);
-  } finally {
     await owner.close();
     await sign.close();
     w.cleanup();
@@ -935,7 +977,8 @@ test('F03. owner unreachable at startup → facilitator starts, /healthz reports
 
 test('F04. owner dies after startup → /healthz becomes unhealthy', async () => {
   const w = fws('dies');
-  const identity = dbIdentityOf(w.db);
+  const other = fws('dies-other');
+  const identity = dbIdentityOf(other.db); // separate Owner database
   const sign = await dummySigningService(w.signSock);
   const owner = await stubOwner(w.authzSock, identity);
   let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
@@ -952,6 +995,7 @@ test('F04. owner dies after startup → /healthz becomes unhealthy', async () =>
     if (f) await f.close();
     await sign.close();
     w.cleanup();
+    other.cleanup();
   }
 });
 
@@ -985,7 +1029,8 @@ test('F05. owner closing mid-request resolves owner_unavailable without the full
 
 test('F06. facilitator database files are 0600 after startup', async () => {
   const w = fws('perm');
-  const identity = dbIdentityOf(w.db);
+  const other = fws('perm-other');
+  const identity = dbIdentityOf(other.db); // separate Owner database
   const sign = await dummySigningService(w.signSock);
   const owner = await stubOwner(w.authzSock, identity);
   let f: Awaited<ReturnType<typeof startFacilitator>> | null = null;
@@ -1005,6 +1050,7 @@ test('F06. facilitator database files are 0600 after startup', async () => {
     await owner.close();
     await sign.close();
     w.cleanup();
+    other.cleanup();
   }
 });
 
@@ -1024,5 +1070,11 @@ test('F06. facilitator database files are 0600 after startup', async () => {
     }
   }
   console.log(`\nfacilitator-sponsor-signer-wiring: ${passed}/${tests.length} passed, ${failed} failed`);
+  if (!hasIpc) {
+    // The cross-process section never ran: report SKIPPED (exit 3) so the
+    // runner treats this as a suite that did not execute, not a pass.
+    console.log('facilitator-sponsor-signer-wiring: SKIPPED — cross-process section did not execute (wrong OS identity)');
+    process.exit(3);
+  }
   process.exit(failed ? 1 : 0);
 })();

@@ -9,10 +9,12 @@
  *   - Durable request idempotency (requestId → canonical request identity).
  *   - Deterministic crash injection via CRASH_AT.
  *
- * It reads and writes the shared settlement database through the same repository
- * class the facilitator uses (SqliteSettlementRepository); it never signs and it
- * never submits. It owns the authorization decision: the durable state gate plus
- * the full policy, using the facilitator repository against a SQLite database.
+ * It reads Owner authorization state from its OWN private database and
+ * settlement state through a READ-ONLY interface to the facilitator's
+ * database . It never signs and it never submits. It owns the
+ * authorization decision: the durable state gate plus the full policy,
+ * using the Owner-private repository against a SQLite database only the
+ * Owner UID can open.
  *
  * Deployment configuration (environment; defaults preserve the original test
  * harness behaviour so existing protocol tests keep passing):
@@ -22,19 +24,34 @@
  *   AUTHZ_MAX_EXPIRY_OFFSET_SECONDS  max expiry offset from now (default: 600)
  *   AUTHZ_ALLOWED_ASSETS          comma-separated assets (default: CCD)
  *   AUTHZ_POLICY_VERSION          version recorded in sign events (default: v348)
- *   AUTHZ_DB_FILE                 authorization database file. Default: <db-dir>/auth.db.
- *                                 For a live deployment this MUST be the facilitator's
- *                                 database file: the owner reads the same `payments` rows
- *                                 the facilitator claims, and writes the same `sign_events`
- *                                 the facilitator recovers from. There is no "register
- *                                 payment" operation in the v1 protocol, so a separate
- *                                 database would see every payment as `unknown_payment`.
- *   AUTHZ_SEED_FIXTURES           '1' seeds the harness digests a..e into the
- *                                 database so protocol tests have something to authorize.
- *                                 Default is '0' (no seeding): a production database must
- *                                 never receive fake payments. Tests and the harness
- *                                 opt in explicitly with '1'.
- *   AUTHZ_AUTHORIZATION_KEY_FILE  REQUIRED (Task 11). PKCS8 PEM file holding the
+ *   AUTHZ_DB_FILE                 Owner-PRIVATE authorization database file.
+ *                                 Default: <db-dir>/authz.db. The directory
+ *                                 must be owned by the Owner UID, mode 0700;
+ *                                 the file is mode 0600. NEVER point this at
+ *                                 the facilitator database — a shared file is
+ *                                 refused at startup.
+ *   AUTHZ_SETTLEMENT_DB_FILE      REQUIRED . Absolute path of the
+ *                                 facilitator settlement database, opened
+ *                                 READ-ONLY to check payment state
+ *                                 (created + no persisted hash) before
+ *                                 authorizing or consuming. The Owner holds
+ *                                 no write handle to it. The file must be
+ *                                 readable by the Owner UID (deployment:
+ *                                 facilitator DB fileMode 0644 —
+ *                                 world-readable, owner-writable; never
+ *                                 grant group or world write, the launcher
+ *                                 refuses a settlement file writable by
+ *                                 its UID). The Owner
+ *                                 refuses to start if the settlement DB
+ *                                 still holds legacy `sign_events` rows —
+ *                                 run scripts/migrate-owner-authz-db.mts
+ *                                 first.
+ *   AUTHZ_SEED_FIXTURES           REMOVED: the Owner must never
+ *                                 write the settlement database, so fixture
+ *                                 seeding moved to the test harness (seed the
+ *                                 settlement DB directly before starting the
+ *                                 Owner). Setting it refuses startup.
+ *   AUTHZ_AUTHORIZATION_KEY_FILE  REQUIRED . PKCS8 PEM file holding the
  *                                 Owner's Ed25519 authorization-signing key (mode
  *                                 0600, owned by the Owner UID). The Owner signs
  *                                 one certificate per approval; the signing
@@ -44,15 +61,15 @@
  *   AUTHZ_SIGNING_SERVICE_UID     UID of the signing service (argv[5] overrides).
  *                                 Only this UID may call the `consume` operation.
  *                                 When unset, `consume` is refused outright.
- *   AUTHZ_REQUIRE_DISTINCT_OWNER_UID  '1' refuses to start when the facilitator
- *                                 UID equals the Owner's own UID, or when the
- *                                 signing-service UID equals the facilitator
- *                                 UID. Default '0' (test compatibility).
- *                                 PRODUCTION MUST SET '1': the certificate is
- *                                 the only thing stopping a compromised
- *                                 facilitator from forging approvals, and it
- *                                 holds only while the Owner key is out of the
- *                                 facilitator's reach.
+ *   AUTHZ_ALLOW_SAME_UID_HARNESS  '1' disables the distinct-UID refusal
+ *                                 below, for suites that deliberately share
+ *                                 one UID between the Owner and the
+ *                                 facilitator so they can exercise the
+ *                                 consume path against one database file.
+ *                                 Test-only: production never sets it, and
+ *                                 the refusal is ON by default, so a
+ *                                 same-UID deployment cannot slip through
+ *                                 by omission.
  *
  * Operations (v1): authorize, recover, db_identity, consume, revoke.
  *   - authorize/recover: facilitator UID only. On approval the response
@@ -70,11 +87,11 @@
 import { createServer } from 'node:net';
 import { mkdirSync, chmodSync, rmSync, existsSync, lstatSync, readFileSync, readdirSync, appendFileSync, realpathSync, statSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import type { KeyObject } from 'node:crypto';
 import { createPublicKey } from 'node:crypto';
 import { AccountAddress } from '@concordium/web-sdk';
-import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { SqliteOwnerAuthorizationRepository, ReadOnlySettlementStateReader } from '../services/facilitator/src/ownerAuthorizationRepository.js';
 import type { SignEventRow } from '../services/facilitator/src/repository.js';
 import { MockNarrowSponsorSigner } from '../services/facilitator/src/narrowSponsorMock.js';
 import {
@@ -130,12 +147,12 @@ const MAX_MSG = 64 * 1024;
 const dir = process.argv[2];
 const sock = process.argv[3];
 const facilitatorUid = Number(process.argv[4] ?? process.getuid());
-// Task 11: the signing-service UID gates the `consume` operation. argv[5]
+// the signing-service UID gates the `consume` operation. argv[5]
 // overrides the environment. When neither is set, `consume` is refused.
 const signingServiceUidRaw = process.argv[5] ?? process.env.AUTHZ_SIGNING_SERVICE_UID;
 const signingServiceUid = signingServiceUidRaw === undefined ? null : Number(signingServiceUidRaw);
 const crashAt = Number(process.env.CRASH_AT ?? 0);
-const logPath = process.env.TASK348_LOG ?? join(dir, 'owner.log');
+const logPath = process.env.AUTHZ_OWNER_LOG ?? join(dir, 'owner.log');
 
 if (!dir || !sock) {
   console.error('usage: authz-owner.mts <db-dir> <socket-path> <facilitator-uid> [signing-service-uid]');
@@ -146,13 +163,13 @@ if (signingServiceUid !== null && (!Number.isSafeInteger(signingServiceUid) || s
   process.exit(3);
 }
 
-// Task 11: the Owner's authorization-signing key. REQUIRED: without it the
+// the Owner's authorization-signing key. REQUIRED: without it the
 // Owner cannot issue certificates, and an approval without a certificate is
 // not verifiable authorization evidence. The key file must be mode 0600 and
 // owned by the Owner UID; only the public-key fingerprint is ever logged.
 const keyFile = process.env.AUTHZ_AUTHORIZATION_KEY_FILE;
 if (!keyFile) {
-  console.error('refusing to start: AUTHZ_AUTHORIZATION_KEY_FILE is required (Task 11: the Owner signs one certificate per approval)');
+  console.error('refusing to start: AUTHZ_AUTHORIZATION_KEY_FILE is required (the Owner signs one certificate per approval)');
   process.exit(3);
 }
 let ownerKey: KeyObject;
@@ -163,19 +180,26 @@ try {
   process.exit(3);
 }
 
-// Task 11: opt-in deployment hardening. When AUTHZ_REQUIRE_DISTINCT_OWNER_UID=1
-// the Owner refuses to run under the facilitator's UID, and refuses a
-// signing-service UID equal to the facilitator UID. The certificate design
-// assumes the Owner key is out of the facilitator's reach; same-UID
-// deployment voids that assumption. Default '0' keeps the test harness
-// (which runs everything as one user) working; production MUST set '1'.
-if (process.env.AUTHZ_REQUIRE_DISTINCT_OWNER_UID === '1') {
+// Deployment hardening, enforced by default. The Owner refuses to run
+// under the facilitator's UID, and refuses a signing-service UID equal to
+// the facilitator UID. The certificate design assumes the Owner key is out
+// of the facilitator's reach; same-UID deployment voids that assumption.
+// The only exception is an explicit test-harness opt-out
+// (AUTHZ_ALLOW_SAME_UID_HARNESS=1), for suites that deliberately share one
+// UID between the Owner and the facilitator so they can exercise the
+// consume path against one database file. Production never sets it, so the
+// refusal cannot be missed by omission.
+const sameUidHarness = process.env.AUTHZ_ALLOW_SAME_UID_HARNESS === '1';
+if (sameUidHarness) {
+  console.error('WARNING: same-UID harness mode — Owner/facilitator UID separation is disabled (test-only, never set in production)');
+}
+if (!sameUidHarness) {
   if (facilitatorUid === process.getuid()) {
-    console.error('refusing to start: AUTHZ_REQUIRE_DISTINCT_OWNER_UID=1 and the facilitator UID equals the Owner UID — run the Owner as a distinct user');
+    console.error('refusing to start: the facilitator UID equals the Owner UID — run the Owner as a distinct user');
     process.exit(3);
   }
   if (signingServiceUid !== null && signingServiceUid === facilitatorUid) {
-    console.error('refusing to start: AUTHZ_REQUIRE_DISTINCT_OWNER_UID=1 and the signing-service UID equals the facilitator UID');
+    console.error('refusing to start: the signing-service UID equals the facilitator UID');
     process.exit(3);
   }
 }
@@ -205,32 +229,119 @@ if (st) {
     process.exit(3);
   }
 }
+// A pre-existing directory is NEVER silently repaired: its mode is the
+// deployment boundary, and chmodding it to 0700 here would mask a
+// misconfigured boundary (a 0777 dir would start fine and the check below
+// could never fire). Only a directory the launcher itself just created is
+// chmodded (to defeat the caller's umask); a pre-existing wrong mode
+// refuses to start below.
+const dirExisted = existsSync(dir);
 mkdirSync(dir, { recursive: true, mode: 0o700 });
-chmodSync(dir, 0o700);
+if (!dirExisted) chmodSync(dir, 0o700);
+// The Owner directory is the access boundary for the private database and
+// the authorization key: it must be owned by the Owner UID. A directory
+// owned by someone else (e.g. a leftover from a shared-DB deployment)
+// refuses to start instead of running with a boundary that does not hold.
+// (Root owns whatever it creates, so the check passes for root-run harnesses.)
+try {
+  const dirStat = statSync(dir);
+  if (dirStat.uid !== process.getuid()) {
+    console.error(`refusing to start: Owner directory ${dir} is owned by uid ${dirStat.uid}, not the Owner uid ${process.getuid()}`);
+    process.exit(3);
+  }
+  if ((dirStat.mode & 0o777) !== 0o700) {
+    console.error(`refusing to start: Owner directory ${dir} is mode 0o${(dirStat.mode & 0o777).toString(8)}, expected 0700`);
+    process.exit(3);
+  }
+} catch (e) {
+  console.error(`refusing to start: cannot stat Owner directory ${dir}: ${(e as Error).message}`);
+  process.exit(3);
+}
 
-// Authorization database. Default: <db-dir>/auth.db (the harness layout). A live
-// deployment points this at the facilitator's database file so the owner reads the
-// same payment rows the facilitator claims. The idempotency store below stays
-// owner-private regardless.
+// ── Owner-private authorization database  ─────────────────────
+// The Owner writes authorization state ONLY here. Default: <db-dir>/authz.db.
+// A live deployment MUST point this at a file in this Owner-owned directory;
+// pointing it at the facilitator database is a shared-database configuration
+// and is refused below. The idempotency store below stays owner-private regardless.
 const dbFileEnv = process.env.AUTHZ_DB_FILE;
 if (dbFileEnv !== undefined && !dbFileEnv.startsWith('/')) {
   console.error('refusing to start: AUTHZ_DB_FILE must be an absolute path');
   process.exit(3);
 }
-const db = dbFileEnv ?? `${dir}/auth.db`;
-const repo = new SqliteSettlementRepository(db, { now: () => Date.now() });
-const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => Date.now() });
+const db = dbFileEnv ?? `${dir}/authz.db`;
 
-// Fixture seeding (harness only). Default OFF: a production database must never
-// receive fake payments. Tests and the harness opt in explicitly with
-// AUTHZ_SEED_FIXTURES=1, and only ever against a test database.
-if (process.env.AUTHZ_SEED_FIXTURES === '1') {
-  for (const c of ['a', 'b', 'c', 'd', 'e']) {
-    const digest = c.repeat(64);
-    repo.noteVerified(digest, 'k');
-    repo.claim(digest, 'k');
+// Fixture seeding was REMOVED: the Owner must never write the
+// settlement database. Tests seed the settlement DB directly before starting
+// the Owner. Setting the variable refuses startup so a stale harness fails
+// loudly instead of silently authorizing nothing.
+if (process.env.AUTHZ_SEED_FIXTURES !== undefined) {
+  console.error('refusing to start: AUTHZ_SEED_FIXTURES was removed — seed the settlement database directly (the Owner never writes it)');
+  process.exit(3);
+}
+
+// Settlement database (read-only). REQUIRED: without it the Owner cannot
+// verify a payment is authorizable and every authorization fails closed.
+const settlementDbFile = process.env.AUTHZ_SETTLEMENT_DB_FILE;
+if (!settlementDbFile) {
+  console.error('refusing to start: AUTHZ_SETTLEMENT_DB_FILE is required (absolute path of the facilitator settlement database, opened read-only)');
+  process.exit(3);
+}
+if (!settlementDbFile.startsWith('/')) {
+  console.error('refusing to start: AUTHZ_SETTLEMENT_DB_FILE must be an absolute path');
+  process.exit(3);
+}
+const resolvedOwnerDb = (() => { try { return realpathSync(db); } catch { return db; } })();
+const resolvedSettlementDb = (() => { try { return realpathSync(settlementDbFile); } catch { return settlementDbFile; } })();
+if (resolvedOwnerDb === resolvedSettlementDb) {
+  console.error('refusing to start: AUTHZ_DB_FILE and AUTHZ_SETTLEMENT_DB_FILE point at the same file — Owner authorization storage must be separate from facilitator settlement storage');
+  process.exit(3);
+}
+if (dirname(resolvedSettlementDb) === dirname(resolvedOwnerDb)) {
+  console.error('refusing to start: AUTHZ_SETTLEMENT_DB_FILE lives in the Owner database directory — settlement and authorization storage must be in separate directories');
+  process.exit(3);
+}
+if (dirname(resolvedOwnerDb) !== realpathSync(dir)) {
+  console.error('refusing to start: AUTHZ_DB_FILE must live in the Owner directory — the Owner-private database cannot sit in a facilitator-writable path');
+  process.exit(3);
+}
+// Defense-in-depth: the Owner must not be able to WRITE the settlement file.
+// The SQLite read-only open below is the real enforcement; this check catches
+// a misconfigured deployment early. Root bypasses permission bits, so the
+// check is skipped for uid 0 (it cannot distinguish anything there).
+if (process.getuid() !== 0 && existsSync(settlementDbFile)) {
+  try {
+    const sst = statSync(settlementDbFile);
+    const myGroups = new Set(process.getgroups?.() ?? []);
+    const writable =
+      (sst.uid === process.getuid() && (sst.mode & 0o200) !== 0) ||
+      (myGroups.has(sst.gid) && (sst.mode & 0o020) !== 0) ||
+      (sst.mode & 0o002) !== 0;
+    if (writable) {
+      console.error('refusing to start: AUTHZ_SETTLEMENT_DB_FILE is writable by the Owner uid — the Owner must only ever read settlement state');
+      process.exit(3);
+    }
+  } catch {
+    // A stat failure here is not a startup blocker: the read-only open below
+    // fails closed on its own if the file cannot be read.
   }
 }
+
+const settlementState = new ReadOnlySettlementStateReader(settlementDbFile);
+// Legacy-state gate: a settlement database that still holds pre-11.1
+// authorization rows must be migrated explicitly first. Refusing here keeps
+// the migration from ever happening silently or partially.
+const legacy = settlementState.legacyAuthorizationState();
+if (legacy === 'present') {
+  console.error('refusing to start: settlement database still holds legacy sign_events/sign_attempts rows — run scripts/migrate-owner-authz-db.mts first (it copies authorization state into the Owner-private database without modifying the settlement file)');
+  process.exit(3);
+}
+if (legacy === 'unreadable') {
+  console.error('refusing to start: cannot inspect the settlement database for legacy authorization state — check that AUTHZ_SETTLEMENT_DB_FILE exists and is readable by the Owner uid');
+  process.exit(3);
+}
+
+const repo = new SqliteOwnerAuthorizationRepository(db, settlementState, { now: () => Date.now() });
+const signer = new MockNarrowSponsorSigner({ policy: POLICY, repository: repo, now: () => Date.now() });
 
 // ── durable idempotency store (owner-only) ───────────────────────────────────
 const idemDb = new DatabaseSync(`${dir}/idem.db`);
@@ -258,7 +369,7 @@ const canonicalOf = (req: Record<string, unknown>): string => {
   const c = req.context as Record<string, unknown>;
   // Canonical identity: protocol version + operation + payment digest + normalized context.
   // Energy is normalized to a decimal string so "3000" and "03000" are equivalent.
-  // Task 11: the exact-transaction binding fields are part of the identity —
+  // the exact-transaction binding fields are part of the identity —
   // the same requestId must never authorize two different transactions.
   return JSON.stringify({
     v: req.protocolVersion,
@@ -280,7 +391,7 @@ const canonicalOf = (req: Record<string, unknown>): string => {
 };
 
 /**
- * Task 11 — check a durable approval against the request context.
+ * check a durable approval against the request context.
  * Returns the list of mismatching fields. NULL in the record means the
  * approval predates the binding — that is reported as legacy, and the
  * caller fails closed with a distinct reason.
@@ -315,7 +426,7 @@ const matchApproval = (
 };
 
 /**
- * Task 11 — issue (or re-issue) the certificate for a durable approval,
+ * issue (or re-issue) the certificate for a durable approval,
  * from the stored row. Ed25519 is deterministic, so re-issuing the same
  * approval with the row's decided_at as issuedAt reproduces the identical
  * bytes. Returns null when the row predates the certificate binding.
@@ -408,7 +519,7 @@ const crash = (point: number, why: string): void => {
 // getsockopt(SO_PEERCRED) on the accepted socket fd. The fd comes from the Node socket
 // handle; the kernel -- not the caller -- reports the identity.
 import { execFileSync } from 'node:child_process';
-const PEERCRED_BIN = process.env.TASK348_PEERCRED_BIN ?? `${process.cwd()}/scripts/authz-peercred`;
+const PEERCRED_BIN = process.env.AUTHZ_OWNER_PEERCRED_BIN ?? `${process.cwd()}/scripts/authz-peercred`;
 
 type PeerCred = { uid: number; gid: number; pid: number };
 const peerCredOf = (conn: import('node:net').Socket): PeerCred | null => {
@@ -506,7 +617,7 @@ const validate = (req: Record<string, unknown>): { ok: true } | { ok: false; rea
   if (typeof c.amount !== 'string' || !/^[0-9]+$/.test(c.amount)) return { ok: false, reason: 'invalid_field' };
   if (typeof c.expiry !== 'number' || !Number.isInteger(c.expiry)) return { ok: false, reason: 'invalid_field' };
   if (typeof c.energy !== 'string' || !/^[0-9]+$/.test(c.energy)) return { ok: false, reason: 'energy_malformed' };
-  // Task 11: the authorization binds the exact transaction.
+  // the authorization binds the exact transaction.
   if (typeof c.transactionDigest !== 'string' || !/^[0-9a-f]{64}$/.test(c.transactionDigest)) return { ok: false, reason: 'invalid_field' };
   if (typeof c.transactionType !== 'string' || c.transactionType.length < 1 || c.transactionType.length > 64) return { ok: false, reason: 'invalid_field' };
   if (typeof c.maxFeeMicroCcd !== 'string' || !/^[0-9]+$/.test(c.maxFeeMicroCcd)) return { ok: false, reason: 'invalid_field' };
@@ -548,7 +659,7 @@ const server = createServer((conn) => {
       const requestId = req.requestId as string;
 
       // 1. peer credentials (before any authorization processing). The
-      //    expected peer depends on the operation (Task 11): the signing
+      //    expected peer depends on the operation : the signing
       //    service alone may consume an authorization; every other
       //    operation is facilitator-only. A request that names no
       //    operation, or an unknown one, is gated on the facilitator UID
@@ -594,7 +705,9 @@ const server = createServer((conn) => {
           conn.write(JSON.stringify({ protocolVersion: 1, requestId, outcome: 'protocol_error', reason: 'db_identity_unavailable', detail: String((e as Error)?.message ?? e) }) + '\n');
           continue;
         }
-        conn.write(JSON.stringify({ protocolVersion: 1, requestId, outcome: 'ok', dbPath: resolved, dbDev: st.dev, dbIno: st.ino }) + '\n');
+        // ownerUid lets the facilitator prove the Owner runs as a UID
+        // distinct from its own and from the signing service (real mode).
+        conn.write(JSON.stringify({ protocolVersion: 1, requestId, outcome: 'ok', dbPath: resolved, dbDev: st.dev, dbIno: st.ino, ownerUid: process.getuid() }) + '\n');
         continue;
       }
 
@@ -605,7 +718,7 @@ const server = createServer((conn) => {
       if (req.operation === 'recover') {
         const ctx = req.context as Record<string, unknown>;
         const digest = req.paymentDigest as string;
-        const payment = repo.get(digest);
+        const payment = settlementState.getPaymentState(digest);
         if (!payment) {
           conn.write(JSON.stringify({
             protocolVersion: 1, requestId, outcome: 'unknown',
@@ -648,7 +761,7 @@ const server = createServer((conn) => {
         }
 
         // Exactly one approval. Prove its context matches the request before reporting it.
-        // Task 11: a consumed approval cannot authorize a second signing, and
+        // a consumed approval cannot authorize a second signing, and
         // a revoked approval cannot authorize at all — both fail here, before
         // any certificate is issued.
         const ev = approvedEvents[0];
@@ -701,7 +814,7 @@ const server = createServer((conn) => {
         continue;
       }
 
-      // Task 11 — consume: the signing service alone (peer-gated above)
+      // consume: the signing service alone (peer-gated above)
       // spends one approval. Atomic in the repository: concurrent consumes
       // of the same authorization yield exactly one 'consumed'.
       if (req.operation === 'consume') {
@@ -741,7 +854,7 @@ const server = createServer((conn) => {
         continue;
       }
 
-      // Task 11 — revoke: the facilitator spends nothing; it marks an
+      // revoke: the facilitator spends nothing; it marks an
       // unconsumed approval unusable. Idempotent; a consumed approval
       // cannot be revoked.
       if (req.operation === 'revoke') {
@@ -774,7 +887,7 @@ const server = createServer((conn) => {
           conn.write(JSON.stringify({ protocolVersion: 1, requestId, outcome: 'rejected', reason: 'request_id_conflict' }) + '\n');
           continue;
         }
-        // Task 11: the idempotency store holds no certificate (no schema
+        // the idempotency store holds no certificate (no schema
         // change). Re-derive it from the durable approval row, so a replayed
         // approval carries the same verifiable evidence as the first answer.
         // A consumed/revoked/mismatched approval yields no certificate —
@@ -802,8 +915,8 @@ const server = createServer((conn) => {
 
       crash(1, 'before authorization transaction');
 
-      // 3. resolve durable payment state
-      const row = repo.get(req.paymentDigest as string);
+      // 3. resolve durable payment state (read-only settlement interface)
+      const row = settlementState.getPaymentState(req.paymentDigest as string);
       if (!row) {
         const r = { protocolVersion: 1, requestId, outcome: 'rejected', reason: 'unknown_payment', detail: null, decidedAt: Date.now(), policyVersion: POLICY.policyVersion };
         idemPut(requestId, canonical, r);
@@ -825,7 +938,7 @@ const server = createServer((conn) => {
         expiry: (req.context as Record<string, unknown>).expiry as number,
         energy: BigInt((req.context as Record<string, unknown>).energy as string),
         paymentDigest: req.paymentDigest as string,
-        // Task 11: the authorization binds the exact transaction.
+        // the authorization binds the exact transaction.
         transactionDigest: (req.context as Record<string, unknown>).transactionDigest as string,
         transactionType: (req.context as Record<string, unknown>).transactionType as string,
         maxFeeMicroCcd: (req.context as Record<string, unknown>).maxFeeMicroCcd as string,
@@ -837,7 +950,7 @@ const server = createServer((conn) => {
       crash(3, 'after authorize() committed, before idempotency record');
 
       const outcome = result.approved ? 'approved' : 'rejected';
-      // Task 11: on approval, issue the certificate from the durable row —
+      // on approval, issue the certificate from the durable row —
       // the row is the authoritative record, and its decided_at is the
       // issuance time (so a later re-issue reproduces identical bytes).
       // An approval whose row cannot be read back is reported as a

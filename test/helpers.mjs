@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 
 export const ROOT = new URL('..', import.meta.url).pathname;
 export const FIXTURES = `${ROOT}test/fixtures/`;
-export const EVIDENCE = `${ROOT}docs/evidence/task02/`;
+export const EVIDENCE = `${ROOT}docs/evidence/agent-card/`;
 
 export const readJson = p => JSON.parse(readFileSync(p, 'utf8'));
 export const readText = p => readFileSync(p, 'utf8');

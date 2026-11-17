@@ -16,6 +16,7 @@ import { IpcAuthorizationClient } from '../services/facilitator/src/authorizatio
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { signingDigestOf } from '../services/facilitator/src/signingService.js';
 import { generateOwnerAuthorizationKeyPair, ownerAuthorizationPublicKeyHex } from '../services/facilitator/src/ownerAuthorization.js';
+import { requireFacilitatorProcess } from './os-identity.mts';
 import { recomputedEnergyOf } from './owner-authz-helper.mjs';
 import { randomUUID } from 'node:crypto';
 
@@ -23,8 +24,6 @@ const SPONSOR = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const RECIPIENT = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const NETWORK = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
-const FACILITATOR_UID = 1001;
-const FACILITATOR_GID = 1002;
 const OWNER_USER = 'authowner';
 
 /** Signable fixture transaction (protocol v2: the client sends this, not a bare digest). */
@@ -48,12 +47,7 @@ const check = (name: string, pass: boolean, detail = '') => {
   console.log(`${pass ? 'ok  ' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 
-const uid = typeof process.getuid === 'function' ? process.getuid() : -1;
-const gids = typeof process.getgroups === 'function' ? process.getgroups() : [];
-if (uid !== FACILITATOR_UID || !gids.includes(FACILITATOR_GID)) {
-  console.log(`separate-process-signing: SKIPPED — requires uid ${FACILITATOR_UID} + group ${FACILITATOR_GID}`);
-  process.exit(0);
-}
+const FACILITATOR_UID = requireFacilitatorProcess('separate-process-signing');
 
 const mkBase = () => {
   const base = mkdtempSync(join(tmpdir(), 't44-'));
@@ -66,7 +60,7 @@ const mkBase = () => {
 };
 
 /**
- * Task 11 — the suite-level Owner. The signing service (a separate process)
+ * the suite-level Owner. The signing service (a separate process)
  * verifies Owner certificates and consumes them at the Owner before signing,
  * so the valid-request tests need a real Owner. One Owner for the suite,
  * one fresh approval per test (consumption is single-use).
@@ -78,7 +72,11 @@ const mkBase = () => {
  */
 const ownerBase = mkdtempSync(join(tmpdir(), 't44-owner-'));
 const ownerSock = join(ownerBase, 'owner.sock');
-const ownerDb = join(ownerBase, 'owner.db');
+// split storage. The settlement database lives in its own
+// directory (the launcher refuses it inside the Owner directory), and the
+// Owner-private database is a fresh file inside the Owner directory.
+const settlementBase = mkdtempSync(join(tmpdir(), 't44-settlement-'));
+const ownerDb = join(settlementBase, 'f.db');
 const ownerKey = generateOwnerAuthorizationKeyPair();
 const ownerKeyFile = join(ownerBase, 'owner-key.pem');
 writeFileSync(ownerKeyFile, ownerKey.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
@@ -87,6 +85,13 @@ const ownerClient = new IpcAuthorizationClient(ownerSock);
 let ownerProc: ReturnType<typeof spawn> | null = null;
 
 const startOwner = async () => {
+  // this harness runs the Owner as the test UID (same-UID,
+  // transport-only — see the comment above), so the launcher's
+  // startup guard would refuse a group/other-writable settlement file
+  // owned by that UID. Present it read-only at startup: the in-process
+  // settlement connection stays open, so later seeds still write via
+  // its file descriptor.
+  chmodSync(ownerDb, 0o400);
   const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/authz-owner.mts`, ownerBase, ownerSock, String(FACILITATOR_UID), String(FACILITATOR_UID)], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
@@ -97,9 +102,13 @@ const startOwner = async () => {
       AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
       AUTHZ_ALLOWED_ASSETS: 'CCD',
       AUTHZ_POLICY_VERSION: 't44',
-      AUTHZ_DB_FILE: ownerDb,
-      AUTHZ_SEED_FIXTURES: '0',
+      AUTHZ_DB_FILE: join(ownerBase, 'authz.db'),
+      AUTHZ_SETTLEMENT_DB_FILE: ownerDb,
       AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
+      // Same-UID harness: the Owner runs as the test process here, so
+      // the launcher's default distinct-UID refusal is opted out
+      // explicitly (test-only, never set in production).
+      AUTHZ_ALLOW_SAME_UID_HARNESS: '1',
     },
   });
   await new Promise<void>((resolve, reject) => {
@@ -152,7 +161,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const startService = async (sock: string, allowedUid: number) => {
   const proc = spawn('npx', ['tsx', `${process.cwd()}/scripts/signing-ipc-service.mts`, sock, SPONSOR, NETWORK, String(allowedUid)], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    // Task 11: the service verifies Owner certificates and consumes them at
+    // the service verifies Owner certificates and consumes them at
     // the Owner before signing.
     env: {
       ...process.env,
@@ -182,7 +191,7 @@ const stopProc = async (proc: ReturnType<typeof spawn>) => {
 
 const runClient = (sock: string, expectedUid: number, txFile: string, certFile?: string): Promise<{ ok: boolean; signature?: string; error?: string; pid?: number; uid?: number }> => {
   return new Promise((resolve) => {
-    // Task 11: the client carries the Owner authorization certificate for
+    // the client carries the Owner authorization certificate for
     // the fixture transaction (and defaults the payment digest to the
     // certificate's). Without it the client refuses before any socket
     // activity.
@@ -374,7 +383,7 @@ test('09. distinct PIDs prove process separation', async () => {
     rmSync(ownerBase, { recursive: true, force: true });
   }
   // The `check()` helper records results without throwing: a failing check
-  // must fail the suite, or the summary lies. (Before Task 11 this suite
+  // must fail the suite, or the summary lies. (Before  this suite
   // reported "9/9 passed" while checks failed.)
   const checkFailed = results.filter(([, pass]) => !pass).length;
   const totalFailed = failed + checkFailed;

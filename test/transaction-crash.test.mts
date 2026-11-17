@@ -89,8 +89,8 @@ type Owner = { proc: ReturnType<typeof spawn> };
 const startOwner = async (crashAt: number): Promise<Owner> => {
   const proc = spawn('sudo', [
     '-u', OWNER_USER, 'env',
-    `TASK349_LOG=${logPath}`,
-    `TASK349_PEERCRED_BIN=${peercredBin}`,
+    `AUTHZ_CRASH_OWNER_LOG=${logPath}`,
+    `AUTHZ_CRASH_OWNER_PEERCRED_BIN=${peercredBin}`,
     `CRASH_AT=${crashAt}`,
     'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -125,7 +125,7 @@ const send = async (request: unknown, as = 'ubuntu') => {
   return { raw: r.stdout, parsed, code: r.code, stderr: r.stderr };
 };
 
-const queryDb = async (sql: string) => {
+const queryDb = async (sql: string, dbFile = 'auth.db') => {
   const script = join(process.cwd(), 'scripts', 'sqlite-crash-query.mts');
   writeFileSync(script, `
 import { DatabaseSync } from 'node:sqlite';
@@ -135,12 +135,14 @@ console.log(JSON.stringify(rows));
 db.close();
 `);
   chmodSync(script, 0o644);
-  const r = await run('npx', ['tsx', script, join(dbDir, 'auth.db'), sql], OWNER_USER, 20000);
+  const r = await run('npx', ['tsx', script, join(dbDir, dbFile), sql], OWNER_USER, 20000);
   try { return JSON.parse(r.stdout) as Array<Record<string, unknown>>; } catch { return []; }
 };
 
 const approvalCount = async (digest: string) => {
-  const rows = await queryDb(`SELECT COUNT(*) AS n FROM sign_events WHERE payment_digest = '${digest}' AND decision = 'approved'`);
+  // approvals live in the Owner-private database, not the
+  // settlement database.
+  const rows = await queryDb(`SELECT COUNT(*) AS n FROM authorizations WHERE payment_digest = '${digest}' AND decision = 'approved'`, 'authz.db');
   return Number((rows[0] as { n: number })?.n ?? 0);
 };
 

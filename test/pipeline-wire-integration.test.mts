@@ -13,6 +13,7 @@ import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { createMockSigner } from '../services/facilitator/src/signer.js';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
+import { ownerRepoFor } from './owner-authz-helper.mjs';
 import { deriveEnergyExposure, SIMPLE_TRANSFER_BASE_COST } from '../services/facilitator/src/energy.js';
 import { paymentDigest } from '../services/facilitator/src/store.js';
 import { convertV2ToSdkV1 } from '../services/facilitator/src/wireConverter.js';
@@ -111,9 +112,13 @@ const buildCore = (over: {
     getTokenDecimals: inner.getTokenDecimals,
   };
   const repo = new SqliteSettlementRepository(over.dbPath, { now: over.now });
+  // the authorization boundary writes Owner-private state only.
+  // The settlement repository no longer holds (or creates) the authorization
+  // tables, so the local client gets a real Owner repository paired with
+  // this settlement database; the settlement repo stays the payment store.
   const authz =
     over.authz ??
-    new LocalAuthorizationClient({ policy, repository: repo, now: over.now });
+    new LocalAuthorizationClient({ policy, repository: ownerRepoFor(over.dbPath, repo, over.now), now: over.now });
   const core = new FacilitatorCore({
     network: CAIP2,
     signer,
@@ -191,7 +196,7 @@ test('04. wrong sponsor is rejected before the signer', async () => {
   (bad.paymentPayload as any).accepted.extra.feePayer = RECIPIENT;
   const res = await core.settle(bad);
   check('04. settle refused', res.success === false, String(res.errorReason));
-  // Task 11: conversion runs before authorization (to bind the request), so
+  // conversion runs before authorization (to bind the request), so
   // the converter is reached once; the signer is never reached.
   eq(calls.convert, 1, 'converter called once to bind the authorization request');
   eq(calls.sign, 0, 'signer not reached');
@@ -245,7 +250,7 @@ test('07. unsupported transaction version is rejected', async () => {
 });
 
 // ── 8. rejected authorization → signer never reached ────────────────────────
-// Task 11: wire conversion runs BEFORE authorization (the authorization must
+// wire conversion runs BEFORE authorization (the authorization must
 // bind the exact converted transaction), so a rejected authorization still
 // sees exactly one converter call — to build the binding — but the signer
 // and submitter are never reached.
@@ -341,7 +346,7 @@ test('11. durable hash is persisted before submit eligibility', async () => {
     signer,
     dbPath: db,
     now: () => NOW * 1000,
-    authorization: new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 }),
+    authorization: new LocalAuthorizationClient({ policy, repository: ownerRepoFor(db, repo, () => NOW * 1000), now: () => NOW * 1000 }),
   });
   const res = await core.settle(envelope());
   check('11. settle succeeded', res.success === true, res.success ? 'ok' : String(res.errorMessage));

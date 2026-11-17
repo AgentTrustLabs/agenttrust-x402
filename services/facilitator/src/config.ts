@@ -16,6 +16,17 @@ export interface FacilitatorConfig {
    * Never a secret. Validated for shape only.
    */
   sponsorAddress: string | null;
+  /**
+   * Mock-mode-only override for the address the mock signer reports as the
+   * sponsor . The mock signer normally derives its own obviously-
+   * fake placeholder, and a real Owner refuses to authorize that: the
+   * launcher validates its policy sponsor with AccountAddress.fromBase58
+   * and every request must match it. Without this knob no mock-mode
+   * facilitator can ever talk to a real Owner, so the cross-process
+   * recovery path (prebroadcast W5) would be untestable. Validated as a
+   * Concordium account; rejected outright in real mode. Never a secret.
+   */
+  mockSponsorAddress: string | null;
   /** CAIP-2 network this facilitator serves. Testnet only in this prototype. */
   network: string;
   /** How long a submitted transaction may be considered `pending` before it is terminal. */
@@ -24,6 +35,15 @@ export interface FacilitatorConfig {
   replayTtlMs: number;
   /** SQLite file for durable settlement state. `:memory:` only for tests. */
   dbPath: string;
+  /**
+   * Permission bits for the settlement database file (and its WAL/-shm),
+   * e.g. `0644`. Default `0600` (single-UID deployment). A deployment that
+   * shares the file across two UIDs — facilitator writes, Owner reads —
+   * must pass `0644`: the Owner reads through the world-read bit and the
+   * launcher refuses startup if the file is writable by the Owner UID, so
+   * the mode must never grant group or world write.
+   */
+  dbFileMode: number | null;
   /** Whether /reconcile is exposed at all. Off unless explicitly enabled. */
   reconcileEnabled: boolean;
   /** SHA-256 digest of the operator token. Never the token itself. */
@@ -216,6 +236,18 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     );
   }
 
+  // mock-mode-only address the mock signer reports (see the
+  // interface comment). Real mode must never use it: a real settlement is
+  // sponsored by the provisioned signer, never by a mock placeholder.
+  const mockSponsorRaw = env['FACILITATOR_MOCK_SPONSOR_ADDRESS'];
+  const mockSponsorAddress = mockSponsorRaw === undefined || mockSponsorRaw === '' ? null : mockSponsorRaw;
+  if (mockSponsorAddress !== null && !isConcordiumAccount(mockSponsorAddress)) {
+    throw new ConfigurationError('FACILITATOR_MOCK_SPONSOR_ADDRESS is not a Concordium base58check account');
+  }
+  if (mode === 'real' && mockSponsorAddress !== null) {
+    throw new ConfigurationError('real mode must not be given FACILITATOR_MOCK_SPONSOR_ADDRESS');
+  }
+
   const pendingTtlMs = Number(env['FACILITATOR_PENDING_TTL_MS'] ?? 120_000);
   const replayTtlMs = Number(env['FACILITATOR_REPLAY_TTL_MS'] ?? 600_000);
   for (const [name, v] of [
@@ -255,9 +287,21 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     throw new ConfigurationError('FACILITATOR_DB_PATH must be a non-empty path');
   }
   // A durable service must not silently fall back to memory: that is exactly the restart bug
-  // this task exists to fix.
+  // this change exists to fix.
   if (mode === 'real' && dbPath === ':memory:') {
     throw new ConfigurationError('real mode requires a durable FACILITATOR_DB_PATH, not :memory:');
+  }
+
+  const dbFileModeRaw = env['FACILITATOR_DB_FILE_MODE'];
+  let dbFileMode: number | null = null;
+  if (dbFileModeRaw !== undefined && dbFileModeRaw !== '') {
+    if (!/^0[0-7]{3}$/.test(dbFileModeRaw)) {
+      throw new ConfigurationError('FACILITATOR_DB_FILE_MODE must be an octal mode like 0644');
+    }
+    dbFileMode = parseInt(dbFileModeRaw, 8);
+    if ((dbFileMode & 0o022) !== 0) {
+      throw new ConfigurationError('FACILITATOR_DB_FILE_MODE must not grant group or world write — the Owner launcher refuses a settlement file writable by its UID');
+    }
   }
 
   const reconcileEnabled = env['FACILITATOR_RECONCILE_ENABLED'] === '1';
@@ -466,10 +510,12 @@ export function loadConfig(env: Record<string, string | undefined>): Facilitator
     host,
     port,
     sponsorAddress,
+    mockSponsorAddress,
     network,
     pendingTtlMs,
     replayTtlMs,
     dbPath,
+    dbFileMode,
     reconcileEnabled,
     operatorTokenSha256,
     operatorTokenExpiresAt,

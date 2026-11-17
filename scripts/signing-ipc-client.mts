@@ -11,7 +11,7 @@
  * signer, so the service validates the digest against the transaction it parses.
  * No bare digest is ever sent.
  *
- * Task 11 (protocol v3): signing also requires an Owner authorization
+ * Protocol v3: signing also requires an Owner authorization
  * certificate and the payment digest it belongs to. Pass the certificate as a
  * JSON file ([cert-json-file]); the payment digest defaults to the
  * certificate's paymentDigest. Without a certificate the signer refuses

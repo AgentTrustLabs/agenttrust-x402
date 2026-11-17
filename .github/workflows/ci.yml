@@ -15,12 +15,20 @@
 # of the workflow fixes the environment part; the code fixes travel with
 # the next push of the four changed files.
 #  - test/ipc-protocol.test.mts, test/process-boundary.test.mts,
-#    test/transaction-crash.test.mts: need OS users authowner, ubuntu and
-#    authzintruder (group authclients), run via sudo. The setup step creates
+#    test/transaction-crash.test.mts: need OS users authowner, ubuntu,
+#    authzintruder and authsigner (group authclients), run via sudo. The setup step creates
 #    them with a home directory and makes the checkout readable; UID 1001
 #    is taken by the `runner` user on GitHub-hosted runners, so `ubuntu`
 #    gets a free UID and the tests read it via TEST_FACILITATOR_UID
 #    (default 1001).
+#  - Six suites used to SKIP in CI and were still counted PASS by the old
+#    runner: owner-storage-isolation (needs root), ipc-context,
+#    ipc-recovery, ipc-signing, response-loss, separate-process-signing
+#    (need the facilitator UID + authclients group). test/run.mjs now
+#    invokes them under the right identity (sudo / sudo -u ubuntu), the
+#    gates resolve the UID/GID at runtime instead of hardcoding 1001/1002,
+#    a skip exits 3 and fails the run, and ubuntu gets a passwordless
+#    sudoers entry so its own setup chowns and Owner spawns work.
 #  - test/lock-hardening.test.mts E1: torn-write race in the audit lock —
 #    a contender could read the lock file while its creator was still
 #    writing it and fail as unrecoverable. Fixed: pre-stringify before
@@ -66,7 +74,11 @@ jobs:
       # 1001). `authowner`'s UID does not matter to the tests (only the name
       # is used), so it takes 997 when free, otherwise any free UID.
       # `authzintruder` must be a different UID from the facilitator and a
-      # member of authclients.
+      # member of authclients. `authsigner` plays the signing-service role
+      # in the owner-storage-isolation suite: the Owner and the facilitator
+      # enforce distinct UIDs for the Owner, the facilitator and the
+      # signing service, so the signing calls must come from a third UID
+      # (they cannot share the facilitator's UID).
       #
       # Two environment facts the CI #1 run exposed (run 42839620365):
       #  - The users need a real home directory. Created with `-M` (no
@@ -96,8 +108,25 @@ jobs:
           if ! id -u authzintruder >/dev/null 2>&1; then
             sudo useradd -m -s /usr/sbin/nologin authzintruder
           fi
+          if ! id -u authsigner >/dev/null 2>&1; then
+            sudo useradd -m -s /usr/sbin/nologin authsigner
+          fi
           sudo usermod -aG authclients ubuntu
           sudo usermod -aG authclients authzintruder
+          sudo usermod -aG authclients authsigner
+          # the Owner (authowner) must also be in authclients —
+          # the owner-storage-isolation suite serves the Owner socket from a
+          # group-gated directory and drives the facilitator side as ubuntu.
+          sudo usermod -aG authclients authowner
+          # The IPC suites run as ubuntu (test/run.mjs invokes them via
+          # `sudo -u ubuntu`), and from there they must sudo back to root
+          # (directory chown) and to authowner (Owner spawn). The runner's
+          # own sudo does not transfer: a sudoers entry for ubuntu is what
+          # makes those suites executable at all. Test-only users on an
+          # ephemeral runner; never production data.
+          echo 'ubuntu ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/ubuntu-test >/dev/null
+          sudo chmod 440 /etc/sudoers.d/ubuntu-test
+          sudo visudo -cf /etc/sudoers.d/ubuntu-test
           sudo ln -sf "$(command -v node)" /usr/local/bin/node
           sudo ln -sf "$(command -v npx)" /usr/local/bin/npx
           # The test users must be able to read the checkout.
@@ -109,7 +138,7 @@ jobs:
           done
           sudo chmod a+rx "$HOME"
           echo "TEST_FACILITATOR_UID=$(id -u ubuntu)" >> "$GITHUB_ENV"
-          id ubuntu; id authowner; id authzintruder; getent group authclients
+          id ubuntu; id authowner; id authzintruder; id authsigner; getent group authclients
 
       - name: Install dependencies
         run: npm ci

@@ -13,7 +13,7 @@ import {
 } from '@concordium/web-sdk';
 
 const SCHEMA_BIN = '/tmp/cis8004-schema.bin';
-const EV = 'docs/evidence/task02';
+const EV = 'docs/evidence/agent-card';
 
 const payload = JSON.parse(readFileSync(`${EV}/register-payload.json`, 'utf8'));
 const manifest = JSON.parse(readFileSync(`${EV}/registration-manifest.json`, 'utf8'));

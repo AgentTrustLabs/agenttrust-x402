@@ -9,7 +9,7 @@
  * reason:'audit_write_failed'}` — approval is never granted without a durable event.
  */
 
-import type { SettlementRepository } from './repository.js';
+import type { OwnerAuthorizationRepository } from './ownerAuthorizationRepository.js';
 import {
   decideAuthorization,
   type NarrowSponsorSigner,
@@ -21,10 +21,10 @@ import {
 export class MockNarrowSponsorSigner implements NarrowSponsorSigner {
   readonly policyVersion: string;
   private readonly policy: SponsorPolicy;
-  private readonly repo: SettlementRepository;
+  private readonly repo: OwnerAuthorizationRepository;
   private readonly now: () => number;
 
-  constructor(deps: { policy: SponsorPolicy; repository: SettlementRepository; now?: () => number }) {
+  constructor(deps: { policy: SponsorPolicy; repository: OwnerAuthorizationRepository; now?: () => number }) {
     this.policy = deps.policy;
     this.repo = deps.repository;
     this.now = deps.now ?? (() => Date.now());
@@ -55,7 +55,7 @@ export class MockNarrowSponsorSigner implements NarrowSponsorSigner {
         asset: request.asset,
         amount: request.amount,
         expiry: request.expiry,
-        // Task 11 — bind the exact transaction the approval covers.
+        // bind the exact transaction the approval covers.
         transactionDigest: request.transactionDigest,
         transactionType: request.transactionType,
         maxEnergy: String(this.policy.maxEnergy),

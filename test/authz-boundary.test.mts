@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { issueTestCertificate, makeTestOwnerKey } from './owner-authz-helper.mts';
+import { issueTestCertificate, makeTestOwnerKey, ownerRepoFor } from './owner-authz-helper.mts';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -121,7 +121,7 @@ const scripted = (fn: (req: AuthorizationRequest) => AuthorizationResponse | 'ma
 });
 
 /**
- * Task 11 — an approval must carry verifiable evidence, not merely a
+ * an approval must carry verifiable evidence, not merely a
  * boolean. The scripted Owner issues a REAL certificate (test key) bound
  * to the exact request it approves; the core fails closed on an approval
  * without one. The mock signer never verifies the signature — what this
@@ -212,7 +212,7 @@ test('07b. owner client throwing never reaches the signer', async () => {
 });
 
 test('07c. an "approved" outcome with no reason field still passes the gate', async () => {
-  // Task 11 — the reason field is absent, but the approval still carries its
+  // the reason field is absent, but the approval still carries its
   // certificate: the gate requires evidence, not a reason string.
   const { core, calls } = coreWith({ authorization: { authorize: async (req) => ({ outcome: 'approved', certificate: approvedFor(req).certificate } as AuthorizationResponse) } });
   const p = payloadFixture();
@@ -222,7 +222,7 @@ test('07c. an "approved" outcome with no reason field still passes the gate', as
 });
 
 test('07d. an "approved" outcome WITHOUT a certificate fails closed before the signer', async () => {
-  // Task 11 — a bare boolean is not evidence. The core must refuse an
+  // a bare boolean is not evidence. The core must refuse an
   // approval that carries no certificate, even when the outcome is 'approved'.
   const { core, calls } = coreWith({ authorization: { authorize: async () => ({ outcome: 'approved', reason: null, detail: null }) } });
   const p = payloadFixture();
@@ -337,7 +337,7 @@ test('10b. authorization_already_recorded leaves no approved sign event', async 
   check('settle refused', r.success === false, String(r.errorReason));
   const repo = new SqliteSettlementRepository(db);
   const digest = (r.extra as Record<string, unknown>)?.digest as string;
-  const approvals = repo.signEvents(digest).filter((e) => e.decision === 'approved').length;
+  const approvals = ownerRepoFor(db, repo, () => Date.now()).signEvents(digest).filter((e) => e.decision === 'approved').length;
   eq(approvals, 0, 'no approved event recorded');
   repo.close();
   rmSync(dir, { recursive: true, force: true });

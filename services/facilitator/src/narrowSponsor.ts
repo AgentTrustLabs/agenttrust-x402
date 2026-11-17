@@ -10,7 +10,7 @@
  * `{approved: true}` only when every policy holds. A future real signer MUST call this first
  * and MUST refuse to sign when it returns `{approved: false}`.
  *
- * This task implements only a **mock/no-op authorization backend**: no signature is produced,
+ * This module implements only a **mock/no-op authorization backend**: no signature is produced,
  * no `AccountSigner` is implemented, and no signing function is reachable.
  *
  * Fail-closed rules:
@@ -47,7 +47,7 @@ export interface SponsorAuthorizationRequest {
   /** The AgentTrust payment digest (replay key). */
   paymentDigest: string;
   /**
-   * Task 11 — the exact transaction the approval must cover. Supplied by the
+   * the exact transaction the approval must cover. Supplied by the
    * facilitator after wire conversion. The Owner binds these into the durable
    * record and the certificate; the signing service verifies them against the
    * transaction it parses. Absent only on legacy paths — an approval recorded
@@ -98,7 +98,7 @@ export interface SponsorAuthorizationResult {
   reason?: SponsorRejectionReason;
   detail?: string;
   /**
-   * Task 11 — the authorization id the approval was recorded with, on
+   * the authorization id the approval was recorded with, on
    * approval. The Owner issues the certificate under this id; the signing
    * service consumes it. Null/absent when not approved.
    */

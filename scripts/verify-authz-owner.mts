@@ -21,6 +21,8 @@ import { mkdtempSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { RepositorySettlementStateReader, SqliteOwnerAuthorizationRepository } from '../services/facilitator/src/ownerAuthorizationRepository.js';
+import { chmodSync } from 'node:fs';
 import { IpcAuthorizationClient, type AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { FacilitatorCore } from '../services/facilitator/src/core.js';
 import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
@@ -44,11 +46,16 @@ if (typeof process.getuid === 'function' && process.getuid() !== FACILITATOR_UID
 
 const base = mkdtempSync(join(tmpdir(), 'verify-authz-'));
 const ownerDir = join(base, 'ownerdb');
-const sharedDb = join(base, 'shared.db');
+const ownerDb = join(ownerDir, 'authz.db');
+// split storage — the settlement database lives in its own
+// directory (the launcher refuses it inside the Owner directory).
+const settlementDir = join(base, 'settlement');
+mkdirSync(settlementDir);
+const settlementDb = join(settlementDir, 'f.db');
 const sock = join(base, 'authz.sock');
 const ownerLog = join(ownerDir, 'owner.log');
 mkdirSync(ownerDir, { mode: 0o700 });
-// Task 11: the Owner needs an authorization-signing key. Ephemeral for this
+// the Owner needs an authorization-signing key. Ephemeral for this
 // harness run: generated here, written 0600, never logged or reused.
 const ownerKeyFile = join(base, 'owner-authz-key.pem');
 writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
@@ -63,31 +70,36 @@ const ownerEnv = (maxEnergy: string, crashAt = 0): Record<string, string> => ({
   AUTHZ_MAX_EXPIRY_OFFSET_SECONDS: '600',
   AUTHZ_ALLOWED_ASSETS: 'CCD',
   AUTHZ_POLICY_VERSION: 'authz-prod-v1',
-  AUTHZ_DB_FILE: sharedDb,
-  AUTHZ_SEED_FIXTURES: '0',
+  AUTHZ_DB_FILE: ownerDb,
+  AUTHZ_SETTLEMENT_DB_FILE: settlementDb,
   AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
-  TASK348_LOG: ownerLog,
+  AUTHZ_OWNER_LOG: ownerLog,
   CRASH_AT: String(crashAt),
 });
 
 type Owner = { proc: ChildProcess };
 const startOwner = (maxEnergy: string, crashAt = 0): Promise<Owner> =>
   new Promise((resolve, reject) => {
+    chmodSync(settlementDb, 0o400);
     const proc = spawn('npx', ['tsx', ownerScript, ownerDir, sock, String(FACILITATOR_UID)], {
       env: ownerEnv(maxEnergy, crashAt),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
     const t = setTimeout(() => reject(new Error('owner start timeout')), 40_000);
+    let stderr = '';
+    proc.stderr.on('data', (c) => { stderr += c.toString(); });
     proc.stdout.on('data', (c) => {
       if (c.toString().includes('owner listening')) {
         clearTimeout(t);
+        chmodSync(settlementDb, 0o600);
         resolve({ proc });
       }
     });
     proc.on('exit', (code) => {
       clearTimeout(t);
-      reject(new Error(`owner exited early code=${code}`));
+      try { chmodSync(settlementDb, 0o600); } catch { /* already restored */ }
+      reject(new Error(`owner exited early code=${code}: ${stderr.trim().split('\n').slice(-3).join(' | ')}`));
     });
   });
 const stopOwner = async (o: Owner, signal: NodeJS.Signals = 'SIGTERM') => {
@@ -115,27 +127,35 @@ const startOwnerOn = (dbFile: string, sockPath: string, dirPath: string, envOver
       AUTHZ_ALLOWED_ASSETS: 'CCD',
       AUTHZ_POLICY_VERSION: 'authz-prod-v1',
       AUTHZ_DB_FILE: dbFile,
+      AUTHZ_SETTLEMENT_DB_FILE: settlementDb,
       AUTHZ_AUTHORIZATION_KEY_FILE: ownerKeyFile,
-      TASK348_LOG: join(dirPath, 'owner.log'),
+      AUTHZ_OWNER_LOG: join(dirPath, 'owner.log'),
       CRASH_AT: '0',
       ...envOver,
     };
     for (const [k, v] of Object.entries(envOver)) if (v === undefined) delete env[k];
+    // Same-UID harness: present the settlement file read-only at startup
+    // (see startOwner); restored to 0600 once the Owner is listening.
+    chmodSync(settlementDb, 0o400);
     const proc = spawn('npx', ['tsx', ownerScript, dirPath, sockPath, String(FACILITATOR_UID)], {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
     const t = setTimeout(() => reject(new Error('owner start timeout')), 40_000);
+    let stderr = '';
+    proc.stderr.on('data', (c) => { stderr += c.toString(); });
     proc.stdout.on('data', (c) => {
       if (c.toString().includes('owner listening')) {
         clearTimeout(t);
+        chmodSync(settlementDb, 0o600);
         resolve({ proc });
       }
     });
     proc.on('exit', (code) => {
       clearTimeout(t);
-      reject(new Error(`owner exited early code=${code}`));
+      try { chmodSync(settlementDb, 0o600); } catch { /* already restored */ }
+      reject(new Error(`owner exited early code=${code}: ${stderr.trim().split('\n').slice(-3).join(' | ')}`));
     });
   });
 
@@ -204,14 +224,17 @@ const req = (digest: string, over: Partial<AuthorizationRequest> = {}): Authoriz
 });
 const D = (c: string) => c.repeat(64);
 
-// ── seed dummy payments into the SHARED database (the facilitator side) ─────
-const repo = new SqliteSettlementRepository(sharedDb, { now: () => Date.now() });
+// ── seed dummy payments into the SETTLEMENT database (the facilitator side) ──
+// approvals live in the Owner-private database, which the harness
+// reads through its own Owner-repository handle on the same file.
+const repo = new SqliteSettlementRepository(settlementDb, { now: () => Date.now() });
 for (const d of [D('a'), D('b'), D('c'), D('d'), D('e'), D('f'), D('0'), D('1'), D('2')]) {
   repo.noteVerified(d, 'k');
   repo.claim(d, 'k');
 }
+const ownerRepo = new SqliteOwnerAuthorizationRepository(ownerDb, new RepositorySettlementStateReader(repo), { now: () => Date.now() });
 const approvedCount = (digest: string) =>
-  repo.signEvents(digest).filter((e) => e.decision === 'approved').length;
+  ownerRepo.signEvents(digest).filter((e) => e.decision === 'approved').length;
 
 // ── direct-client flows against the owner ────────────────────────────────────
 let owner = await startOwner('1000');
@@ -350,7 +373,7 @@ owner = await startOwner('500');
   const core = new FacilitatorCore({
     network: NETWORK,
     signer: recordingSigner(calls) as never,
-    dbPath: sharedDb,
+    dbPath: settlementDb,
     authorization: new IpcAuthorizationClient(sock),
     senderVerifier: async () => ({ ok: true }),
     now: () => Date.now(),
@@ -370,7 +393,7 @@ owner = await startOwner('1000');
   const core = new FacilitatorCore({
     network: NETWORK,
     signer: recordingSigner(calls) as never,
-    dbPath: sharedDb,
+    dbPath: settlementDb,
     authorization: new IpcAuthorizationClient(sock),
     senderVerifier: async () => ({ ok: true }),
     now: () => Date.now(),
@@ -389,7 +412,7 @@ await stopOwner(owner);
   const core = new FacilitatorCore({
     network: NETWORK,
     signer: recordingSigner(calls) as never,
-    dbPath: sharedDb,
+    dbPath: settlementDb,
     authorization: new IpcAuthorizationClient(sock),
     senderVerifier: async () => ({ ok: true }),
     now: () => Date.now(),
@@ -410,7 +433,7 @@ owner = await startOwner('1000');
   const core = new FacilitatorCore({
     network: NETWORK,
     signer: recordingSigner(calls) as never,
-    dbPath: sharedDb,
+    dbPath: settlementDb,
     authorization: new IpcAuthorizationClient(sock),
     senderVerifier: async () => ({ ok: true }),
     now: () => Date.now(),
@@ -421,11 +444,15 @@ owner = await startOwner('1000');
   core.store.close();
 }
 
-// F2: db_identity reports the shared database (dev+ino match the facilitator file).
+// F2: db_identity reports the Owner-private database (dev+ino match the
+// Owner DB file). the check is now INVERTED — a match with the
+// settlement database would be a shared-database misconfiguration.
 {
   const probe = await client.probeDbIdentity();
-  const st = statSync(sharedDb);
-  check('30. db_identity reports the shared database (dev+ino match)', probe.reachable === true && probe.dbDev === st.dev && probe.dbIno === st.ino, `owner dbDev=${probe.dbDev} dbIno=${probe.dbIno} vs file dev=${st.dev} ino=${st.ino}`);
+  const st = statSync(ownerDb);
+  const sst = statSync(settlementDb);
+  check('30. db_identity reports the Owner-private database (dev+ino match)', probe.reachable === true && probe.dbDev === st.dev && probe.dbIno === st.ino, `owner dbDev=${probe.dbDev} dbIno=${probe.dbIno} vs file dev=${st.dev} ino=${st.ino}`);
+  check('30b. db_identity does NOT match the settlement database', probe.dbDev !== sst.dev || probe.dbIno !== sst.ino, `owner dbDev=${probe.dbDev} dbIno=${probe.dbIno} vs settlement dev=${sst.dev} ino=${sst.ino}`);
 }
 
 // F2 (second owner): an owner on a different database reports a different identity.
@@ -434,11 +461,11 @@ owner = await startOwner('1000');
   mkdirSync(f2Dir, { mode: 0o700 });
   const f2Db = join(f2Dir, 'auth.db');
   const f2Sock = join(f2Dir, 'authz.sock');
-  const o2 = await startOwnerOn(f2Db, f2Sock, f2Dir, { AUTHZ_SEED_FIXTURES: '0' });
+  const o2 = await startOwnerOn(f2Db, f2Sock, f2Dir, {});
   try {
     const probe2 = await new IpcAuthorizationClient(f2Sock).probeDbIdentity();
-    const st = statSync(sharedDb);
-    check('31. owner on a different database reports a different identity', probe2.reachable === true && (probe2.dbDev !== st.dev || probe2.dbIno !== st.ino), `other dbDev=${probe2.dbDev} dbIno=${probe2.dbIno} vs shared dev=${st.dev} ino=${st.ino}`);
+    const st = statSync(ownerDb);
+    check('31. owner on a different database reports a different identity', probe2.reachable === true && (probe2.dbDev !== st.dev || probe2.dbIno !== st.ino), `other dbDev=${probe2.dbDev} dbIno=${probe2.dbIno} vs owner dev=${st.dev} ino=${st.ino}`);
   } finally {
     await stopOwner(o2);
   }
@@ -461,7 +488,11 @@ owner = await startOwner('1000');
   check('34. owner still alive after the concurrent duplicates', alive.outcome === 'rejected' && alive.reason === 'unknown_payment', `${alive.outcome}/${alive.reason ?? '-'}`);
 }
 
-// F1: default seeding is off at the IPC level (fresh DB, no env var).
+// F1 : seeding moved out of the Owner. A fresh Owner on a
+// fresh Owner-private DB reads settlement state from the shared settlement
+// database — so the seeded harness digest IS authorizable there (a fresh
+// approval in this Owner's own database). And AUTHZ_SEED_FIXTURES now
+// refuses startup.
 await stopOwner(owner);
 {
   const f1Dir = join(base, 'f1db');
@@ -469,30 +500,32 @@ await stopOwner(owner);
   const f1Db = join(f1Dir, 'auth.db');
   const f1Sock = join(f1Dir, 'authz.sock');
   const f1Client = new IpcAuthorizationClient(f1Sock);
-  // Default (AUTHZ_SEED_FIXTURES unset): the harness digest must be unknown.
-  const o1 = await startOwnerOn(f1Db, f1Sock, f1Dir, { AUTHZ_SEED_FIXTURES: undefined });
+  // A fresh Owner authorizes the seeded harness digest from settlement state.
+  const o1 = await startOwnerOn(f1Db, f1Sock, f1Dir, {});
   try {
     const r1 = await f1Client.authorize(req(D('a'), {}));
-    check('35. default owner (no seed env) does not know the harness digest', r1.outcome === 'rejected' && r1.reason === 'unknown_payment', `${r1.outcome}/${r1.reason ?? '-'}`);
+    check('35. fresh owner authorizes the seeded harness digest (settlement state is read-only)', r1.outcome === 'approved', `${r1.outcome}/${r1.reason ?? '-'}`);
   } finally {
     await stopOwner(o1);
   }
-  // Opt-in (AUTHZ_SEED_FIXTURES=1): the same digest is now authorizable.
-  const o2 = await startOwnerOn(f1Db, f1Sock, f1Dir, { AUTHZ_SEED_FIXTURES: '1' });
+  // AUTHZ_SEED_FIXTURES=1 refuses startup (exit 3 → startOwnerOn rejects).
+  let seedRefused = '';
   try {
-    const r2 = await f1Client.authorize(req(D('a'), {}));
-    check('36. opt-in owner (seed=1) authorizes the harness digest', r2.outcome === 'approved', `${r2.outcome}/${r2.reason ?? '-'}`);
-  } finally {
+    const o2 = await startOwnerOn(f1Db, f1Sock, f1Dir, { AUTHZ_SEED_FIXTURES: '1' });
     await stopOwner(o2);
+  } catch (e) {
+    seedRefused = String((e as Error)?.message ?? e);
   }
+  check('36. AUTHZ_SEED_FIXTURES=1 refuses startup', /owner exited early/.test(seedRefused), seedRefused || 'started (bad)');
 }
 
-// F7: the shared database files are 0600.
+// F7: the Owner-private database and the settlement database files are 0600.
 {
   const modeOf = (p: string) => statSync(p).mode & 0o777;
-  check('37. shared database files are 0600', modeOf(sharedDb) === 0o600 && modeOf(`${sharedDb}-wal`) === 0o600, `db=0o${modeOf(sharedDb).toString(8)} wal=0o${modeOf(`${sharedDb}-wal`).toString(8)}`);
+  check('37. Owner-private and settlement database files are 0600', modeOf(ownerDb) === 0o600 && modeOf(settlementDb) === 0o600, `owner=0o${modeOf(ownerDb).toString(8)} settlement=0o${modeOf(settlementDb).toString(8)}`);
 }
 
+ownerRepo.close();
 repo.close();
 const failed = results.filter(([, pass]) => !pass).length;
 console.log(`\nverify-authz-owner: ${results.length - failed}/${results.length} passed, ${failed} failed`);

@@ -189,7 +189,7 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
         network: opts.network,
         ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
         transaction: bare,
-        // Task 11 — the certificate + payment digest ride with the bound
+        // the certificate + payment digest ride with the bound
         // signer. Without them the signer refuses client-side, and the
         // service would reject the request as `authorization_missing`.
         ...(callOpts?.authorization !== undefined ? { authorization: callOpts.authorization } : {}),

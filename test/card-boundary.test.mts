@@ -5,7 +5,7 @@
  * and the registry record are all injected. Nothing is fetched from the network and
  * nothing is signed or settled.
  *
- * Assertions encode the *required* semantics from the task, not the current behavior —
+ * Assertions encode the *required* semantics from the spec, not the current behavior —
  * so a failing test is a reproduced defect, not a test that needs adjusting.
  */
 

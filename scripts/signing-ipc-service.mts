@@ -4,7 +4,7 @@
  * A real separate OS process that owns the Unix socket and holds the fake signer.
  * It never has key material — `createFakeSigner()` returns a deterministic signature.
  *
- * Task 11: the service verifies an Owner authorization certificate and consumes
+ * the service verifies an Owner authorization certificate and consumes
  * the authorization at the Owner before signing. The Owner's public key, socket
  * and UID are REQUIRED (exit 2 when unset).
  *
@@ -29,7 +29,7 @@ const ownerPublicKey = process.env['SIGNING_OWNER_PUBLIC_KEY'];
 const ownerSocket = process.env['SIGNING_OWNER_SOCKET'];
 const ownerUidRaw = process.env['SIGNING_OWNER_UID'];
 if (!ownerPublicKey || !ownerSocket || !ownerUidRaw) {
-  console.error('refusing to start: SIGNING_OWNER_PUBLIC_KEY, SIGNING_OWNER_SOCKET and SIGNING_OWNER_UID are required (Task 11)');
+  console.error('refusing to start: SIGNING_OWNER_PUBLIC_KEY, SIGNING_OWNER_SOCKET and SIGNING_OWNER_UID are required ');
   process.exit(2);
 }
 const ownerConsume = new IpcOwnerConsumeClient({ socketPath: ownerSocket, ownerUid: Number(ownerUidRaw) });

@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { issueTestCertificate, makeTestOwnerKey } from './owner-authz-helper.mts';
+import { issueTestCertificate, makeTestOwnerKey, ownerRepoFor } from './owner-authz-helper.mts';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const PAY_TO = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -97,7 +97,7 @@ const stubClient = (response: AuthorizationResponse | ((req: AuthorizationReques
 });
 
 /**
- * Task 11 — an approval must carry verifiable evidence. The stub Owner
+ * an approval must carry verifiable evidence. The stub Owner
  * issues a REAL certificate (test key) bound to the exact request it
  * approves; the core fails closed on an approval without one.
  */
@@ -280,7 +280,7 @@ test('07. rejected authorization leaves the payment rejected, not settled', asyn
   const row = repo.get(digest);
   ok(row !== undefined, 'payment row exists');
   eq(row?.state, 'rejected', 'payment is rejected, not finalized');
-  const approvals = repo.signEvents(digest).filter((e) => e.decision === 'approved').length;
+  const approvals = ownerRepoFor(db, repo, () => Date.now()).signEvents(digest).filter((e) => e.decision === 'approved').length;
   eq(approvals, 0, 'no approved sign event recorded');
   repo.close();
   rmSync(dir, { recursive: true, force: true });

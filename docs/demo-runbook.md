@@ -33,7 +33,7 @@ from that template and each owned by the service user with mode 0600:
 
 | File | Contents |
 |---|---|
-| `/home/agenttrust/.agenttrust/owner.env` | 9 `AUTHZ_*` + `TASK348_LOG` variables |
+| `/home/agenttrust/.agenttrust/owner.env` | 9 `AUTHZ_*` + `AUTHZ_OWNER_LOG` variables |
 | `/home/agenttrust/.agenttrust/signing.env` | 5 `FACILITATOR_SPONSOR_*` / signing variables |
 | `/home/agenttrust/.agenttrust/facilitator.env` | 28 `FACILITATOR_*` variables |
 

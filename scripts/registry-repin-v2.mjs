@@ -22,7 +22,7 @@ const OWNER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const TOKEN_ID = 1004;
 const AGENT_URI = 'https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json';
 const MODULE_SCHEMA = '/tmp/cis8004-schema.bin';
-const OUT = 'docs/evidence/task02';
+const OUT = 'docs/evidence/agent-card';
 
 mkdirSync(OUT, { recursive: true });
 const mcp = mcpFor(TESTNET);

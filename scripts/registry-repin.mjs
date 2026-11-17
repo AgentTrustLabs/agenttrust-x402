@@ -15,7 +15,7 @@ const TOKEN_ID = 1004;
 const NEW_URI = 'https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json';
 const CARD_SHA256 = '1f001ec9bd89f8ce48f2d3bf343f9ebd41604155f42f6a2fec426dd5101d7f84';
 const MODULE_SCHEMA = '/tmp/cis8004-schema.bin';
-const OUT = 'docs/evidence/task02';
+const OUT = 'docs/evidence/agent-card';
 
 mkdirSync(OUT, { recursive: true });
 const mcp = mcpFor(TESTNET);

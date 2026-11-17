@@ -10,6 +10,7 @@
 
 import { eq, ok } from './helpers.mjs';
 import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
+import { ownerRepoFor } from './owner-authz-helper.mts';
 import { LocalAuthorizationClient } from '../services/facilitator/src/authorization.js';
 import type { AuthorizationRequest } from '../services/facilitator/src/authorization.js';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -54,7 +55,7 @@ const request = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest
   amount: '250000',
   expiry: NOW + 200,
   energy: 700n,
-  // Task 11 — the authorization binds the exact transaction and fee policy.
+  // the authorization binds the exact transaction and fee policy.
   transactionDigest: 'cd'.repeat(32),
   transactionType: 'transfer',
   maxFeeMicroCcd: '10000000',
@@ -66,8 +67,9 @@ const setup = () => {
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified(A, 'k');
   repo.claim(A, 'k');
-  const client = new LocalAuthorizationClient({ policy, repository: repo, now: () => NOW * 1000 });
-  return { dir, db, rm, repo, client };
+  const ownerRepo = ownerRepoFor(db, repo, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo, now: () => NOW * 1000 });
+  return { dir, db, rm, repo, ownerRepo, client };
 };
 
 const tests: Array<[string, () => Promise<void> | void]> = [];
@@ -174,7 +176,7 @@ test('08. digest not matching the canonical context does not recover as approved
   rm();
 });
 
-// ── 8b. Task 11: transaction binding changed ─────────────────────────────────
+// ── 8b. transaction binding changed ─────────────────────────────────
 
 test('08b. changed transactionDigest does not recover as approved', async () => {
   const { rm, client } = setup();
@@ -191,17 +193,20 @@ test('09. a legacy approved record with NULL context fails closed', async () => 
   const repo = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
   repo.noteVerified(A, 'k');
   repo.claim(A, 'k');
+  // the legacy row lives in the Owner-private database now — create the file first.
+  ownerRepoFor(db, repo, () => NOW * 1000).close();
   repo.close();
 
   // Simulate a legacy record with NULL asset/amount/expiry.
   const { DatabaseSync } = await import('node:sqlite');
-  const raw = new DatabaseSync(db);
-  raw.exec(`INSERT INTO sign_events (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`INSERT INTO authorizations (payment_digest, decided_at, decision, reason, network, sender, sponsor, recipient, energy, policy_version, asset, amount, expiry)
             VALUES ('${A}', ${NOW * 1000}, 'approved', NULL, '${CAIP2}', '${SENDER}', '${SPONSOR}', '${PAY_TO}', '700', 'v3414', NULL, NULL, NULL)`);
   raw.close();
 
   const repo2 = new SqliteSettlementRepository(db, { now: () => NOW * 1000 });
-  const client = new LocalAuthorizationClient({ policy, repository: repo2, now: () => NOW * 1000 });
+  const ownerRepo2 = ownerRepoFor(db, repo2, () => NOW * 1000);
+  const client = new LocalAuthorizationClient({ policy, repository: ownerRepo2, now: () => NOW * 1000 });
   const rec = await client.recover(request());
   ok(rec.outcome !== 'approved', `legacy NULL context → ${rec.outcome}/${rec.reason}`);
   repo2.close();
@@ -211,45 +216,45 @@ test('09. a legacy approved record with NULL context fails closed', async () => 
 // ── 10. repeated recovery for the correct context ────────────────────────────
 
 test('10. repeated recovery for the correct context stays approved', async () => {
-  const { rm, client, repo } = setup();
+  const { rm, client, ownerRepo } = setup();
   await client.authorize(request());
-  const before = repo.signEvents(A).length;
+  const before = ownerRepo.signEvents(A).length;
   const outs = await Promise.all(Array.from({ length: 5 }, () => client.recover(request())));
   const approved = outs.filter((o) => o.outcome === 'approved').length;
   check('10. 5 repeated recoveries approved', approved === 5, `${approved}/5`);
-  eq(repo.signEvents(A).length, before, 'no records written');
-  eq(repo.signEvents(A).length, 1, 'still exactly one record');
+  eq(ownerRepo.signEvents(A).length, before, 'no records written');
+  eq(ownerRepo.signEvents(A).length, 1, 'still exactly one record');
   rm();
 });
 
 // ── 12. recovery writes no approval ──────────────────────────────────────────
 
 test('12. recovery never writes an approval', async () => {
-  const { rm, client, repo } = setup();
+  const { rm, client, ownerRepo } = setup();
   await client.authorize(request());
-  const before = repo.signEvents(A).length;
+  const before = ownerRepo.signEvents(A).length;
   for (let i = 0; i < 10; i++) await client.recover(request());
-  eq(repo.signEvents(A).length, before, 'record count unchanged');
-  eq(repo.signEvents(A).length, 1, 'exactly one approval');
+  eq(ownerRepo.signEvents(A).length, before, 'record count unchanged');
+  eq(ownerRepo.signEvents(A).length, 1, 'exactly one approval');
   rm();
 });
 
 // ── 13. no signer or submission for non-approved results ─────────────────────
 
 test('13. non-approved recovery never invokes the signer or submission', async () => {
-  const { rm, db, client, repo } = setup();
+  const { rm, db, client, ownerRepo } = setup();
   await client.authorize(request());
   // Tamper the durable record so recovery cannot match (amount NULL = legacy).
   const { DatabaseSync } = await import('node:sqlite');
-  const raw = new DatabaseSync(db);
-  raw.exec(`UPDATE sign_events SET amount = NULL WHERE payment_digest = '${A}'`);
+  const raw = new DatabaseSync(`${db}.owner.db`);
+  raw.exec(`UPDATE authorizations SET amount = NULL WHERE payment_digest = '${A}'`);
   raw.close();
   const rec = await client.recover(request());
   ok(rec.outcome !== 'approved', `non-approved → ${rec.outcome}`);
   // The client is a read-only seam; the settlement boundary only invokes the signer after
   // an approved outcome. Assert the boundary's contract: no approval record is created and
   // the recovery path never calls an approval writer.
-  eq(repo.signEvents(A).length, 1, 'no new record');
+  eq(ownerRepo.signEvents(A).length, 1, 'no new record');
   rm();
 });
 

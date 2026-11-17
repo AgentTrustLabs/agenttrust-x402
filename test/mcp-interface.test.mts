@@ -710,7 +710,7 @@ function runServerGraceful(
 }
 
 
-// ─── 10. protocol details required by the task ─────────────────────────
+// ─── 10. protocol details required by the spec ─────────────────────────
 
 test('29. stdout carries only JSON-RPC; diagnostics never contaminate the stream', async () => {
   const lines = [

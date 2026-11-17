@@ -15,6 +15,8 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, chmodSync, writeFileSync } from 'node:fs';
 import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+import { seedSettlementDb } from './owner-authz-helper.mts';
+import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -81,15 +83,62 @@ const sock = join(base, 'auth.sock');
 const logPath = join(dbDir, 'owner.log');
 
 mkdirSync(dbDir, { mode: 0o700 });
-// Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
+// the Owner needs an authorization-signing key. Ephemeral for this run.
 // Write it BEFORE chowning the dir to the Owner: a non-root test user
 // (CI runner) cannot write into a 0700 dir owned by another uid.
 const ownerKeyFile = join(dbDir, 'owner-key.pem');
 writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-// Whole base belongs to the owner so it can create the log inside; group can traverse.
+// the Owner never seeds the settlement database
+// (AUTHZ_SEED_FIXTURES was removed). Seed digests a..e directly, in a
+// SEPARATE directory the Owner can read (0644) but not write. This runs
+// BEFORE the chown below: the base is chowned to the Owner (0770), and a
+// non-root test user (CI runner) cannot create a directory inside it
+// afterwards (EACCES on mkdir facdb).
+const settlementDir = join(base, 'facdb');
+mkdirSync(settlementDir);
+// The Owner UID must traverse this directory: the test runs as root with
+// umask 0007, so a default mkdir is 0770 root:root and authowner cannot
+// reach the settlement file inside it.
+chmodSync(settlementDir, 0o755);
+const settlementDb = join(settlementDir, 'f.db');
+seedSettlementDb(settlementDb, ['a', 'b', 'c', 'd', 'e', 'f'].map((c) => c.repeat(64)), () => Date.now());
+// The Owner opens the settlement database read-only. A read-only open of a
+// WAL database must create the -shm wal-index when none exists, which needs
+// write access to the directory — the Owner UID has neither. Holding one
+// facilitator-side connection open keeps the -shm present (world-readable),
+// so the Owner's read-only reads work. In production the facilitator server
+// holds its store open for its lifetime, so this holds naturally; the Owner
+// still never opens the settlement database read-write.
+// fileMode 0644: the repository tightens db/-wal/-shm to 0600 on open by
+// default, which would lock the Owner UID out again. 0644 is test-only
+// (temp dir); production uses 0644 (see repository.ts F7).
+const settlementHolder = new SqliteSettlementRepository(settlementDb, { now: () => Date.now(), fileMode: 0o644 });
+void settlementHolder;
+// The Owner launcher refuses startup when the settlement file is writable
+// by the Owner UID. The chown below makes the file Owner-owned, so strip
+// its owner-write bit first (the held-open facilitator connection keeps
+// writing through its file descriptor). The Owner reads it read-only.
+chmodSync(settlementDb, 0o400);
+// The query helper script must exist BEFORE the chown below: after it,
+// the whole base is Owner-owned 0770 and the CI runner (not in
+// authclients) cannot write anything into it. The script is static, so
+// create it once here; digested() only runs it. It stays readable by the
+// Owner UID, which executes it (mode 0644, Owner-owned after chown).
+const queryScript = join(base, 'authz-query.mts');
+writeFileSync(queryScript, `
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync(process.argv[2]);
+const n = (db.prepare("SELECT COUNT(*) AS n FROM authorizations WHERE payment_digest = ? AND decision = 'approved'").get(process.argv[3]) as { n: number }).n;
+console.log(String(n));
+db.close();
+`, { mode: 0o644 });
+chmodSync(queryScript, 0o644);
+// Whole base belongs to the owner so it can create the socket inside;
+// group can traverse (the authorized client runs as ubuntu, in authclients).
 await run('chown', ['-R', `${OWNER_USER}:authclients`, base], 'root');
 await run('chmod', ['770', base], 'root');
 await run('chmod', ['700', dbDir], 'root');
+
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const clientScript = join(process.cwd(), 'scripts/authz-client.mts');
@@ -100,10 +149,10 @@ type Owner = { proc: ReturnType<typeof spawn>; waitReady: Promise<void> };
 const startOwner = async (crashAt = 0): Promise<Owner> => {
   const proc = spawn('sudo', [
     '-u', OWNER_USER, 'env',
-    `TASK348_LOG=${logPath}`,
-    `TASK348_PEERCRED_BIN=${peercredBin}`,
+    `AUTHZ_OWNER_LOG=${logPath}`,
+    `AUTHZ_OWNER_PEERCRED_BIN=${peercredBin}`,
     `CRASH_AT=${crashAt}`,
-    'AUTHZ_SEED_FIXTURES=1', // F1: fixtures are opt-in now; these tests authorize the seeded digests a..e.
+    `AUTHZ_DB_FILE=${join(dbDir, 'authz.db')}`, `AUTHZ_SETTLEMENT_DB_FILE=${settlementDb}`, // F1: fixtures are opt-in now; these tests authorize the seeded digests a..e.
     `AUTHZ_AUTHORIZATION_KEY_FILE=${ownerKeyFile}`,
     'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -169,18 +218,12 @@ const classifyOutcome = (raw: string, code: number): string => {
 };
 
 const digested = (digest: string) => {
-  // Query the owner's DB for approved sign events (owner-only read, via psql-free sqlite).
-  const script = join(process.cwd(), 'scripts', 'authz-query.mts');
-  writeFileSync(script, `
-  import { DatabaseSync } from 'node:sqlite';
-  const db = new DatabaseSync(process.argv[2]);
-  const n = (db.prepare("SELECT COUNT(*) AS n FROM sign_events WHERE payment_digest = ? AND decision = 'approved'").get(process.argv[3]) as { n: number }).n;
-  console.log(String(n));
-  db.close();
-  `, { mode: 0o644 });
-  chmodSync(script, 0o644);
-  chmodSync(script, 0o644);
-  return run('npx', ['tsx', script, join(dbDir, 'auth.db'), digest], OWNER_USER, 20000);
+  // Query the Owner-private DB for approved authorization rows (owner-only
+  // read, via psql-free sqlite). The table is `authorizations` in
+  // <dbDir>/authz.db. The helper script was created at setup time (see
+  // queryScript above): after the base is chowned to the Owner, the test
+  // user cannot write a new file into it.
+  return run('npx', ['tsx', queryScript, join(dbDir, 'authz.db'), digest], OWNER_USER, 20000);
 };
 
 // ═══ 1. legitimate authorization ══════════════════════════════════════════════
@@ -331,8 +374,8 @@ console.log('\n── root policy ──');
 console.log('\n── concurrent authorization ──');
 {
   const digest = 'f'.repeat(64);
-  const seedRes = await run('npx', ['tsx', `${process.cwd()}/scripts/authz-seed.mts`, join(dbDir, 'auth.db'), digest], OWNER_USER, 20000);
-  console.log('   seed result:', seedRes.code, seedRes.stdout, seedRes.stderr);
+  // 'f' is seeded upfront with a..e into the settlement DB (see
+  // the seed block above); the Owner reads it read-only from there.
   const a = run('npx', ['tsx', clientScript, sock, JSON.stringify(req('conc-1', digest))], 'ubuntu', 25000);
   const b = run('npx', ['tsx', clientScript, sock, JSON.stringify(req('conc-2', digest))], 'ubuntu', 25000);
   const [ra, rb] = await Promise.all([a, b]);
@@ -353,7 +396,7 @@ for (const [point, label] of [
   [5, 'during response transmission'],
 ] as const) {
   const digest = (point === 3 ? 'c' : point === 4 ? 'd' : 'e').repeat(64);
-  await run('npx', ['tsx', `${process.cwd()}/scripts/authz-seed.mts`, join(dbDir, 'auth.db'), digest], OWNER_USER, 20000);
+  // c/d/e were seeded upfront into the settlement DB.
   await stopOwner(owner);
   owner = await startOwner(point);
   const r = await send(req(`crash-${point}`, digest));
@@ -410,7 +453,7 @@ console.log('\n── outcome classification ──');
   check('36. missing socket classifies as owner_unavailable', cls === 'owner_unavailable', cls);
 
   // unknown: owner killed before commit, no response
-  await run('npx', ['tsx', `${process.cwd()}/scripts/authz-seed.mts`, join(dbDir, 'auth.db'), D('c')], OWNER_USER, 20000);
+  // D('c') was seeded upfront into the settlement DB.
   await stopOwner(owner);
   owner = await startOwner(3);
   const crashRes = await send(req('unk-1', D('c')));

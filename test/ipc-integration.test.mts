@@ -14,6 +14,8 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, chmodSync, writeFileSync } from 'node:fs';
 import { generateOwnerAuthorizationKeyPair } from '../services/facilitator/src/ownerAuthorization.js';
+import { seedSettlementDb } from './owner-authz-helper.mts';
+import { SqliteSettlementRepository } from '../services/facilitator/src/repository.js';
 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -92,14 +94,48 @@ const sock = join(base, 'authz.sock');
 const logPath = join(dbDir, 'owner.log');
 
 mkdirSync(dbDir, { mode: 0o700 });
-// Task 11: the Owner needs an authorization-signing key. Ephemeral for this run.
+// the Owner needs an authorization-signing key. Ephemeral for this run.
 // Write it BEFORE chowning the dir to the Owner: a non-root test user
 // (CI runner) cannot write into a 0700 dir owned by another uid.
 const ownerKeyFile = join(dbDir, 'owner-key.pem');
 writeFileSync(ownerKeyFile, generateOwnerAuthorizationKeyPair().privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+// the Owner never seeds the settlement database
+// (AUTHZ_SEED_FIXTURES was removed). Seed digests a..e directly, in a
+// SEPARATE directory the Owner can read (0644) but not write. This runs
+// BEFORE the chown below: the base is chowned to the Owner (0770), and a
+// non-root test user (CI runner) cannot create a directory inside it
+// afterwards (EACCES on mkdir facdb).
+const settlementDir = join(base, 'facdb');
+mkdirSync(settlementDir);
+// The Owner UID must traverse this directory: the test runs as root with
+// umask 0007, so a default mkdir is 0770 root:root and authowner cannot
+// reach the settlement file inside it.
+chmodSync(settlementDir, 0o755);
+const settlementDb = join(settlementDir, 'f.db');
+seedSettlementDb(settlementDb, ['a', 'b', 'c', 'd', 'e', 'f'].map((c) => c.repeat(64)), () => Date.now());
+// The Owner opens the settlement database read-only. A read-only open of a
+// WAL database must create the -shm wal-index when none exists, which needs
+// write access to the directory — the Owner UID has neither. Holding one
+// facilitator-side connection open keeps the -shm present (world-readable),
+// so the Owner's read-only reads work. In production the facilitator server
+// holds its store open for its lifetime, so this holds naturally; the Owner
+// still never opens the settlement database read-write.
+// fileMode 0644: the repository tightens db/-wal/-shm to 0600 on open by
+// default, which would lock the Owner UID out again. 0644 is test-only
+// (temp dir); production uses 0644 (see repository.ts F7).
+const settlementHolder = new SqliteSettlementRepository(settlementDb, { now: () => Date.now(), fileMode: 0o644 });
+void settlementHolder;
+// The Owner launcher refuses startup when the settlement file is writable
+// by the Owner UID. The chown below makes the file Owner-owned, so strip
+// its owner-write bit first (the held-open facilitator connection keeps
+// writing through its file descriptor). The Owner reads it read-only.
+chmodSync(settlementDb, 0o400);
+// Whole base belongs to the owner so it can create the socket inside;
+// group can traverse (the authorized client runs as ubuntu, in authclients).
 await run('chown', ['-R', `${OWNER_USER}:authclients`, base], 'root');
 await run('chmod', ['770', base], 'root');
 await run('chmod', ['700', dbDir], 'root');
+
 
 const ownerScript = join(process.cwd(), 'scripts/authz-owner.mts');
 const peercredBin = join(process.cwd(), 'scripts/authz-peercred');
@@ -108,7 +144,7 @@ type Owner = { proc: ReturnType<typeof spawn> };
 let owner: Owner | null = null;
 
 const startOwner = async (crashAt = 0): Promise<Owner> => {
-  const proc = spawn('sudo', ['-u', OWNER_USER, 'env', `TASK348_LOG=${logPath}`, `TASK348_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, 'AUTHZ_SEED_FIXTURES=1', `AUTHZ_AUTHORIZATION_KEY_FILE=${ownerKeyFile}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn('sudo', ['-u', OWNER_USER, 'env', `AUTHZ_OWNER_LOG=${logPath}`, `AUTHZ_OWNER_PEERCRED_BIN=${peercredBin}`, `CRASH_AT=${crashAt}`, `AUTHZ_DB_FILE=${join(dbDir, 'authz.db')}`, `AUTHZ_SETTLEMENT_DB_FILE=${settlementDb}`, `AUTHZ_AUTHORIZATION_KEY_FILE=${ownerKeyFile}`, 'npx', 'tsx', ownerScript, dbDir, sock, String(FACILITATOR_UID)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let ready = false;
   await new Promise<void>((resolve) => {
     const t = setTimeout(() => { resolve(); }, 40000);
