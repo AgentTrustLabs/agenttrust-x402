@@ -104,6 +104,14 @@
  *   AGENTTRUST_DISCOVERY_DB         default /home/hatch/agenttrust-state/discovery.db
  *                                   (persistent service registry; the same file
  *                                   the agenttrust-discovery CLI writes to)
+ *   AGENTTRUST_AGENT_CARD_FILE      optional: absolute path to the Agent
+ *                                   Card JSON (CIS-8004 Token #1004).
+ *                                   Default: the repo's
+ *                                   signing-site/.well-known/agent-card.json
+ *                                   (resolved relative to this launcher).
+ *                                   Served at /.well-known/agent-card.json;
+ *                                   the reverse proxy strips its /agenttrust
+ *                                   prefix and forwards the bare path.
  *
  * Run: npx tsx scripts/x402-resource-server.mts
  * Demo (needs a payer — see scripts/x402-pay.mts, live run needs separate
@@ -126,6 +134,8 @@ import { createServiceRegistry, buildServicePaymentRequirements, isDiscoverable 
 import { SqliteServiceStore } from '../src/discovery/store.js';
 import { AGENTTRUST_SERVICE_ID, agenttrustServiceResource } from '../src/discovery/firstProvider.js';
 import { parseCorsOrigins } from '../src/x402/cors.js';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 const HOST = resolveBindHost(process.env.AGENTTRUST_X402_HOST);
 const PORT = Number(process.env.AGENTTRUST_X402_PORT ?? 4590);
@@ -139,6 +149,12 @@ const NODE_PORT = Number(process.env.AGENTTRUST_NODE_PORT ?? TESTNET.grpcPort);
 const NETWORK = TESTNET.caip2;
 const DISCOVERY_DB = process.env.AGENTTRUST_DISCOVERY_DB ?? '/home/hatch/agenttrust-state/discovery.db';
 const STATIC_DIR = process.env.AGENTTRUST_STATIC_DIR;
+// Agent Card file: explicit path wins; otherwise the repo's card,
+// resolved relative to this launcher (works in the checkout and in
+// /opt/agenttrust, where the recovery script syncs the whole repo).
+// An empty value is treated as unset, like the other path variables.
+const AGENT_CARD_FILE = process.env.AGENTTRUST_AGENT_CARD_FILE?.trim()
+  || join(dirname(fileURLToPath(import.meta.url)), '..', 'signing-site', '.well-known', 'agent-card.json');
 
 async function main(): Promise<void> {
   // 0. Canonical resource URL + facilitator mode. Both resolved before any
@@ -280,7 +296,7 @@ async function main(): Promise<void> {
   // Registration is operator-side only (agenttrust-discovery CLI), never
   // over unauthenticated HTTP. The Discovery API is read-only:
   // GET /api/services, GET /api/services/:id.
-  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, corsOrigins, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
+  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, corsOrigins, agentCardFile: AGENT_CARD_FILE, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
   console.log(`AgentTrust x402 resource server on ${started.url}${RESOURCE_PATH}`);
   console.log(`  resource=${resourceUrl}  payTo=${requirements.payTo}  amount=${requirements.amount} microCCD  network=${NETWORK}`);
   console.log(`  cors: ${corsOrigins.length > 0 ? `enabled for ${corsOrigins.join(', ')}` : 'disabled (AGENTTRUST_CORS_ORIGINS unset)'}`);
@@ -289,6 +305,7 @@ async function main(): Promise<void> {
     console.log(`  first-provider service: ${AGENTTRUST_SERVICE_ID} (verified, active) — requirements + resource from the registry record`);
   }
   console.log(`  discovery: GET ${started.url}/api/services (persistent registry: ${DISCOVERY_DB}, ${discovery.size()} service(s))`);
+  console.log(`  agent card: GET ${started.url}/.well-known/agent-card.json (file: ${AGENT_CARD_FILE})`);
   if (STATIC_DIR) console.log(`  static website: GET ${started.url}/ (V5.4 prototype, dir: ${STATIC_DIR})`);
   console.log('  Ctrl-C to stop. (Replay store is in-memory: a restart forgets consumed payments.)');
 

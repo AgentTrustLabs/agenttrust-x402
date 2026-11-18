@@ -16,6 +16,10 @@
  *   GET /protected + X-PAYMENT      → provider gate → 200 + resource, or
  *                                      400 malformed / 402 unpaid-or-invalid /
  *                                      409 replay / 503 verification unavailable
+ *   GET /.well-known/agent-card.json → 200 + the Agent Card file (when an
+ *                                      agent-card file was injected; the
+ *                                      reverse proxy strips its /agenttrust
+ *                                      prefix and forwards the bare path)
  *
  * On a granted access the response carries the settlement in the
  * `PAYMENT-RESPONSE` header (and the `X-PAYMENT-RESPONSE` alias), base64 JSON
@@ -71,7 +75,22 @@ export interface X402ResourceServerOptions {
    * the Discovery API are untouched.
    */
   staticDir?: string;
+  /**
+   * Optional Agent Card file (CIS-8004 Token #1004). When provided, the
+   * server also answers GET /.well-known/agent-card.json with the file's
+   * bytes, Content-Type: application/json — and nothing else. Only this
+   * one exact pathname is ever served, so no directory traversal is
+   * possible. The reverse proxy strips its /agenttrust prefix and
+   * forwards the bare path, so the server sees the bare route — the
+   * same contract as /protected. When omitted, the route does not
+   * exist (404), exactly as before. The file is served read-only; the
+   * payment flow and the Discovery API are untouched.
+   */
+  agentCardFile?: string;
 }
+
+/** The Agent Card route: the on-chain URI path for CIS-8004 Token #1004. */
+export const AGENT_CARD_PATH = '/.well-known/agent-card.json';
 
 /** Base64 JSON of the settlement, in the SDK header convention. */
 export function encodePaymentResponse(value: Record<string, unknown>): string {
@@ -287,6 +306,24 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
           const body = await readFile(join(opts.staticDir, file));
           res.writeHead(200, {
             'content-type': contentType,
+            'cache-control': 'no-store',
+            'content-length': body.length,
+          });
+          res.end(body);
+        } catch {
+          json(res, 404, { error: 'not found' });
+        }
+        return;
+      }
+
+      // Agent Card (CIS-8004 Token #1004). Only active when a card file
+      // was injected. Exactly one file is served, by exact pathname
+      // match; everything else falls through to the 404 below.
+      if (opts.agentCardFile && method === 'GET' && url === AGENT_CARD_PATH) {
+        try {
+          const body = await readFile(opts.agentCardFile);
+          res.writeHead(200, {
+            'content-type': 'application/json',
             'cache-control': 'no-store',
             'content-length': body.length,
           });

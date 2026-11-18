@@ -137,7 +137,9 @@ The helper never prints credential values and never stores them in the repo.
 **Resource server** (`resource.env`): `AGENTTRUST_X402_HOST`,
 `AGENTTRUST_X402_PORT`, `AGENTTRUST_X402_FACILITATOR_URL`,
 `AGENTTRUST_X402_FACILITATOR_MODE`, `AGENTTRUST_X402_PUBLIC_URL` (required),
-`AGENTTRUST_CORS_ORIGINS`, `AGENTTRUST_DISCOVERY_DB`. Never set
+`AGENTTRUST_CORS_ORIGINS`, `AGENTTRUST_DISCOVERY_DB`,
+`AGENTTRUST_AGENT_CARD_FILE` (optional override; default is the repo's
+`signing-site/.well-known/agent-card.json`). Never set
 `AGENTTRUST_X402_ALLOW_MOCK` in production.
 
 ## Shutdown and recovery limitations
