@@ -28,6 +28,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { canonicalStringify } from './canonicalJson.js';
 import { chmodSync, existsSync } from 'node:fs';
 import {
   canTransition,
@@ -266,6 +267,8 @@ export interface SettlementRepository {
   /** Apply verified evidence. The ONLY path to `finalized`. */
   reconcile(input: ReconcileInput): ReconcileResult;
   get(paymentDigest: string): PaymentRow | undefined;
+  /** Find a payment by its recorded transaction hash. Read-only. */
+  getByTransaction(txHash: string): PaymentRow | undefined;
   transitions(paymentDigest: string): TransitionRow[];
   listRecoverable(): PaymentRow[];
   listOutcomeUnknown(): PaymentRow[];
@@ -808,6 +811,14 @@ export class SqliteSettlementRepository implements SettlementRepository {
     return this.read(paymentDigest);
   }
 
+  getByTransaction(txHash: string): PaymentRow | undefined {
+    return this.db
+      .prepare(
+        'SELECT payment_digest, requirements_key, state, tx_hash, created_at, updated_at, attempted, rejection_observation_count FROM payments WHERE tx_hash = ? LIMIT 1',
+      )
+      .get(txHash) as unknown as PaymentRow | undefined;
+  }
+
   transitions(paymentDigest: string): TransitionRow[] {
     return this.db
       .prepare(
@@ -884,7 +895,13 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
 }
 
-/** Evidence digest helper, so the audit log records a tamper-evident pointer. */
+/** Evidence digest helper, so the audit log records a tamper-evident pointer.
+ * Canonical serialization (see `canonicalJson.ts`): the digest is a function
+ * of the evidence's CONTENT alone — same logical evidence, same digest —
+ * including live SDK responses that carry BigInt and rich types (BlockHash,
+ * AccountAddress, CcdAmount), which plain `JSON.stringify` cannot hash at
+ * all. Historical digests are untouched (they are stored audit pointers,
+ * never recomputed); only future rows use this scheme. */
 export function evidenceDigestOf(evidence: unknown): string {
-  return createHash('sha256').update(JSON.stringify(evidence)).digest('hex');
+  return createHash('sha256').update(canonicalStringify(evidence)).digest('hex');
 }

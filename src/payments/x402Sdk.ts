@@ -93,6 +93,23 @@ export function createHttpFacilitator(opts: HttpFacilitatorOptions): ConsumerFac
         clearTimeout(timer);
       }
     },
+    async getPaymentDetail(id: string) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${base}/payment/${encodeURIComponent(id)}`, { headers, signal: ac.signal });
+        const text = await res.text();
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = { error: 'invalid_json', raw: text.slice(0, 200) };
+        }
+        return { status: res.status, body };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
   };
 }
 

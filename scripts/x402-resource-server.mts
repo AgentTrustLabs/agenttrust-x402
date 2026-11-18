@@ -124,7 +124,8 @@ import { TESTNET } from '../src/core/types.js';
 import { probeFacilitator, classifyCompatibility } from '../src/payments/facilitator.js';
 import { buildPaymentRequirements, buildPaymentRequired, preflightPaymentPayload } from '../src/payments/x402.js';
 import { createHttpFacilitator } from '../src/payments/x402Sdk.js';
-import { createX402Provider, ReplayStore, type ChainVerifier, type ProviderFacilitatorPort } from '../src/x402/provider.js';
+import { createX402Provider, ReplayStore, type ChainVerifier } from '../src/x402/provider.js';
+import type { ConsumerFacilitator } from '../src/payments/x402.js';
 import { ConcordiumChainVerifier } from '../src/x402/concordiumChainVerifier.js';
 import { startX402ResourceServer, resolveResourceUrl, resolveFacilitatorMode, resolveBindHost, createMockChainVerifier } from '../src/x402/resourceServer.js';
 import { assertMockModeAllowed } from '../src/x402/mockModeGuard.js';
@@ -207,7 +208,7 @@ async function main(): Promise<void> {
   // chain node. Mock mode skips both — there is no real facilitator to
   // probe, no sponsor to announce, and no chain to read.
   let requirements: PaymentRequirements;
-  let facilitator: ProviderFacilitatorPort;
+  let facilitator: ConsumerFacilitator;
   let chain: ChainVerifier;
   let feePayerLog: string;
   if (mode === 'real') {
@@ -296,11 +297,12 @@ async function main(): Promise<void> {
   // Registration is operator-side only (agenttrust-discovery CLI), never
   // over unauthenticated HTTP. The Discovery API is read-only:
   // GET /api/services, GET /api/services/:id.
-  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, corsOrigins, agentCardFile: AGENT_CARD_FILE, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
+  const started = await startX402ResourceServer({ provider, resourcePath: RESOURCE_PATH, host: HOST, port: PORT, discovery, corsOrigins, agentCardFile: AGENT_CARD_FILE, paymentDetail: facilitator, ...(STATIC_DIR ? { staticDir: STATIC_DIR } : {}) });
   console.log(`AgentTrust x402 resource server on ${started.url}${RESOURCE_PATH}`);
   console.log(`  resource=${resourceUrl}  payTo=${requirements.payTo}  amount=${requirements.amount} microCCD  network=${NETWORK}`);
   console.log(`  cors: ${corsOrigins.length > 0 ? `enabled for ${corsOrigins.join(', ')}` : 'disabled (AGENTTRUST_CORS_ORIGINS unset)'}`);
   console.log(`  facilitator mode=${mode}  facilitator=${mode === 'real' ? FACILITATOR_URL : 'mock'}  feePayer=${feePayerLog}`);
+  console.log(`  payment detail: ${typeof facilitator.getPaymentDetail === 'function' ? `GET ${started.url}/api/payments/:id (facilitator detail + explorer link)` : 'unavailable — facilitator has no detail endpoint'}`);
   if (firstDiscoverable) {
     console.log(`  first-provider service: ${AGENTTRUST_SERVICE_ID} (verified, active) — requirements + resource from the registry record`);
   }

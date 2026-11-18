@@ -30,6 +30,14 @@ import type { ObservedStatus } from './state.js';
 /** Minimal client surface needed by the verifier. */
 export interface ConcordiumStatusClient {
   getBlockItemStatus(hash: unknown): Promise<unknown>;
+  /** Optional: block header lookup, for the payment-detail block height. */
+  getBlockInfo?(hash: unknown): Promise<unknown>;
+}
+
+/** Block height + slot time, as reported by the node. */
+export interface ConcordiumBlockInfo {
+  blockHeight: string;
+  blockSlotTime: string | null;
 }
 
 export interface ConcordiumVerifierOptions {
@@ -87,6 +95,45 @@ export class ConcordiumEvidenceVerifier implements EvidenceVerifier {
     }
 
     return mapStatus(raw, transaction, this.name);
+  }
+
+  /**
+   * Block height + slot time for a finalized block hash, from the same node
+   * the status query used. Returns null when the client cannot answer (no
+   * `getBlockInfo`, node error, malformed response) — the caller renders
+   * "block height unavailable" instead of inventing one. Read-only.
+   */
+  async blockInfo(blockHash: string): Promise<ConcordiumBlockInfo | null> {
+    if (typeof this.client.getBlockInfo !== 'function') return null;
+    const hash = typeof blockHash === 'string' ? blockHash.toLowerCase() : '';
+    if (!HEX64.test(hash)) return null;
+    try {
+      let hashArg: unknown = hash;
+      try {
+        const { BlockHash } = await import('@concordium/web-sdk/types');
+        hashArg = BlockHash.fromHexString(hash);
+      } catch {
+        // Pass the raw string through and let the node reject it.
+      }
+      const raw = await withTimeout(this.client.getBlockInfo(hashArg), this.timeoutMs);
+      if (!raw || typeof raw !== 'object') return null;
+      const r = raw as { blockHeight?: unknown; blockSlotTime?: unknown };
+      if (r.blockHeight === undefined || r.blockHeight === null) return null;
+      const slot = r.blockSlotTime;
+      let slotTime: string | null = null;
+      if (slot instanceof Date) slotTime = slot.toISOString();
+      else if (typeof slot === 'string') slotTime = slot;
+      else if (
+        slot !== undefined &&
+        slot !== null &&
+        typeof (slot as { toISOString?: unknown }).toISOString === 'function'
+      ) {
+        slotTime = (slot as { toISOString: () => string }).toISOString();
+      }
+      return { blockHeight: String(r.blockHeight), blockSlotTime: slotTime };
+    } catch {
+      return null;
+    }
   }
 }
 
