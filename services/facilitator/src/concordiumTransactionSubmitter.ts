@@ -18,6 +18,8 @@
 /** Outcome of the submission call itself. `accepted` means the transport returned a hash. */
 export type SubmissionStatus = 'accepted';
 
+import { SubmissionError } from './submissionErrors.js';
+
 export interface SubmissionResult {
   hash: string;
   status: SubmissionStatus;
@@ -46,8 +48,13 @@ export interface ConcordiumTransactionTransport {
    * Submit an already-signed transaction. Returns the 64-hex transaction hash.
    * MUST throw when the node rejects the submission or the transport fails — never
    * return a hash that the node did not acknowledge.
+   *
+   * Throws a `SubmissionError`: `validation` for a LOCAL failure before any
+   * broadcast (malformed transaction, finalize error), `transport` for a
+   * failure during/after the node call (node rejection, network error).
+   * `opts.correlationId` is attached to the error for tracing; it is never a secret.
    */
-  submit(signedTx: unknown): Promise<string>;
+  submit(signedTx: unknown, opts?: { correlationId?: string }): Promise<string>;
   /**
    * Read the current status of a submitted transaction.
    * `pending` covers both `Received` and `Committed` (committed is not final).
@@ -66,6 +73,11 @@ export interface TransportStatus {
 export interface SubmitOptions {
   /** Abort a submission in flight. */
   signal?: AbortSignal;
+  /**
+   * Correlation id for tracing (payment digest / request id). Attached to
+   * any `SubmissionError`; never a secret. Optional.
+   */
+  correlationId?: string;
 }
 
 export interface FinalizationOptions {
@@ -130,24 +142,42 @@ export class ConcordiumTransactionSubmitter {
    *
    * Never reports success unless the transport returned a well-formed hash. Malformed
    * input throws before the transport is touched.
+   *
+   * Throws a `SubmissionError`: `validation` for a LOCAL failure (nothing was
+   * broadcast — terminal), `transport` for a failure during/after the node
+   * call (outcome unknown — reconcile by hash, never retry blindly).
+   * `opts.correlationId` is attached to the error for tracing.
    */
   async submit(signedTx: unknown, opts: SubmitOptions = {}): Promise<SubmissionResult> {
+    const correlationId = opts.correlationId;
     const invalid = ConcordiumTransactionSubmitter.validate(signedTx);
     if (invalid !== null) {
-      throw new Error(`malformed transaction: ${invalid}`);
+      throw new SubmissionError('validation', `malformed transaction: ${invalid}`, correlationId);
     }
     if (opts.signal?.aborted) {
-      throw new Error('submission cancelled before it was attempted');
+      throw new SubmissionError('validation', 'submission cancelled before it was attempted', correlationId);
     }
     let hash: unknown;
     try {
-      hash = await this.transport.submit(signedTx);
+      hash = await this.transport.submit(signedTx, { correlationId });
     } catch (e) {
-      // The transport's message is preserved; nothing is invented.
-      throw new Error(`submission rejected: ${(e as Error)?.message ?? String(e)}`);
+      // Preserve a typed error unchanged (kind + correlation id intact).
+      // A non-typed error from the transport is a transport failure: the
+      // submitter called the transport, so the node may have been reached.
+      if (e instanceof SubmissionError) throw e;
+      throw new SubmissionError(
+        'transport',
+        `submission rejected: ${(e as Error)?.message ?? String(e)}`,
+        correlationId,
+      );
     }
     if (typeof hash !== 'string' || !TX_HASH_RE.test(hash)) {
-      throw new Error(`submission returned an invalid transaction hash: ${String(hash)}`);
+      // The send happened but the reply is not a usable hash: outcome UNKNOWN.
+      throw new SubmissionError(
+        'transport',
+        `submission returned an invalid transaction hash: ${String(hash)}`,
+        correlationId,
+      );
     }
     return { hash: hash.toLowerCase(), status: 'accepted' };
   }

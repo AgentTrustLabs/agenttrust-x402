@@ -26,6 +26,7 @@ import {
   SqliteOwnerAuthorizationRepository,
 } from './ownerAuthorizationRepository.js';
 import { SIMPLE_TRANSFER_BASE_COST, ESTIMATED_SPONSOR_FEE_MICROCCD_PER_NRG } from './energy.js';
+import { isSubmissionValidationError } from './submissionErrors.js';
 import { convertV2ToSdkV1 } from './wireConverter.js';
 import { signingDigestOf, transactionEnergyOf } from './signingService.js';
 import type { OwnerAuthorizationCertificate } from './ownerAuthorization.js';
@@ -699,11 +700,32 @@ export class FacilitatorCore {
       await new Promise(() => {});
     }
     try {
-      txHash = await this.signer.submitTransaction(sponsored);
+      txHash = await this.signer.submitTransaction(sponsored, { correlationId: digest });
     } catch (e) {
-      // Submission threw: we do not know whether anything was broadcast. Treat as pending,
-      // never as failure-with-retry, because retrying could double-spend. The hash is already
-      // durable, so recovery can use it.
+      // A LOCAL validation failure (malformed transaction, missing sponsor
+      // signature, finalize error) happens BEFORE any broadcast: nothing
+      // reached the node, so the outcome is KNOWN. This is terminal — the
+      // payment is marked failed (not pending), the original error is
+      // preserved verbatim, and the caller may fix the transaction and retry
+      // with a NEW payment. It must NEVER be reported as `outcome_unknown`.
+      if (isSubmissionValidationError(e)) {
+        const reason = `submission validation failed: ${e.message}`;
+        this.store.markFailed(digest, reason, persistedHash);
+        return {
+          success: false,
+          errorReason: 'submission_failed',
+          errorMessage: reason,
+          transaction: persistedHash,
+          network: this.network,
+          extra: { digest, submissionKind: 'validation', simulated: this.simulatedFlag() },
+        };
+      }
+      // Any other submission failure (node rejection, network error,
+      // timeout) is genuinely ambiguous: we do not know whether anything
+      // was broadcast. Treat as pending, never as failure-with-retry,
+      // because retrying could double-spend. The hash is already durable,
+      // so recovery can reconcile it by hash. The original error message
+      // is preserved verbatim (never swallowed).
       this.store.markPending(digest, persistedHash, 'submission outcome unknown');
       return {
         success: false,
@@ -711,7 +733,7 @@ export class FacilitatorCore {
         errorMessage: `submission outcome unknown: ${(e as Error).message}`,
         transaction: persistedHash,
         network: this.network,
-        extra: { digest, nonTerminal: true, simulated: this.simulatedFlag() },
+        extra: { digest, nonTerminal: true, submissionKind: 'transport', simulated: this.simulatedFlag() },
       };
     }
     if (this.dieAt === 'after-submit') {

@@ -116,8 +116,12 @@ export interface SponsorSigner {
    * feature. Mock signers ignore them.
    */
   addSponsorSignature(txJson: unknown, opts?: AddSponsorSignatureOptions): Promise<unknown>;
-  /** Submits the transaction. The mock never contacts a chain. */
-  submitTransaction(txJson: unknown): Promise<string>;
+  /**
+   * Submits the transaction. The mock never contacts a chain.
+   * `opts.correlationId` (payment digest / request id) is threaded to the
+   * submission pipeline for tracing; it is never a secret. Optional.
+   */
+  submitTransaction(txJson: unknown, opts?: { correlationId?: string }): Promise<string>;
   /** Waits for finalization. */
   waitForFinalization(txHash: string, timeoutMs?: number): Promise<{
     txHash: string;
@@ -270,9 +274,11 @@ export function createLedgerSigner(opts: LedgerSignerOptions): SponsorSigner {
     // Wraps the mock: outcomes are simulated, never real.
     simulated: true,
     addSponsorSignature: (tx, _opts) => inner.addSponsorSignature(tx, _opts),
-    async submitTransaction(txJson) {
+    async submitTransaction(txJson, submitOpts) {
       // Recorded BEFORE the attempt: even a throwing submission is an attempt, and the count
       // must reflect that, not just the successes.
+      // `submitOpts` is the per-call correlation id; `opts` (outer) is the
+      // ledger's own configuration (label/behaviour) — the names must not collide.
       append({
         event: 'submit_attempt',
         at: now(),
@@ -281,7 +287,7 @@ export function createLedgerSigner(opts: LedgerSignerOptions): SponsorSigner {
         paymentHint: hintOf(txJson),
       });
       try {
-        const hash = await inner.submitTransaction(txJson);
+        const hash = await inner.submitTransaction(txJson, submitOpts);
         if (opts.behaviour === 'submit-then-die') {
           // The submission "succeeded" off-process and we never get to record it.
           append({ event: 'crash_after_submit', at: now(), pid: process.pid, label: opts.label ?? null });

@@ -114,11 +114,14 @@ export function createIpcSponsorSigner(opts: IpcSponsorSignerOptions): SponsorSi
    */
   const submitter = opts.submitter;
 
-  const submitTransaction = async (txJson: unknown): Promise<string> => {
+  const submitTransaction = async (txJson: unknown, opts?: { correlationId?: string }): Promise<string> => {
     if (!submitter) return noSubmit('submitTransaction');
     // Semantics: `submit` throws on a transport rejection and never returns a hash
     // the node did not acknowledge; the hash is already lower-cased 64-hex.
-    const result = await submitter.submit(txJson);
+    // A typed `SubmissionError` propagates unchanged (kind + correlation id
+    // intact) so the caller can distinguish a local validation failure
+    // (terminal, nothing broadcast) from a transport failure (unknown outcome).
+    const result = await submitter.submit(txJson, { correlationId: opts?.correlationId });
     return result.hash;
   };
 

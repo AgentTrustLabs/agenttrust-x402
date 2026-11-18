@@ -29,6 +29,7 @@
 import { Transaction, TransactionHash, isRejectTransaction, getTransactionRejectReason } from '@concordium/web-sdk';
 import type { BlockItemStatus } from '@concordium/web-sdk';
 import type { ConcordiumTransactionTransport, TransportStatus } from './concordiumTransactionSubmitter.js';
+import { SubmissionError } from './submissionErrors.js';
 
 /**
  * Minimal shape of the SDK client this transport depends on. The real client is
@@ -101,26 +102,41 @@ export class GrpcConcordiumTransport implements ConcordiumTransactionTransport {
     this.client = client;
   }
 
-  async submit(signedTx: unknown): Promise<string> {
+  async submit(signedTx: unknown, opts?: { correlationId?: string }): Promise<string> {
+    const correlationId = opts?.correlationId;
     // Convert the signed pipeline JSON into the SDK's signable form.
+    // A failure here is LOCAL (before any broadcast): validation.
     let signable: unknown;
     try {
       signable = Transaction.signableFromJSON(signedTx);
     } catch (e) {
-      throw new Error(`malformed signed transaction: ${(e as Error)?.message ?? e}`);
+      throw new SubmissionError(
+        'validation',
+        `malformed signed transaction: ${(e as Error)?.message ?? e}`,
+        correlationId,
+      );
     }
     const version = (signable as { version?: unknown }).version;
     if (version !== 0 && version !== 1) {
-      throw new Error(`unsupported transaction version: ${String(version)}`);
+      throw new SubmissionError(
+        'validation',
+        `unsupported transaction version: ${String(version)}`,
+        correlationId,
+      );
     }
 
     // V1 sponsored transactions must use `finalize` + `sendTransaction`; the
     // deprecated V0-only `sendAccountTransaction` cannot carry a sponsor signature.
+    // A finalize failure is LOCAL (before any broadcast): validation.
     let finalized: unknown;
     try {
       finalized = Transaction.finalize(signable as never);
     } catch (e) {
-      throw new Error(`cannot finalize transaction: ${(e as Error)?.message ?? e}`);
+      throw new SubmissionError(
+        'validation',
+        `cannot finalize transaction: ${(e as Error)?.message ?? e}`,
+        correlationId,
+      );
     }
 
     let hash: unknown;
@@ -136,16 +152,29 @@ export class GrpcConcordiumTransport implements ConcordiumTransactionTransport {
             ? (signable as { signature?: unknown }).signature
             : (signable as { signatures?: { sender?: unknown } }).signatures?.sender;
         if (signature === undefined || signature === null) {
-          throw new Error('cannot submit transaction: missing signature');
+          throw new SubmissionError('validation', 'cannot submit transaction: missing signature', correlationId);
         }
         hash = await this.client.sendAccountTransaction?.(accountTransaction, signature);
       }
     } catch (e) {
-      throw new Error(`submission rejected: ${(e as Error)?.message ?? String(e)}`);
+      // The node call failed (node rejection, network error, timeout). The
+      // node may or may not have received the transaction: outcome UNKNOWN.
+      // Preserve a typed error unchanged so the caller can distinguish it.
+      if (e instanceof SubmissionError) throw e;
+      throw new SubmissionError(
+        'transport',
+        `submission rejected: ${(e as Error)?.message ?? String(e)}`,
+        correlationId,
+      );
     }
     const hex = toHex(hash);
     if (!TX_HASH_RE.test(hex)) {
-      throw new Error(`submission returned an invalid transaction hash: ${String(hash)}`);
+      // The send happened but the reply is not a usable hash: outcome UNKNOWN.
+      throw new SubmissionError(
+        'transport',
+        `submission returned an invalid transaction hash: ${String(hash)}`,
+        correlationId,
+      );
     }
     return hex.toLowerCase();
   }

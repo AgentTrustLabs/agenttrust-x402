@@ -8,12 +8,13 @@
  *                              retry once with `X-PAYMENT`
  *   GET url + X-PAYMENT     → 200: resource + PAYMENT-RESPONSE settlement
  *
- * Signing reuses the proven envelope pattern (sender wallet export +
- * `loadWalletExportSigner` + live nonce + `Transaction.signableFromJSON` /
- * `Transaction.sign` / `Transaction.toJSON`). The sender signs only the
- * sender part; the sponsor signature is added by the facilitator's signing
- * service during settlement. The sponsor account is read from the
- * requirement's `extra.feePayer` — never configured locally.
+ * Signing reuses the local sender signing module (`src/x402/localSenderSigning.ts`):
+ * the sender wallet export is loaded locally (`loadWalletExportSigner`), the
+ * transaction is validated fail-closed and signed locally, and only the signed
+ * JSON (sender signature present, sponsor slot empty) is sent. The sponsor
+ * signature is added by the facilitator's signing service during settlement.
+ * The sponsor account is read from the requirement's `extra.feePayer` — never
+ * configured locally.
  *
  * ⚠️  LIVE — this script signs a real transaction and pays real (test) CCD
  * through the facilitator. Run ONLY with a separate, explicit operator
@@ -39,9 +40,13 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { parseWallet, Transaction } from '@concordium/web-sdk';
+import { parseWallet } from '@concordium/web-sdk';
 import { TESTNET } from '../src/core/types.js';
 import { fetchPaidResource } from '../src/x402/client.js';
+import {
+  signSenderTransaction,
+  SIMPLE_TRANSFER_BASE_COST,
+} from '../src/x402/localSenderSigning.js';
 import { loadWalletExportSigner } from '../services/facilitator/src/walletExportLoader.js';
 import { GrpcAccountInfoProvider } from '../services/facilitator/src/grpcAccountInfoProvider.js';
 
@@ -113,21 +118,27 @@ async function main(): Promise<void> {
           sender: SENDER,
           nonce,
           expiry: Math.floor(Date.now() / 1000) + 300,
-          executionEnergyAmount: 300,
+          // C_t (the transaction-specific base cost), NOT the total energy.
+          // The SDK recomputes the total (635 NRG for this transfer) when it
+          // signs and finalizes. Passing a total here is the energy bug:
+          // the SDK would treat it as C_t and price a different transaction.
+          executionEnergyAmount: Number(SIMPLE_TRANSFER_BASE_COST),
           numSignatures: 1,
           sponsor: { account: feePayer, numSignatures: 1 },
         },
         payload: { type: 'transfer', toAddress: requirements.payTo, amount: requirements.amount },
         signatures: { sender: {}, sponsor: {} },
       };
-      const signable = Transaction.signableFromJSON(txJson);
-      const signed = await Transaction.sign(signable, signer);
-      const signedJson = Transaction.toJSON(signed) as Record<string, any>;
-      // SDK 12 `Transaction.toJSON` returns header.nonce and
-      // header.executionEnergyAmount as BigInt — convert before stringifying,
-      // or JSON.stringify throws.
-      signedJson.header.nonce = Number(signedJson.header.nonce);
-      signedJson.header.executionEnergyAmount = Number(signedJson.header.executionEnergyAmount);
+      // Local sender signing (fail-closed): validates the transaction, signs
+      // the sender part with the locally-loaded export signer, and returns
+      // the signed JSON. The private key never leaves this process; the
+      // sponsor signature is added later by the facilitator.
+      const { signedTransaction: signedJson, energy, digest } = await signSenderTransaction(
+        txJson,
+        signer,
+        { expectedSender: SENDER },
+      );
+      console.log(`x402-pay: sender signed digest=${digest} energy=${energy} NRG`);
       return {
         x402Version: 2,
         accepted: requirements,
