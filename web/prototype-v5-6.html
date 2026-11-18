@@ -4976,68 +4976,207 @@
       });
     });
 
-    function renderTxDetailInspector(hash) {
-      const tx = realTransactionsData.find(t => t.hash === hash) || realTransactionsData[0];
-      document.querySelectorAll('#page-transactions .podium-card, #page-transactions .block-pill-card, #page-transactions tr.clickable-tx').forEach(el => {
-        const isCurrent = el.dataset.txHash === tx.hash;
-        el.classList.toggle('active', isCurrent);
-        if (isCurrent) el.setAttribute('aria-current', 'true');
-        else el.removeAttribute('aria-current');
-      });
+    /* Payment detail inspector (live, API-driven). The settlement evidence
+       for the requested hash is fetched from GET /api/payments/:id and
+       rendered from the response — nothing here is hardcoded. A payment is
+       shown as FINALIZED only when the STORED state is `finalized`; any
+       other stored state renders an explicit NOT FINALIZED notice, and a
+       hash this facilitator has no record of renders "not in this
+       facilitator's settlement records" with an independent CCDScan link. */
+    const TESTNET_NETWORK_LABELS = {
+      'ccd:4221332d34e1694168c2a0c0b3fd0f27': 'Concordium Testnet',
+    };
+    function ccdscanTxUrl(h) {
+      return 'https://testnet.ccdscan.io/?dcount=1&dentity=transaction&dhash=' + h;
+    }
+    function formatMicroCcd(micro) {
+      if (micro === null || micro === undefined || micro === '') return 'not available';
+      const n = Number(micro);
+      if (!Number.isFinite(n)) return 'not available';
+      return (n / 1000000).toFixed(6) + ' CCD';
+    }
+    function formatBlockTimeWib(iso) {
+      if (!iso) return 'not available';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return 'not available';
+      return d.toLocaleString('en-GB', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + ' WIB';
+    }
+    function renderTxDetailFallback(hash, title, bodyHtml, explorerUrl) {
       const el = document.getElementById('tx-detail-inspector');
       el.innerHTML = `
         <div class="card-header">
           <div class="section-title-group">
             <span class="eyebrow-label">SETTLEMENT RECEIPT</span>
-            <span class="card-title">Cryptographic Settlement Receipt — Block #${tx.block} (Rank #${tx.rank})</span>
-            <span class="badge-live">LIVE - TESTNET</span>
+            <span class="card-title">${escapeHtml(title)}</span>
+            <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED</span>
           </div>
-          <a class="btn-black-pill" target="_blank" rel="noopener" href="${tx.url}">Verify on Concordium Testnet CCDScan ↗</a>
+          <a class="btn-black-pill" target="_blank" rel="noopener" href="${escapeHtml(explorerUrl)}">Verify on Concordium Testnet CCDScan ↗</a>
         </div>
         <div class="inspector-grid">
           <div class="inspector-field" style="grid-column: 1 / -1;">
             <span class="inspector-label">Transaction Hash (64-Hex Concordium Testnet Identifier)</span>
-            <span class="inspector-val">${tx.hash}</span>
+            <span class="inspector-val">${escapeHtml(hash)}</span>
+          </div>
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Status</span>
+            <span class="inspector-val" style="font-weight:700;">${bodyHtml}</span>
+          </div>
+        </div>
+      `;
+    }
+    async function renderTxDetailInspector(hash) {
+      const requested = String(hash || '').toLowerCase();
+      document.querySelectorAll('#page-transactions .podium-card, #page-transactions .block-pill-card, #page-transactions tr.clickable-tx').forEach(el => {
+        const isCurrent = el.dataset.txHash === requested;
+        el.classList.toggle('active', isCurrent);
+        if (isCurrent) el.setAttribute('aria-current', 'true');
+        else el.removeAttribute('aria-current');
+      });
+      const el = document.getElementById('tx-detail-inspector');
+      const listed = realTransactionsData.find(t => t.hash === requested);
+      el.innerHTML = `
+        <div class="card-header">
+          <div class="section-title-group">
+            <span class="eyebrow-label">SETTLEMENT RECEIPT</span>
+            <span class="card-title">Loading settlement evidence…</span>
+          </div>
+        </div>
+        <div class="inspector-grid">
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Transaction Hash (64-Hex Concordium Testnet Identifier)</span>
+            <span class="inspector-val">${escapeHtml(requested)}</span>
+          </div>
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Status</span>
+            <span class="inspector-val">Fetching live detail from the facilitator…</span>
+          </div>
+        </div>
+      `;
+      let res;
+      try {
+        res = await fetch(apiUrl('/api/payments/' + encodeURIComponent(requested)));
+      } catch {
+        renderTxDetailFallback(requested, 'Settlement Detail', 'Live detail unavailable — the facilitator could not be reached. Verify the transaction independently on CCDScan.', ccdscanTxUrl(requested));
+        return;
+      }
+      if (res.status === 404) {
+        renderTxDetailFallback(requested, 'Settlement Detail', 'Not in this facilitator\u2019s settlement records. This facilitator only knows payments it settled itself; the transaction may still exist on-chain — verify it independently on CCDScan.', ccdscanTxUrl(requested));
+        return;
+      }
+      if (!res.ok) {
+        renderTxDetailFallback(requested, 'Settlement Detail', 'Live detail unavailable (HTTP ' + res.status + '). Verify the transaction independently on CCDScan.', ccdscanTxUrl(requested));
+        return;
+      }
+      let d;
+      try {
+        d = await res.json();
+      } catch {
+        renderTxDetailFallback(requested, 'Settlement Detail', 'Live detail unavailable — the facilitator returned an unreadable response. Verify the transaction independently on CCDScan.', ccdscanTxUrl(requested));
+        return;
+      }
+      const v = (d && d.verification) || {};
+      const req = (d && d.requirements) || {};
+      const networkLabel = TESTNET_NETWORK_LABELS[req.network] || req.network || 'not available';
+      const explorerUrl = (d && typeof d.explorerUrl === 'string' && d.explorerUrl) || ccdscanTxUrl(requested);
+      const finalizeTransition = Array.isArray(d.transitions)
+        ? d.transitions.find(t => t.to === 'finalized' && t.evidence)
+        : null;
+      const title = v.blockHeight
+        ? 'Cryptographic Settlement Receipt — Block #' + escapeHtml(v.blockHeight) + (listed ? ' (Rank #' + escapeHtml(String(listed.rank)) + ')' : '')
+        : 'Settlement Detail — ' + escapeHtml(requested.slice(0, 8)) + '…' + escapeHtml(requested.slice(-8));
+      const statusBadge = d.finalized
+        ? '<span class="badge-live">FINALIZED — LIVE - TESTNET</span>'
+        : '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED — ' + escapeHtml(String(d.state || 'unknown')).toUpperCase() + '</span>';
+      const statusNotice = d.finalized
+        ? 'Finalized. Stored state <code>finalized</code>'
+          + (v.available && v.finalized
+            ? ', confirmed live on-chain' + (v.source ? ' via ' + escapeHtml(v.source) : '') + '.'
+            : v.available
+              ? '. The chain currently reports this transaction as <code>' + escapeHtml(String(v.observed || 'unknown')) + '</code> — the stored finalized state is shown as recorded.'
+              : '. Live verification is unavailable' + (v.error ? ': ' + escapeHtml(String(v.error)) : '') + ' — the stored finalized state is shown, not a fresh live confirmation.')
+        : 'NOT finalized. Stored state: <code>' + escapeHtml(String(d.state || 'unknown')) + '</code>.'
+          + (v.available
+            ? ' The chain currently reports this transaction as <code>' + escapeHtml(String(v.observed || 'unknown')) + '</code>.'
+            : ' Live verification is unavailable' + (v.error ? ': ' + escapeHtml(String(v.error)) : '') + '.')
+          + ' This payment is not shown as finalized until reconciliation confirms it.';
+      const amountLabel = req.amount && req.asset
+        ? escapeHtml(String(req.amount)) + ' micro' + escapeHtml(String(req.asset)) + (req.asset === 'CCD' ? ' (1 µCCD)' : '')
+        : 'not available';
+      const evidenceLine = finalizeTransition && finalizeTransition.evidence
+        ? 'Finalize transition recorded evidence from <code>' + escapeHtml(finalizeTransition.evidence.source) + '</code> (digest <code>' + escapeHtml(finalizeTransition.evidence.digest) + '</code>).'
+        : (d.finalized
+          ? 'No finalize-transition evidence pointer was recorded for this payment.'
+          : 'No finalize-transition evidence — the payment has not finalized.');
+      el.innerHTML = `
+        <div class="card-header">
+          <div class="section-title-group">
+            <span class="eyebrow-label">SETTLEMENT RECEIPT</span>
+            <span class="card-title">${title}</span>
+            ${statusBadge}
+          </div>
+          <a class="btn-black-pill" target="_blank" rel="noopener" href="${escapeHtml(explorerUrl)}">Verify on Concordium Testnet CCDScan ↗</a>
+        </div>
+        <div class="inspector-grid">
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Transaction Hash (64-Hex Concordium Testnet Identifier)</span>
+            <span class="inspector-val">${escapeHtml(d.transactionHash || requested)}</span>
+          </div>
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Finalization Status &amp; Evidence</span>
+            <span class="inspector-val" style="font-weight:400;">${statusNotice}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Network</span>
+            <span class="inspector-val">${escapeHtml(networkLabel)}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Settlement Amount &amp; Asset</span>
-            <span class="inspector-val" style="font-weight:700;">${tx.amount} (1 microCCD)</span>
+            <span class="inspector-val" style="font-weight:700;">${amountLabel}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Finalized Block Height</span>
-            <span class="inspector-val">${tx.block}</span>
+            <span class="inspector-val">${v.blockHeight ? escapeHtml(String(v.blockHeight)) : 'not available'}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Block Hash</span>
+            <span class="inspector-val">${v.blockHash ? escapeHtml(String(v.blockHash)) : 'not available'}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Sponsored Network Fee</span>
-            <span class="inspector-val">${tx.fee}</span>
+            <span class="inspector-val">${escapeHtml(formatMicroCcd(v.feeMicroCcd))}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Execution Energy</span>
-            <span class="inspector-val">635 NRG (cap 1000 NRG)</span>
+            <span class="inspector-val">${v.energy ? escapeHtml(String(v.energy)) + ' NRG' : 'not available'}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Timestamp (WIB)</span>
-            <span class="inspector-val">${tx.timestamp}</span>
+            <span class="inspector-val">${escapeHtml(formatBlockTimeWib(v.blockSlotTime))}</span>
           </div>
           <div class="inspector-field">
-            <span class="inspector-label">Sender Account (Token #1004 Owner)</span>
-            <span class="inspector-val">4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d</span>
+            <span class="inspector-label">Sender Account</span>
+            <span class="inspector-val">${v.sender ? escapeHtml(String(v.sender)) : 'not available'}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Sponsor / Fee Payer Account</span>
-            <span class="inspector-val">3xRV448QMiTDyeAdiS9FfzZLWFUnKqTJZ2bx2aNd44zksrSxUK</span>
+            <span class="inspector-val">${v.sponsor ? escapeHtml(String(v.sponsor)) : 'not available'}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Recipient / payTo Account</span>
-            <span class="inspector-val">3dX7PEbUkmarXKhPo6HwRK6YWZtmAgJdDRt5UELd7k63AsUwUB</span>
+            <span class="inspector-val">${req.payTo ? escapeHtml(String(req.payTo)) : (v.recipient ? escapeHtml(String(v.recipient)) : 'not available')}</span>
           </div>
+          ${listed ? `
           <div class="inspector-field">
             <span class="inspector-label">Provider &amp; Identity Reference</span>
-            <span class="inspector-val">${tx.provider}</span>
+            <span class="inspector-val">${escapeHtml(listed.provider)}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Settlement Mechanism</span>
-            <span class="inspector-val">${tx.service} · Sponsored x402 Transfer</span>
+            <span class="inspector-val">${escapeHtml(listed.service)} · Sponsored x402 Transfer</span>
+          </div>` : ''}
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Verification Evidence</span>
+            <span class="inspector-val" style="font-weight:400;">${evidenceLine}</span>
           </div>
         </div>
       `;

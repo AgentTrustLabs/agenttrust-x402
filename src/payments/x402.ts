@@ -34,6 +34,14 @@ export interface ConsumerFacilitator {
     extensions?: string[];
     signers?: Record<string, string[]>;
   }>;
+  /**
+   * Read-only payment detail, when the facilitator serves it
+   * (`GET /payment/:id`). Absent on facilitators that predate the detail
+   * endpoint (e.g. mocks): callers must treat a missing method as "detail
+   * unavailable", never as an error in the payment itself. Returns the
+   * facilitator's HTTP status and body so the caller can map 404/400.
+   */
+  getPaymentDetail?(id: string): Promise<{ status: number; body: unknown }>;
 }
 
 export const X402_VERSION = 2;

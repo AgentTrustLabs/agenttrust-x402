@@ -30,6 +30,7 @@ import { IpcAuthorizationClient } from './authorization.js';
 import { FacilitatorCore, type CoreOptions } from './core.js';
 import { buildOperatorAuth } from './auth.js';
 import { ReconciliationService } from './reconcile.js';
+import { getPaymentDetail } from './paymentDetail.js';
 import { FixtureEvidenceVerifier, type EvidenceVerifier } from './evidence.js';
 import { ConcordiumEvidenceVerifier, type ConcordiumStatusClient } from './concordiumEvidence.js';
 import type { FacilitatorConfig } from './config.js';
@@ -567,6 +568,28 @@ export async function startFacilitator(
         });
         const status = outcome.ok ? 200 : outcome.code === 'unknown_payment' ? 404 : 409;
         json(res, status, outcome);
+        return;
+      }
+      if (method === 'GET' && url.startsWith('/payment/')) {
+        // Read-only payment detail: the stored record + a fresh live
+        // observation of the recorded transaction hash. No state is
+        // written, nothing is signed or submitted. The identifier is a
+        // payment digest or a transaction hash (both 64-char hex).
+        const segment = url.slice('/payment/'.length).split('?')[0]!;
+        if (!segment || segment.includes('/')) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        const result = await getPaymentDetail({ repository: core.store, verifier }, segment);
+        if (!result.ok) {
+          json(res, result.code === 'invalid_request' ? 400 : 404, {
+            ok: false,
+            code: result.code,
+            reason: result.reason,
+          });
+          return;
+        }
+        json(res, 200, result.detail);
         return;
       }
 

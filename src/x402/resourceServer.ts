@@ -42,6 +42,8 @@ import type { ChainTransferSummary, ChainVerifier, X402Provider } from './provid
 import { handleDiscoveryRequest } from '../discovery/http.js';
 import type { ServiceRegistry } from '../discovery/registry.js';
 import { corsHeadersFor, corsPreflight } from './cors.js';
+import { sdkExplorerTxUrl } from '../payments/x402Sdk.js';
+import type { ConsumerFacilitator } from '../payments/x402.js';
 
 export interface X402ResourceServerOptions {
   /** Decides access. Constructed by the caller (facilitator + chain wired in). */
@@ -87,6 +89,16 @@ export interface X402ResourceServerOptions {
    * payment flow and the Discovery API are untouched.
    */
   agentCardFile?: string;
+  /**
+   * Optional payment-detail port (the same facilitator client the provider
+   * uses, when it serves GET /payment/:id). When provided, the server also
+   * answers GET /api/payments/:id by forwarding to it and adding the
+   * explorer link for the payment's network (built from the SDK's network
+   * mapping, never a hardcoded URL). When omitted, or when the port has no
+   * detail method, the route does not exist (404), exactly as before. The
+   * detail is read-only: it never writes, signs, or submits.
+   */
+  paymentDetail?: Pick<ConsumerFacilitator, 'getPaymentDetail'>;
 }
 
 /** The Agent Card route: the on-chain URI path for CIS-8004 Token #1004. */
@@ -247,13 +259,14 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
   const provider = opts.provider;
   const corsOrigins = opts.corsOrigins ?? [];
   const corsActive = corsOrigins.length > 0;
-  // CORS applies to the two browser-facing endpoints: the protected
+  // CORS applies to the three browser-facing endpoints: the protected
   // resource (the configured path — behind a reverse proxy the proxy
-  // strips its prefix and forwards this bare path) and the Discovery
-  // API (list + detail — the same route family). Nothing else gets
-  // CORS headers: the static website is same-origin by design.
+  // strips its prefix and forwards this bare path), the Discovery API
+  // (list + detail — the same route family), and the payment-detail API
+  // (GET /api/payments/:id). Nothing else gets CORS headers: the static
+  // website is same-origin by design.
   const isCorsPath = (path: string): boolean =>
-    path === resourcePath || path === '/api/services' || path.startsWith('/api/services/');
+    path === resourcePath || path === '/api/services' || path.startsWith('/api/services/') || path.startsWith('/api/payments/');
 
   return (req, res) => {
     void (async () => {
@@ -330,6 +343,51 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
           res.end(body);
         } catch {
           json(res, 404, { error: 'not found' });
+        }
+        return;
+      }
+
+      // Payment detail (read-only). Only active when a detail port was
+      // injected AND it serves the detail method. GET /api/payments/:id
+      // forwards to the facilitator's stored record + live verification
+      // and adds the explorer link for the payment's network (from the
+      // SDK's network mapping, never a hardcoded URL). A facilitator
+      // that is down yields 503; an unknown payment yields the
+      // facilitator's 404. Non-GET on this path is 405.
+      if (url.startsWith('/api/payments/')) {
+        if (method !== 'GET') {
+          json(res, 405, { error: 'method not allowed' }, { allow: 'GET', ...cors });
+          return;
+        }
+        const getDetail = opts.paymentDetail?.getPaymentDetail;
+        if (typeof getDetail !== 'function') {
+          json(res, 404, { error: 'not found' }, cors);
+          return;
+        }
+        const id = url.slice('/api/payments/'.length);
+        if (!id || id.includes('/')) {
+          json(res, 404, { error: 'not found' }, cors);
+          return;
+        }
+        if (!/^[0-9a-fA-F]{64}$/.test(id)) {
+          json(res, 400, { error: 'invalid_request', reason: 'payment identifier must be a 64-char hex digest or transaction hash' }, cors);
+          return;
+        }
+        try {
+          const { status, body } = await getDetail.call(opts.paymentDetail, id);
+          if (status === 200 && body && typeof body === 'object' && !Array.isArray(body)) {
+            const b = body as Record<string, unknown>;
+            // The network lives in the detail's requirements, not top-level.
+            const req = b.requirements && typeof b.requirements === 'object' ? (b.requirements as Record<string, unknown>) : null;
+            const network = req && typeof req.network === 'string' ? req.network : null;
+            const txHash = typeof b.transactionHash === 'string' ? b.transactionHash : null;
+            const explorerUrl = network && txHash ? (sdkExplorerTxUrl(network, txHash) ?? null) : null;
+            json(res, status, { ...b, explorerUrl }, cors);
+            return;
+          }
+          json(res, status, body, cors);
+        } catch {
+          json(res, 503, { error: 'payment_detail_unavailable' }, cors);
         }
         return;
       }
