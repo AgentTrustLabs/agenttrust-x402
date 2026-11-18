@@ -2935,6 +2935,69 @@
       word-break: break-all;
     }
 
+    .tx-timeline {
+      list-style: none;
+      margin: 2px 0 0;
+      padding: 0;
+    }
+
+    .tx-timeline li {
+      position: relative;
+      margin-left: 5px;
+      padding: 0 0 10px 20px;
+      border-left: 2px solid var(--border-hairline);
+    }
+
+    .tx-timeline li:last-child {
+      padding-bottom: 0;
+      border-left-color: transparent;
+    }
+
+    .tx-timeline li::before {
+      content: '';
+      position: absolute;
+      left: -6px;
+      top: 4px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--bg-subtle);
+      border: 2px solid var(--text-muted);
+    }
+
+    .tx-timeline-step {
+      display: block;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-primary);
+      word-break: break-all;
+    }
+
+    .tx-timeline-meta {
+      display: block;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      word-break: break-all;
+    }
+
+    .tx-timeline-evidence {
+      display: block;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      word-break: break-all;
+    }
+
+    .tx-timeline-empty,
+    .tx-timeline-note {
+      margin: 2px 0 0;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+    }
+
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -5026,6 +5089,43 @@
     }
     async function renderTxDetailInspector(hash) {
       const requested = String(hash || '').toLowerCase();
+
+      /* Settlement transition timeline: renders the stored transitions in
+         the API's own order (the facilitator returns them ORDER BY id, i.e.
+         chronological insertion order) — never re-sorted, never a live
+         chain claim. Every field is escaped; missing or malformed data is
+         labeled, never invented. */
+      function buildTransitionTimeline(transitions) {
+        if (!Array.isArray(transitions)) {
+          return '<p class="tx-timeline-empty">Transition history was not included in this response.</p>';
+        }
+        if (transitions.length === 0) {
+          return '<p class="tx-timeline-empty">No transitions recorded for this payment.</p>';
+        }
+        const readable = transitions.filter(t => t && typeof t === 'object' && !Array.isArray(t) && typeof t.to === 'string' && t.to !== '');
+        if (readable.length === 0) {
+          return '<p class="tx-timeline-empty">No readable transition history was returned.</p>';
+        }
+        const items = transitions.map((t, i) => {
+          const step = i + 1;
+          if (!t || typeof t !== 'object' || Array.isArray(t) || typeof t.to !== 'string' || t.to === '') {
+            return `<li><span class="tx-timeline-step">${step}. unreadable transition entry</span><span class="tx-timeline-meta">The API returned an entry without a readable state — shown as-is, not reconstructed.</span></li>`;
+          }
+          const from = (typeof t.from === 'string' && t.from !== '') ? escapeHtml(t.from) + ' → ' : '';
+          const reason = (typeof t.reason === 'string' && t.reason.trim() !== '') ? escapeHtml(t.reason) : 'reason not recorded';
+          const whenDate = (typeof t.at === 'number' && Number.isFinite(t.at)) ? new Date(t.at) : null;
+          const when = (whenDate && !Number.isNaN(whenDate.getTime())) ? escapeHtml(formatBlockTimeWib(whenDate.toISOString())) : 'time not recorded';
+          let evidence = '';
+          if (t.evidence && typeof t.evidence === 'object' && !Array.isArray(t.evidence)
+            && typeof t.evidence.source === 'string' && typeof t.evidence.digest === 'string') {
+            evidence = `<span class="tx-timeline-evidence">Evidence: ${escapeHtml(t.evidence.source)} (digest ${escapeHtml(t.evidence.digest)})</span>`;
+          } else if (t.evidence !== null && t.evidence !== undefined) {
+            evidence = '<span class="tx-timeline-evidence">Evidence reference incomplete.</span>';
+          }
+          return `<li><span class="tx-timeline-step">${step}. ${from}${escapeHtml(t.to)}</span><span class="tx-timeline-meta">${reason} · ${when}</span>${evidence}</li>`;
+        }).join('');
+        return `<ol class="tx-timeline">${items}</ol><p class="tx-timeline-note">Stored settlement history — recorded state changes, not a live chain confirmation.</p>`;
+      }
       document.querySelectorAll('#page-transactions .podium-card, #page-transactions .block-pill-card, #page-transactions tr.clickable-tx').forEach(el => {
         const isCurrent = el.dataset.txHash === requested;
         el.classList.toggle('active', isCurrent);
@@ -5177,6 +5277,10 @@
           <div class="inspector-field" style="grid-column: 1 / -1;">
             <span class="inspector-label">Verification Evidence</span>
             <span class="inspector-val" style="font-weight:400;">${evidenceLine}</span>
+          </div>
+          <div class="inspector-field" style="grid-column: 1 / -1;">
+            <span class="inspector-label">Settlement Transition Timeline</span>
+            ${buildTransitionTimeline(d.transitions)}
           </div>
         </div>
       `;

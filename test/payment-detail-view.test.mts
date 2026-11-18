@@ -89,6 +89,38 @@ test('08. finalized branch claims a live confirmation only when the chain confir
   ok(body.includes('The chain currently reports this transaction as'), 'live-but-not-finalized observation is stated, not hidden');
 });
 
+test('09. settlement transition timeline renders the API transitions in order', () => {
+  ok(body.includes('buildTransitionTimeline(d.transitions)'), 'timeline is built from the API transitions');
+  ok(body.includes('Settlement Transition Timeline'), 'timeline field label present');
+  ok(body.includes('tx-timeline'), 'timeline list markup present');
+  ok(body.includes("Array.isArray(transitions)"), 'transition array is validated before rendering');
+  ok(body.includes("escapeHtml(t.to)"), 'transition state is escaped');
+  ok(body.includes("escapeHtml(t.reason)"), 'transition reason is escaped');
+  ok(body.includes("escapeHtml(t.evidence.source)"), 'transition evidence source is escaped');
+  ok(body.includes("escapeHtml(t.evidence.digest)"), 'transition evidence digest is escaped');
+});
+
+test('10. missing, empty, and malformed transition data are labeled, never invented', () => {
+  ok(body.includes('Transition history was not included in this response.'), 'missing transitions array is labeled');
+  ok(body.includes('No transitions recorded for this payment.'), 'empty transitions array is labeled');
+  ok(body.includes('No readable transition history was returned.'), 'all-unreadable transitions are labeled');
+  ok(body.includes('unreadable transition entry'), 'a malformed entry keeps its position and is labeled');
+  ok(body.includes('reason not recorded'), 'missing reason is labeled');
+  ok(body.includes('time not recorded'), 'missing timestamp is labeled');
+  ok(body.includes('Evidence reference incomplete.'), 'incomplete evidence reference is labeled');
+  ok(body.includes('formatBlockTimeWib'), 'timestamps use the existing WIB formatter');
+});
+
+test('11. the timeline never independently implies live on-chain confirmation', () => {
+  ok(body.includes('not a live chain confirmation'), 'timeline states it is stored history, not a live confirmation');
+  const tlStart = body.indexOf('function buildTransitionTimeline');
+  ok(tlStart >= 0, 'timeline builder exists');
+  const tlEnd = body.indexOf('</ol>', tlStart);
+  ok(tlEnd > tlStart, 'timeline markup is bounded');
+  const tl = body.slice(tlStart, tlEnd);
+  notOk(tl.includes('confirmed live on-chain'), 'timeline builder contains no live-confirmation claim');
+});
+
 // ═══ runner ═════════════════════════════════════════════════════════════
 
 let failed = 0;
