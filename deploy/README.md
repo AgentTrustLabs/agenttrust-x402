@@ -362,6 +362,18 @@ server restarted — same narrow procedure as above) — otherwise its API
 calls fail CORS exactly like an unlisted Production origin. If a preview
 does not need the API, leave it unlisted.
 
+## Reverse proxy (nginx, inbound)
+
+The public API `https://api.sabokun.my.id/agenttrust/*` is served by nginx
+on the host, proxying to the resource server on `127.0.0.1:4590` with the
+`/agenttrust` prefix stripped. The version-controlled config is
+`deploy/nginx/api.sabokun.my.id.conf`; prerequisites (DNS, TLS via
+certbot), install steps, and verification are in `deploy/nginx/README.md`.
+This is the inbound reverse proxy — it is unrelated to the egress "Proxy
+credential" below, which is the facilitator's outbound proxy to the
+Testnet node. The proxy adds no CORS headers and changes none: CORS is
+set entirely by the resource server.
+
 ## Proxy credential
 
 The facilitator's gRPC client reaches the Testnet node only through the
