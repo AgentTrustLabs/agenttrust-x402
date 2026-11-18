@@ -77,7 +77,7 @@ HOME_SIGNING=/home/agenttrust-signing
 # them before running; the preflight dies when either is empty. CORS_ORIGINS
 # is a comma-separated list of exact origins (no `*`, no `*.vercel.app`).
 PUBLIC_URL="https://api.sabokun.my.id/agenttrust/protected"
-CORS_ORIGINS=""
+CORS_ORIGINS="https://agenttrust-x402.vercel.app"
 
 STATE_DIR=/home/hatch/agenttrust-state
 DURABLE=/home/hatch/.agenttrust
