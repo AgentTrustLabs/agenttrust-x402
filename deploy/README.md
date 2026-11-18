@@ -90,8 +90,277 @@ below), then run the recovery script.
 3. **Set the production inputs** at the top of `deploy/recover-deployment.sh`:
    `PUBLIC_URL` (required) and `CORS_ORIGINS` (exact origin(s), no
    wildcards; may stay empty for a local-first run, with CORS disabled).
-4. **Create the Vercel project** for the frontend and put its exact origin
-   in `CORS_ORIGINS` before exposing the frontend.
+4. **Create the Vercel project** for the frontend — see "Frontend on
+   Vercel" below. Put its exact origin in `CORS_ORIGINS` before exposing
+   the frontend.
+
+## Frontend on Vercel
+
+The Vercel project serves only static files. The API lives on the host
+behind `https://api.sabokun.my.id/agenttrust` (the resource server and
+facilitator deployed by the recovery script). Vercel does **not** deploy
+the backend, and the recovery script does **not** deploy the frontend:
+they are two separate deployments, connected only by the API base URL
+below and by the backend's CORS allowlist.
+
+### Project settings
+
+- **Repository:** `AgentTrustLabs/agenttrust-x402` (this repo).
+- **Root Directory:** `web`.
+- **Build Command / Output Directory / Framework:** taken from
+  `web/vercel.json` — `node build.mjs` / `dist` / framework `null`
+  (Framework Preset "Other" in the dashboard). Do not override them
+  with different values; the committed `vercel.json` is authoritative.
+
+### Environment variable (build time)
+
+Set in the Vercel project settings (Environment Variables), for every
+environment whose deployments must call the API:
+
+  AGENTTRUST_API_BASE_URL=https://api.sabokun.my.id/agenttrust
+
+`web/build.mjs` reads this variable **at build time** and bakes it into
+`dist/index.html` (replacing the `__AGENTTRUST_API_BASE_URL__`
+placeholder). A value set or changed after a build does nothing to the
+already-built output — redeploy (rebuild) after changing it.
+
+If the variable is missing at build time, the build still succeeds, but
+the placeholder is replaced with an empty string and the frontend falls
+back to same origin: both API calls (`GET /protected` and
+`GET /api/services`, via the `apiUrl()` helper in
+`web/prototype-v5-6.html`) go to the Vercel origin, which serves only
+static files, so they 404 and the UI reports the API as unavailable. A
+malformed value (not an `http(s)` URL) fails the build loudly instead
+(`build.mjs` throws).
+
+### CORS: allow the Vercel origin on the backend
+
+The browser enforces CORS, so the exact production Vercel origin must
+be listed in the backend's allowlist — in two places, with the same
+complete value:
+
+1. **Source of truth** — `CORS_ORIGINS` at the top of
+   `deploy/recover-deployment.sh` (line 80; see "Before the first run",
+   step 3). The recovery script regenerates `resource.env` from this
+   variable on every run (step 6), so a value set only in the live env
+   file would be silently reverted by the next recovery.
+2. **Live file** — `AGENTTRUST_CORS_ORIGINS` in
+   `/home/agenttrust/.agenttrust/resource.env`, applied by restarting
+   only the resource service (procedure below).
+
+The same string must flow through all three carriers: the validated
+`COMPLETE` (step 2), the script's `CORS_ORIGINS` (step 2, verified
+identical to `COMPLETE` before continuing), and the live
+`AGENTTRUST_CORS_ORIGINS` (step 4, verified by `grep` after the write).
+If any of the three differs, stop and resolve it — a difference means
+the next recovery would silently apply the wrong allowlist.
+
+Do not re-run the full recovery script for a CORS-only change. The
+script has no scope flag: it also re-syncs code from the working copy
+with `--delete` (stopping all four services first if the code
+changed), rebuilds, refreshes the egress proxy credential (which can
+restart the facilitator), touches all four units and env files, and
+refuses to run at all if any unrelated preflight fails (Owner key
+mode/owner, durable export hashes, launcher gate). A one-line CORS
+change does not need any of that.
+
+  CORS_ORIGINS="<existing-origins>,https://<your-vercel-project>.vercel.app"
+
+`<existing-origins>` is the allowlist from step 1 — the identical value
+in both sources, or the explicitly resolved list if they conflicted;
+if the allowlist is currently empty, drop the `<existing-origins>,`
+prefix. Replace
+`https://<your-vercel-project>.vercel.app` with the actual Production
+origin shown by Vercel after the project is created — it is not known
+until then, so no real origin is recorded here. Every entry must be
+the exact origin, byte-for-byte: no trailing slash, no path, no
+wildcard. `*.vercel.app` is rejected — the recovery script refuses a
+wildcard, and the server's `parseCorsOrigins` also fails startup on
+one. An origin that is not listed gets no `Access-Control-Allow-Origin`
+header (a preflight answers 403), so the browser blocks the response
+and the frontend cannot call the API.
+
+#### Narrow CORS update procedure (as root, on the host)
+
+What is already in the repo, and what is not: the file state (0600,
+`agenttrust:agenttrust`), the atomic temp+chmod+chown+mv pattern, the
+`parseCorsOrigins` validator, and the restart primitive are all
+already in the source (`deploy/recover-deployment.sh` step 6 and its
+`start_service`; `deploy/refresh-proxy-credential.sh`;
+`src/x402/cors.ts`). The composed sequence itself is an operator
+procedure — there is no dedicated CORS helper script. (The only
+scripted paths are the full recovery and the proxy-only refresh
+helper.) Run the steps in order, in the same shell session, and stop at
+the first error; nothing below prints any env value except the CORS
+list itself.
+
+1. **Read both allowlists and compare them.** Only the two CORS lines
+   are shown — no other env value is printed.
+
+     grep '^CORS_ORIGINS=' deploy/recover-deployment.sh
+     grep '^AGENTTRUST_CORS_ORIGINS=' /home/agenttrust/.agenttrust/resource.env
+
+   - If the two values are identical (ignoring the variable name and
+     the quotes around the script's value), that list is the starting
+     point: the complete final list is every origin in it, plus the new
+     one. Never write only the new origin — that silently drops every
+     existing origin.
+   - If the two values differ, **STOP. Do not proceed.** Do not merge
+     them, do not take their union, and do not automatically pick one
+     side. A difference means an origin may have been intentionally
+     removed from one source — reintroducing it from the other would
+     undo that removal. Determine the intended final allowlist
+     explicitly, origin by origin: only origins the operator has
+     confirmed should remain are preserved. Write the resolved list
+     down before touching either file.
+
+2. **Validate the complete final list, then set the source of truth.**
+   The list is validated BEFORE either file is modified. Set `COMPLETE`
+   to the final list from step 1 — the starting list plus the new
+   origin, or the explicitly resolved list if the sources conflicted —
+   keeping only origins the operator has confirmed should remain. Copy
+   the existing origins from the step-1 output; do not retype them from
+   memory.
+
+   In an interactive shell, turn history expansion off first: `set +H`
+   disables Bash history expansion for the current shell, so a `!` in
+   the value is kept literally and reaches the guard below — which
+   rejects it with a clear message — instead of being expanded (or
+   erroring) at the assignment itself. Non-interactive shells already
+   have it off; the command is harmless there.
+
+     set +H
+     COMPLETE="<existing-origins>,https://<your-vercel-project>.vercel.app"
+
+   Guard first: the parser accepts a few characters that break shell
+   quoting — `parseCorsOrigins` only checks that each entry is a bare
+   origin, it does not reject `"`, `$`, backtick, `\`, or `!` — so
+   reject them here, before the value is used in any quoted assignment.
+   The check reads the literal value and allows normal origins:
+   comma-separated multi-origin lists, ports, IPv6 (`[::1]`), and
+   underscores. If it triggers, stop and re-check the origins; do not
+   proceed to validation.
+
+     if printf '%s' "$COMPLETE" | grep -q '["$`\\!]'; then echo "CORS list contains a shell-special character - stop and re-check the origins" >&2; exit 1; fi
+
+   Then validate the guarded value with the same parser the server runs
+   at startup; on a bad value this throws and the sequence stops here.
+
+     (cd /opt/agenttrust && node_modules/.bin/tsx --eval "import { parseCorsOrigins } from './src/x402/cors.js'; console.log(JSON.stringify(parseCorsOrigins(process.argv[1])));" "$COMPLETE")
+
+   Only after guard and validation both pass, edit the `CORS_ORIGINS`
+   line at the top of `deploy/recover-deployment.sh` to that same
+   validated string. This is the value future recoveries will regenerate
+   `resource.env` from.
+
+   Verify the edit before continuing: the script's assignment must be
+   identical to `COMPLETE`, and the script must still parse. Neither
+   check executes the recovery script — the first only reads the file,
+   the second only checks its syntax.
+
+     [ "$(grep '^CORS_ORIGINS=' deploy/recover-deployment.sh)" = "CORS_ORIGINS=\"$COMPLETE\"" ] || { echo "script CORS_ORIGINS does not match the validated list - fix it before continuing" >&2; exit 1; }
+     bash -n deploy/recover-deployment.sh
+
+3. **Back up the live env file.** The backup is created by root, so it
+   is root-owned; the rollback step restores the service ownership and
+   mode explicitly.
+
+     cp /home/agenttrust/.agenttrust/resource.env \
+        /home/agenttrust/.agenttrust/resource.env.bak.$(date +%Y%m%d)
+     chmod 0600 /home/agenttrust/.agenttrust/resource.env.bak.*
+
+4. **Write the validated list atomically.** `set -e` stops the sequence
+   on any failure, and the trap removes the temp file, so a failed run
+   never leaves the live file half-written or wrongly owned. The
+   validator prints only the parsed CORS list.
+
+     set -euo pipefail
+     D=/home/agenttrust/.agenttrust
+     # COMPLETE was set and validated in step 2. Refuse to continue if
+     # it is missing (for example, this block run in a fresh shell) —
+     # never write an empty or guessed list.
+     : "${COMPLETE:?complete list not set — run step 2 first}"
+     # Re-validate the same list before writing: the write must not
+     # proceed on an unvalidated value.
+     (cd /opt/agenttrust && node_modules/.bin/tsx --eval "import { parseCorsOrigins } from './src/x402/cors.js'; console.log(JSON.stringify(parseCorsOrigins(process.argv[1])));" "$COMPLETE")
+     T=$(mktemp "$D/.resource.env.tmp.XXXXXX")
+     trap 'rm -f "$T"' EXIT
+     sed '/^AGENTTRUST_CORS_ORIGINS=/d' "$D/resource.env" > "$T"
+     printf 'AGENTTRUST_CORS_ORIGINS=%s\n' "$COMPLETE" >> "$T"
+     chmod 0600 "$T"
+     chown agenttrust:agenttrust "$T"
+     mv "$T" "$D/resource.env"
+     trap - EXIT
+     stat -c '%a %U:%G %n' "$D/resource.env"
+     grep '^AGENTTRUST_CORS_ORIGINS=' "$D/resource.env"
+     # stat must read: 600 agenttrust agenttrust
+     # grep must show the complete list from step 1, including every
+     # origin the operator confirmed should remain.
+
+5. **Restart only the resource service.** No `daemon-reload`: the unit
+   file is unchanged, and systemd reads `EnvironmentFile` at (re)start;
+   the launcher reads the env file once at startup. No other service
+   reads `AGENTTRUST_CORS_ORIGINS`, so nothing else needs restarting.
+
+     systemctl restart agenttrust-resource.service
+
+   The restart briefly takes the public API down (a few seconds) and
+   resets the in-memory replay store: consumed payments are forgotten,
+   but the facilitator settle is durable and idempotent, so no second
+   CCD moves (see "Shutdown and recovery limitations").
+
+6. **Verify.** The service must be active, the startup log must print
+   the effective allowlist, and the API must answer the new origin —
+   and still refuse an unlisted one.
+
+     systemctl is-active agenttrust-resource.service
+     journalctl -u agenttrust-resource.service --since '2 minutes ago' | grep 'cors: enabled for'
+     # Positive: the new origin gets the header (expect HTTP 402).
+     curl -s -D - -o /dev/null -H "Origin: https://<your-vercel-project>.vercel.app" \
+       https://api.sabokun.my.id/agenttrust/protected
+     # Positive, preflight: expect HTTP 204 with Access-Control-Allow-Origin,
+     # Access-Control-Allow-Methods: GET, OPTIONS, and Access-Control-Allow-Headers:
+     # X-PAYMENT, Content-Type.
+     curl -s -D - -o /dev/null -X OPTIONS \
+       -H "Origin: https://<your-vercel-project>.vercel.app" \
+       -H "Access-Control-Request-Method: GET" \
+       -H "Access-Control-Request-Headers: X-PAYMENT" \
+       https://api.sabokun.my.id/agenttrust/protected
+     # Negative: an unlisted origin gets NO Allow-Origin header
+     # (expect HTTP 402 without it; a preflight would answer 403).
+     curl -s -D - -o /dev/null -H "Origin: https://not-allowed.example" \
+       https://api.sabokun.my.id/agenttrust/protected
+     # If the allowlist had pre-existing origins, repeat the positive
+     # check for each of them — the update must not have dropped any.
+
+7. **Rollback.** If the restart fails or verification fails, restore
+   the backup — and then explicitly restore the service ownership and
+   mode, because the backup is root-owned (created by root with `cp`)
+   and a plain `mv` would leave the live file root-owned instead of
+   the reference state (0600, `agenttrust:agenttrust`). Also revert
+   the `CORS_ORIGINS` line in `deploy/recover-deployment.sh` to its
+   previous value, so the next recovery does not re-apply the reverted
+   change.
+
+     D=/home/agenttrust/.agenttrust
+     mv "$D/resource.env.bak.YYYYMMDD" "$D/resource.env"
+     chown agenttrust:agenttrust "$D/resource.env"
+     chmod 0600 "$D/resource.env"
+     stat -c '%a %U:%G %n' "$D/resource.env"
+     # must read: 600 agenttrust agenttrust
+     systemctl restart agenttrust-resource.service
+     systemctl is-active agenttrust-resource.service
+     # (Use the exact backup name created in step 3.)
+
+### Preview deployments
+
+Each Vercel Preview deployment gets its own unique origin, different
+from Production (shown in the Vercel dashboard for that deployment).
+Because the allowlist is exact-match only, a Preview origin that needs
+the API must be added to `CORS_ORIGINS` explicitly (and the resource
+server restarted — same narrow procedure as above) — otherwise its API
+calls fail CORS exactly like an unlisted Production origin. If a preview
+does not need the API, leave it unlisted.
 
 ## Proxy credential
 
