@@ -91,14 +91,16 @@ export interface X402ResourceServerOptions {
   agentCardFile?: string;
   /**
    * Optional payment-detail port (the same facilitator client the provider
-   * uses, when it serves GET /payment/:id). When provided, the server also
-   * answers GET /api/payments/:id by forwarding to it and adding the
-   * explorer link for the payment's network (built from the SDK's network
-   * mapping, never a hardcoded URL). When omitted, or when the port has no
-   * detail method, the route does not exist (404), exactly as before. The
-   * detail is read-only: it never writes, signs, or submits.
+   * uses, when it serves GET /payment/:id and GET /payments). When provided,
+   * the server also answers GET /api/payments/:id by forwarding to it and
+   * adding the explorer link for the payment's network (built from the SDK's
+   * network mapping, never a hardcoded URL), and GET /api/payments by
+   * forwarding to the facilitator's stored payment list (newest first,
+   * bounded). When omitted, or when the port has no detail/list method, the
+   * route does not exist (404), exactly as before. Both are read-only: they
+   * never write, sign, or submit.
    */
-  paymentDetail?: Pick<ConsumerFacilitator, 'getPaymentDetail'>;
+  paymentDetail?: Pick<ConsumerFacilitator, 'getPaymentDetail' | 'listPayments'>;
 }
 
 /** The Agent Card route: the on-chain URI path for CIS-8004 Token #1004. */
@@ -262,11 +264,11 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
   // CORS applies to the three browser-facing endpoints: the protected
   // resource (the configured path — behind a reverse proxy the proxy
   // strips its prefix and forwards this bare path), the Discovery API
-  // (list + detail — the same route family), and the payment-detail API
-  // (GET /api/payments/:id). Nothing else gets CORS headers: the static
-  // website is same-origin by design.
+  // (list + detail — the same route family), and the payment API
+  // (GET /api/payments, GET /api/payments/:id). Nothing else gets CORS
+  // headers: the static website is same-origin by design.
   const isCorsPath = (path: string): boolean =>
-    path === resourcePath || path === '/api/services' || path.startsWith('/api/services/') || path.startsWith('/api/payments/');
+    path === resourcePath || path === '/api/services' || path.startsWith('/api/services/') || path === '/api/payments' || path.startsWith('/api/payments/');
 
   return (req, res) => {
     void (async () => {
@@ -343,6 +345,45 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
           res.end(body);
         } catch {
           json(res, 404, { error: 'not found' });
+        }
+        return;
+      }
+
+      // Payment list (read-only). Only active when a list port was
+      // injected. GET /api/payments forwards to the facilitator's stored
+      // payment list (newest first, bounded) and passes its status/body
+      // through unchanged. The query string is NOT forwarded verbatim:
+      // only a validated `limit` is passed. A facilitator that is down
+      // yields 503; no port means the route does not exist (404);
+      // non-GET is 405.
+      if (url === '/api/payments') {
+        if (method !== 'GET') {
+          json(res, 405, { error: 'method not allowed' }, { allow: 'GET', ...cors });
+          return;
+        }
+        const listPayments = opts.paymentDetail?.listPayments;
+        if (typeof listPayments !== 'function') {
+          json(res, 404, { error: 'not found' }, cors);
+          return;
+        }
+        const rawLimit = new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('limit');
+        let limit: number | undefined;
+        if (rawLimit !== null) {
+          if (!/^\d+$/.test(rawLimit)) {
+            json(res, 400, { error: 'invalid_request', reason: 'limit must be an integer' }, cors);
+            return;
+          }
+          limit = Number(rawLimit);
+          if (limit < 1 || limit > 100) {
+            json(res, 400, { error: 'invalid_request', reason: 'limit must be between 1 and 100' }, cors);
+            return;
+          }
+        }
+        try {
+          const { status, body } = await listPayments.call(opts.paymentDetail, limit);
+          json(res, status, body, cors);
+        } catch {
+          json(res, 503, { error: 'payment_list_unavailable' }, cors);
         }
         return;
       }

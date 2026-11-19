@@ -303,6 +303,7 @@ async function main(): Promise<void> {
   console.log(`  cors: ${corsOrigins.length > 0 ? `enabled for ${corsOrigins.join(', ')}` : 'disabled (AGENTTRUST_CORS_ORIGINS unset)'}`);
   console.log(`  facilitator mode=${mode}  facilitator=${mode === 'real' ? FACILITATOR_URL : 'mock'}  feePayer=${feePayerLog}`);
   console.log(`  payment detail: ${typeof facilitator.getPaymentDetail === 'function' ? `GET ${started.url}/api/payments/:id (facilitator detail + explorer link)` : 'unavailable — facilitator has no detail endpoint'}`);
+  console.log(`  payment list: ${typeof facilitator.listPayments === 'function' ? `GET ${started.url}/api/payments (facilitator list, newest first)` : 'unavailable — facilitator has no list endpoint'}`);
   if (firstDiscoverable) {
     console.log(`  first-provider service: ${AGENTTRUST_SERVICE_ID} (verified, active) — requirements + resource from the registry record`);
   }
