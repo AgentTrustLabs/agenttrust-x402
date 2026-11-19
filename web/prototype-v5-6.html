@@ -5045,7 +5045,16 @@
        shown as FINALIZED only when the STORED state is `finalized`; any
        other stored state renders an explicit NOT FINALIZED notice, and a
        hash this facilitator has no record of renders "not in this
-       facilitator's settlement records" with an independent CCDScan link. */
+       facilitator's settlement records" with an independent CCDScan link.
+       The LIVE TESTNET VERIFICATION — FINALIZED badge appears only when
+       BOTH the stored state is `finalized` AND the API's live
+       verification reports available evidence whose observed status is
+       `finalized`; a stored-finalized payment without a live
+       confirmation shows FINALIZED — STORED STATE instead. A live chain
+       observation alone never advances the displayed settlement state:
+       a payment whose stored state is not `finalized` is shown as NOT
+       FINALIZED even when the chain already reports its transaction as
+       finalized, until reconciliation advances the stored state. */
     const TESTNET_NETWORK_LABELS = {
       'ccd:4221332d34e1694168c2a0c0b3fd0f27': 'Concordium Testnet',
     };
@@ -5184,21 +5193,35 @@
       const title = v.blockHeight
         ? 'Cryptographic Settlement Receipt — Block #' + escapeHtml(v.blockHeight) + (listed ? ' (Rank #' + escapeHtml(String(listed.rank)) + ')' : '')
         : 'Settlement Detail — ' + escapeHtml(requested.slice(0, 8)) + '…' + escapeHtml(requested.slice(-8));
-      const statusBadge = d.finalized
-        ? '<span class="badge-live">FINALIZED — LIVE - TESTNET</span>'
-        : '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED — ' + escapeHtml(String(d.state || 'unknown')).toUpperCase() + '</span>';
-      const statusNotice = d.finalized
-        ? 'Finalized. Stored state <code>finalized</code>'
-          + (v.available && v.finalized
-            ? ', confirmed live on-chain' + (v.source ? ' via ' + escapeHtml(v.source) : '') + '.'
-            : v.available
+      /* The LIVE badge requires BOTH the stored state and the chain
+         observation: stored `finalized` AND available live evidence
+         whose observed status is finalized. A stored-finalized payment
+         whose live check is unavailable (or reports anything else)
+         keeps its stored state visible but never claims a live
+         confirmation; a live chain observation alone never advances
+         the displayed settlement state. */
+      const liveFinalized = d.finalized && v.available && v.finalized && v.observed === 'finalized';
+      const storedBadge = '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">FINALIZED — STORED STATE</span>';
+      const statusBadge = liveFinalized
+        ? '<span class="badge-live">LIVE TESTNET VERIFICATION — FINALIZED</span>'
+        : d.finalized
+          ? storedBadge
+          : '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED — ' + escapeHtml(String(d.state || 'unknown')).toUpperCase() + '</span>';
+      const statusNotice = liveFinalized
+        ? 'LIVE TESTNET VERIFICATION — FINALIZED. The Concordium Testnet node confirms this transaction finalized'
+          + (v.source ? ' via ' + escapeHtml(v.source) : '')
+          + (v.blockHeight ? ' in block #' + escapeHtml(String(v.blockHeight)) : '')
+          + '. Stored state <code>finalized</code> agrees; the verified evidence below is from the live chain observation.'
+        : d.finalized
+          ? 'Finalized. Stored state <code>finalized</code>'
+            + (v.available
               ? '. The chain currently reports this transaction as <code>' + escapeHtml(String(v.observed || 'unknown')) + '</code> — the stored finalized state is shown as recorded.'
               : '. Live verification is unavailable' + (v.error ? ': ' + escapeHtml(String(v.error)) : '') + ' — the stored finalized state is shown, not a fresh live confirmation.')
-        : 'NOT finalized. Stored state: <code>' + escapeHtml(String(d.state || 'unknown')) + '</code>.'
-          + (v.available
-            ? ' The chain currently reports this transaction as <code>' + escapeHtml(String(v.observed || 'unknown')) + '</code>.'
-            : ' Live verification is unavailable' + (v.error ? ': ' + escapeHtml(String(v.error)) : '') + '.')
-          + ' This payment is not shown as finalized until reconciliation confirms it.';
+          : 'NOT finalized. Stored state: <code>' + escapeHtml(String(d.state || 'unknown')) + '</code>.'
+            + (v.available
+              ? ' The chain currently reports this transaction as <code>' + escapeHtml(String(v.observed || 'unknown')) + '</code>.'
+              : ' Live verification is unavailable' + (v.error ? ': ' + escapeHtml(String(v.error)) : '') + '.')
+            + ' This payment is not shown as finalized until reconciliation confirms it.';
       const amountLabel = req.amount && req.asset
         ? escapeHtml(String(req.amount)) + ' micro' + escapeHtml(String(req.asset)) + (req.asset === 'CCD' ? ' (1 µCCD)' : '')
         : 'not available';

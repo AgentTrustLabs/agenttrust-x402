@@ -8,7 +8,17 @@
  *   - it has distinct FINALIZED and NOT FINALIZED branches,
  *   - it uses the API's `explorerUrl` field,
  *   - it contains NONE of the old hardcoded fee strings or hardcoded
- *     account addresses, and no silent fallback to the first list entry.
+ *     account addresses, and no silent fallback to the first list entry,
+ *   - the LIVE TESTNET VERIFICATION — FINALIZED badge appears only when
+ *     the API reports available live evidence with observed `finalized`;
+ *     a stored-finalized payment without a live confirmation shows
+ *     FINALIZED — STORED STATE and an honest unavailable notice,
+ *   - missing or malformed optional evidence fields render
+ *     "not available", never an invented value,
+ *   - the inspector performs exactly one fetch and never retries,
+ *   - a stored-not-finalized payment whose chain observation is already
+ *     finalized is NEVER shown as live-finalized (F1 regression): the
+ *     stored state is the only finalized verdict the inspector shows.
  *
  * Static analysis only — no browser, no server. The list data
  * (`realTransactionsData`) is navigation data and is NOT covered by the
@@ -119,6 +129,138 @@ test('11. the timeline never independently implies live on-chain confirmation', 
   ok(tlEnd > tlStart, 'timeline markup is bounded');
   const tl = body.slice(tlStart, tlEnd);
   notOk(tl.includes('confirmed live on-chain'), 'timeline builder contains no live-confirmation claim');
+});
+
+test('12. live evidence available + finalized shows the live-verified status', () => {
+  // Required behavior A: the API reports available live evidence whose
+  // observed status is finalized — the inspector must say so explicitly.
+  ok(body.includes('LIVE TESTNET VERIFICATION — FINALIZED'), 'live-verified finalized label present');
+  ok(body.includes("v.available && v.finalized && v.observed === 'finalized'"), 'live-finalized gate requires available + finalized + observed finalized');
+  ok(body.includes('const statusBadge = liveFinalized'), 'badge is keyed off the live observation, not the stored state alone');
+  ok(body.includes('The Concordium Testnet node confirms this transaction finalized'), 'live-finalized notice states the node confirmed it');
+  ok(body.includes("in block #' + escapeHtml(String(v.blockHeight))"), 'live-finalized notice names the finalized block when the API reports one');
+  // The live-finalized branch itself must never carry the stale
+  // "unavailable" message: slice just that branch of the notice ternary.
+  const liveStart = body.indexOf("? 'LIVE TESTNET VERIFICATION — FINALIZED.");
+  ok(liveStart >= 0, 'live-finalized notice branch found');
+  const liveEnd = body.indexOf(': d.finalized', liveStart);
+  ok(liveEnd > liveStart, 'live-finalized notice branch is bounded');
+  const liveBranch = body.slice(liveStart, liveEnd);
+  notOk(liveBranch.includes('Live verification is unavailable'), 'live-finalized branch carries no unavailable message');
+  notOk(liveBranch.includes('not a fresh live confirmation'), 'live-finalized branch carries no stored-state-only disclaimer');
+});
+
+test('13. live evidence unavailable never claims a live confirmation (badge)', () => {
+  // Required behavior B: with no live check, the badge must not say LIVE.
+  ok(body.includes('FINALIZED — STORED STATE'), 'stored-finalized badge label present');
+  const storedStart = body.indexOf('const storedBadge');
+  ok(storedStart >= 0, 'stored badge definition found');
+  const storedEnd = body.indexOf('\n', storedStart);
+  const storedLine = body.slice(storedStart, storedEnd);
+  notOk(storedLine.includes('LIVE'), 'stored badge contains no LIVE claim');
+  notOk(storedLine.includes('badge-live'), 'stored badge uses the amber style, not the live style');
+  ok(body.includes('? storedBadge'), 'stored-finalized payments fall through to the stored badge');
+});
+
+test('14. live evidence not found / unknown keeps OUTCOME_UNKNOWN messaging', () => {
+  // Required behavior C: a payment the chain cannot confirm is never
+  // labeled live-finalized; the stored state and the reconciliation
+  // safeguard stay visible.
+  ok(body.includes('NOT FINALIZED — '), 'non-finalized badge label present');
+  ok(body.includes("escapeHtml(String(d.state || 'unknown')).toUpperCase()"), 'non-finalized badge renders the stored state (e.g. OUTCOME_UNKNOWN)');
+  ok(body.includes('This payment is not shown as finalized until reconciliation confirms it.'), 'reconciliation safeguard present');
+  // The non-finalized branch of the notice must not carry the live label.
+  const nfStart = body.indexOf(": 'NOT finalized. Stored state:");
+  ok(nfStart >= 0, 'non-finalized notice branch found');
+  const nfEnd = body.indexOf('const amountLabel', nfStart);
+  ok(nfEnd > nfStart, 'non-finalized notice branch is bounded');
+  const nfBranch = body.slice(nfStart, nfEnd);
+  notOk(nfBranch.includes('LIVE TESTNET VERIFICATION — FINALIZED'), 'non-finalized branch never claims live finalization');
+  ok(nfBranch.includes('Live verification is unavailable'), 'unavailable live check is stated in the non-finalized branch');
+  ok(nfBranch.includes('The chain currently reports this transaction as'), 'available-but-not-finalized observation is stated in the non-finalized branch');
+});
+
+test('15. stored state finalized but live evidence unavailable stays honest', () => {
+  // Required behavior B, stored-finalized variant: the stored state is
+  // shown, the live check is reported unavailable, and the badge is the
+  // stored-state badge — never the live badge.
+  ok(body.includes('stored finalized state is shown, not a fresh live confirmation'), 'stored-finalized + unavailable notice is honest');
+  ok(body.includes('FINALIZED — STORED STATE'), 'stored-finalized + unavailable badge is the stored badge');
+  ok(body.includes('const statusBadge = liveFinalized'), 'the live badge is reachable only through the live gate');
+  const badgeStart = body.indexOf('const statusBadge = liveFinalized');
+  ok(badgeStart >= 0, 'badge ternary found');
+  const badgeEnd = body.indexOf('const statusNotice', badgeStart);
+  ok(badgeEnd > badgeStart, 'badge ternary is bounded');
+  const badge = body.slice(badgeStart, badgeEnd);
+  ok(badge.indexOf('LIVE TESTNET VERIFICATION — FINALIZED') < badge.indexOf('FINALIZED — STORED STATE') || badge.includes('storedBadge'), 'live label and stored label are distinct badge branches');
+});
+
+test('16. missing or malformed optional evidence fields are labeled, never invented', () => {
+  // Required behavior: every optional verification field has a
+  // "not available" fallback; the fee formatter rejects null, empty,
+  // and non-finite input instead of rendering a bogus number.
+  ok(html.includes("if (micro === null || micro === undefined || micro === '') return 'not available'"), 'fee formatter rejects null/undefined/empty');
+  ok(html.includes("if (!Number.isFinite(n)) return 'not available'"), 'fee formatter rejects non-finite input');
+  ok(html.includes("if (!iso) return 'not available'"), 'block-time formatter rejects a missing timestamp');
+  ok(html.includes("if (Number.isNaN(d.getTime())) return 'not available'"), 'block-time formatter rejects an invalid timestamp');
+  ok(body.includes('formatMicroCcd(v.feeMicroCcd)'), 'fee renders through the formatter');
+  ok(body.includes("v.blockHeight ? escapeHtml(String(v.blockHeight)) : 'not available'"), 'missing block height is labeled');
+  ok(body.includes("v.blockHash ? escapeHtml(String(v.blockHash)) : 'not available'"), 'missing block hash is labeled');
+  ok(body.includes("v.energy ? escapeHtml(String(v.energy)) + ' NRG' : 'not available'"), 'missing energy is labeled');
+  ok(body.includes("v.sender ? escapeHtml(String(v.sender)) : 'not available'"), 'missing sender is labeled');
+  ok(body.includes("v.sponsor ? escapeHtml(String(v.sponsor)) : 'not available'"), 'missing sponsor is labeled');
+  ok(body.includes("v.recipient ? escapeHtml(String(v.recipient)) : 'not available'"), 'missing recipient is labeled');
+  ok(body.includes('formatBlockTimeWib(v.blockSlotTime)'), 'block time renders through the WIB formatter');
+});
+
+test('17. fail-closed behavior and transition timeline remain intact', () => {
+  // Required behavior: one detail fetch, no automatic retry or reload,
+  // no state mutation; the timeline still renders the stored transitions
+  // in order and never implies a live confirmation on its own.
+  const fetchCount = (body.match(/fetch\(/g) || []).length;
+  eq(fetchCount, 1, `inspector performs exactly one fetch (got ${fetchCount})`);
+  notOk(body.includes('setInterval'), 'no polling retry');
+  notOk(body.includes('setTimeout'), 'no delayed retry');
+  notOk(body.includes('location.reload'), 'no page reload');
+  notOk(body.includes('retry'), 'no retry wording in the inspector');
+  ok(body.includes("renderTxDetailFallback(requested, 'Settlement Detail', 'Live detail unavailable"), 'unreachable-facilitator fallback present');
+  ok(body.includes('Not in this facilitator'), 'unknown-hash fallback present');
+  ok(body.includes('buildTransitionTimeline(d.transitions)'), 'timeline is still built from the API transitions');
+  ok(body.includes('not a live chain confirmation'), 'timeline still states it is stored history, not a live confirmation');
+});
+
+test('18. stored outcome_unknown + chain finalized is NEVER shown as live-finalized (F1 regression)', () => {
+  // The combination the F1 review found: the stored state is
+  // `outcome_unknown` (d.finalized === false) while the live chain
+  // observation is available + finalized. The inspector must report the
+  // chain observation, keep the NOT FINALIZED badge, keep the
+  // reconciliation safeguard, and never claim the stored state agrees.
+  // 1. The live-finalized gate includes the stored state.
+  ok(body.includes("d.finalized && v.available && v.finalized && v.observed === 'finalized'"), 'live-finalized gate requires stored-finalized AND live evidence');
+  ok(body.includes('const liveFinalized = d.finalized'), 'gate starts with the stored-state check');
+  // 2. The LIVE badge is reachable only through that gate, so it cannot
+  // be selected when d.finalized is false.
+  ok(body.includes('const statusBadge = liveFinalized'), 'badge is keyed off the live-finalized gate');
+  const badgeStart = body.indexOf('const statusBadge = liveFinalized');
+  ok(badgeStart >= 0, 'badge ternary found');
+  const badgeEnd = body.indexOf('const statusNotice', badgeStart);
+  ok(badgeEnd > badgeStart, 'badge ternary is bounded');
+  const badge = body.slice(badgeStart, badgeEnd);
+  ok(badge.includes('? storedBadge'), 'stored-finalized payments fall through to the stored badge');
+  ok(badge.includes("NOT FINALIZED — ' + escapeHtml(String(d.state || 'unknown')).toUpperCase()"), 'non-finalized payments fall through to the stored-state badge');
+  // 3–6. The non-finalized notice branch is the one that renders for
+  // this combination: it reports the chain observation, keeps the
+  // safeguard, and claims nothing about a finalized stored state.
+  const nfStart = body.indexOf(": 'NOT finalized. Stored state:");
+  ok(nfStart >= 0, 'non-finalized notice branch found');
+  const nfEnd = body.indexOf('const amountLabel', nfStart);
+  ok(nfEnd > nfStart, 'non-finalized notice branch is bounded');
+  const nfBranch = body.slice(nfStart, nfEnd);
+  ok(nfBranch.includes('The chain currently reports this transaction as'), 'chain finalized observation is reported, not hidden');
+  ok(nfBranch.includes('This payment is not shown as finalized until reconciliation confirms it.'), 'reconciliation safeguard remains visible');
+  notOk(nfBranch.includes('LIVE TESTNET VERIFICATION — FINALIZED'), 'no live-finalized label in the non-finalized branch');
+  notOk(nfBranch.includes('Stored state <code>finalized</code> agrees'), 'no false stored-finalized agreement claim');
+  notOk(nfBranch.includes('the verified evidence below is from the live chain observation'), 'live-finalized notice text is absent from the non-finalized branch');
 });
 
 // ═══ runner ═════════════════════════════════════════════════════════════
