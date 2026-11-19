@@ -5105,7 +5105,7 @@
       if (proof.percent === null) {
         return '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(proof.label) + '</span>';
       }
-      return '<div class="orange-progress-wrap"><div class="orange-progress-track"><div class="orange-progress-fill" style="width:' + proof.percent + '%"></div></div><span style="font-size:10.5px;">' + proof.percent + '%</span></div>';
+      return '<div class="orange-progress-wrap"><div class="orange-progress-track"><div class="orange-progress-fill" style="width:' + proof.percent + '%"></div></div><span style="font-size:10.5px;">' + proof.percent + '% · ' + escapeHtml(proof.label) + '</span></div>';
     }
     function formatLiveTxTime(updatedAt) {
       const ms = Number(updatedAt);

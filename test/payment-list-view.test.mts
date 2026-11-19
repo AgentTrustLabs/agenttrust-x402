@@ -147,6 +147,7 @@ const liveProofProgress = new Function(`return ${extractFunctionSource('liveProo
 const escapeHtmlForProbe = (value: unknown): string =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 const liveRowStateBadge = new Function('escapeHtml', `return ${extractFunctionSource('liveRowStateBadge')}`)(escapeHtmlForProbe) as unknown as (state: unknown) => string;
+const renderLiveProofProgress = new Function('escapeHtml', 'liveProofProgress', `return ${extractFunctionSource('renderLiveProofProgress')}`)(escapeHtmlForProbe, liveProofProgress) as unknown as (p: unknown) => string;
 
 test('09. stored finalized without live evidence never renders 100%', () => {
   notOk(listBody.includes('width:100%'), 'no hardcoded 100% in the live list code');
@@ -189,6 +190,44 @@ test('13. partial or forged evidence fails closed', () => {
   ];
   for (const bad of cases) {
     eq(liveProofProgress({ state: 'finalized', verification: bad }).percent, null, 'evidence rejected');
+  }
+});
+
+test('15. valid evidence renders 100% together with the VERIFIED FINALITY label', () => {
+  const evidence = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  const html = renderLiveProofProgress({ state: 'finalized', verification: evidence });
+  ok(html.includes('100%'), 'renders the percentage');
+  ok(html.includes('VERIFIED FINALITY'), 'renders the verified label explicitly');
+  notOk(html.includes('NOT VERIFIED'), 'no not-verified label on valid evidence');
+});
+
+test('16. stored state without evidence renders NOT VERIFIED and no percentage', () => {
+  for (const row of [{ state: 'finalized' }, { state: 'outcome_unknown' }, {}]) {
+    const html = renderLiveProofProgress(row);
+    ok(html.includes('NOT VERIFIED'), 'renders the not-verified label');
+    ok(html.includes('evidence unavailable'), 'states that evidence is unavailable');
+    notOk(html.includes('100%'), 'no percentage without evidence');
+    notOk(html.includes('VERIFIED FINALITY'), 'no verified label without evidence');
+    notOk(html.includes('width:'), 'no progress bar without evidence');
+  }
+});
+
+test('17. partial or forged evidence renders fail-closed, never 100%', () => {
+  const base = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  const cases: unknown[] = [
+    { ...base, finalized: false },
+    { ...base, available: false },
+    { ...base, observed: 'rejected' },
+    { ...base, source: '' },
+    { ...base, blockHash: 'short' },
+    { ...base, blockHash: 'z'.repeat(64) },
+    null,
+  ];
+  for (const bad of cases) {
+    const html = renderLiveProofProgress({ state: 'finalized', verification: bad });
+    ok(html.includes('NOT VERIFIED'), 'renders not-verified');
+    notOk(html.includes('100%'), 'no percentage');
+    notOk(html.includes('VERIFIED FINALITY'), 'no verified label');
   }
 });
 
