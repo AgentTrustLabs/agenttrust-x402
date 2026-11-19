@@ -570,6 +570,41 @@ export async function startFacilitator(
         json(res, status, outcome);
         return;
       }
+      if (method === 'GET' && (url === '/payments' || url.startsWith('/payments?'))) {
+        // Read-only payment list: stored rows only, newest first.
+        // No live verification is performed per item — the detail endpoint
+        // (`GET /payment/:id`) is the only source of live evidence.
+        // Public fields only: no requirements key, no rejection counters,
+        // no signatures. `limit` is bounded (default 50, max 100); an
+        // invalid limit is a 400, never silently clamped.
+        const rawLimit = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '').get('limit');
+        let limit = 50;
+        if (rawLimit !== null) {
+          if (!/^\d+$/.test(rawLimit)) {
+            json(res, 400, { error: 'invalid_request', reason: 'limit must be an integer' });
+            return;
+          }
+          limit = Number(rawLimit);
+          if (limit < 1 || limit > 100) {
+            json(res, 400, { error: 'invalid_request', reason: 'limit must be between 1 and 100' });
+            return;
+          }
+        }
+        const rows = core.store.listPayments(limit);
+        json(res, 200, {
+          payments: rows.map((r) => ({
+            paymentDigest: r.payment_digest,
+            state: r.state,
+            transactionHash: r.tx_hash,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at,
+            attempted: r.attempted,
+          })),
+          count: rows.length,
+          limit,
+        });
+        return;
+      }
       if (method === 'GET' && url.startsWith('/payment/')) {
         // Read-only payment detail: the stored record + a fresh live
         // observation of the recorded transaction hash. No state is

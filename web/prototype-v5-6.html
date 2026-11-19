@@ -4430,11 +4430,19 @@
         <!-- Cryptographic Settlement Receipt Detail Panel -->
         <div class="inspector-card" id="tx-detail-inspector"></div>
 
-        <!-- Dense Ranked Settlement Table with Orange Progress Bars -->
+        <!-- Live Settlements (Facilitator Records) — newest first, from GET /api/payments -->
+        <div class="tx-panel" id="live-payments-section">
+          <div class="card-header">
+            <span class="card-title">Live Settlements — Facilitator Records</span>
+          </div>
+          <div class="tx-table-wrap" id="live-tx-table-mount"></div>
+        </div>
+
+        <!-- Earlier Settlements — 11 November 2026 (Historical Archive) -->
         <div class="tx-panel" id="payments-section">
           <div class="card-header">
-            <span class="card-title">Concordium Testnet Settlement Ledger (1 microCCD, Sponsored)</span>
-            <span class="badge-live">LIVE - TESTNET</span>
+            <span class="card-title">Earlier Settlements — 11 November 2026</span>
+            <span class="badge-demo">HISTORICAL ARCHIVE</span>
           </div>
           <div class="tx-table-wrap" id="transactions-page-table-mount"></div>
         </div>
@@ -4958,7 +4966,14 @@
     document.getElementById('dashboard-stats-grid').innerHTML = getStatsCardsHTML();
     document.getElementById('analytics-stats-grid').innerHTML = getStatsCardsHTML();
 
-    function buildTxTableHTML() {
+    /* The transaction ledger is split in two. The LIVE list (rendered by
+       loadLiveTxTable below, from GET /api/payments) shows the
+       facilitator's stored settlement records, newest first. The table
+       built here is the HISTORICAL ARCHIVE — the four 11 Nov 2026
+       settlements, kept as a clearly labelled archive because they are
+       not in the facilitator's settlement records. Archive rows never
+       carry a LIVE badge. */
+    function buildTxTableHTML(rows) {
       return `
         <table class="tx-table">
           <thead>
@@ -4975,10 +4990,10 @@
             </tr>
           </thead>
           <tbody>
-            ${realTransactionsData.map(tx => `
+            ${rows.map(tx => `
               <tr class="clickable-tx" data-tx-hash="${tx.hash}">
                 <td><span class="rank-num">${tx.rank}</span></td>
-                <td><span class="badge-live">LIVE - TESTNET</span></td>
+                <td><span class="badge-demo">HISTORICAL ARCHIVE</span></td>
                 <td><a class="tx-link" target="_blank" rel="noopener" href="${tx.url}" onclick="event.stopPropagation()">${tx.shortHash} ↗</a></td>
                 <td>#${tx.block}</td>
                 <td><strong>${tx.amount}</strong></td>
@@ -4998,17 +5013,13 @@
       `;
     }
 
-    document.getElementById('dashboard-tx-table-mount').innerHTML = buildTxTableHTML();
-    document.getElementById('transactions-page-table-mount').innerHTML = buildTxTableHTML();
-    document.getElementById('wallet-tx-table-mount').innerHTML = buildTxTableHTML();
-
     /* Transactions Podium (Chronological First 3 Settlements: #01 = Tx #1 / Block #50652456, matching table Rank 1..3) */
-    const firstThreeTxs = realTransactionsData.slice(0, 3);
-    document.getElementById('tx-podium-grid').innerHTML = firstThreeTxs.map(tx => `
+    function buildPodiumHTML(rows) {
+      return rows.slice(0, 3).map(tx => `
       <div class="podium-card" data-tx-hash="${tx.hash}">
         <div style="display:flex;align-items:center;justify-content:space-between;">
           <span class="eyebrow-label">PODIUM #0${tx.rank} · BLOCK #${tx.block}</span>
-          <span class="badge-live">LIVE - TESTNET</span>
+          <span class="badge-demo">HISTORICAL ARCHIVE</span>
         </div>
         <div style="font-family:var(--font-mono);font-size:14px;font-weight:800;color:var(--text-primary);">${tx.shortHash}</div>
         <div class="orange-progress-wrap">
@@ -5021,8 +5032,10 @@
         </div>
       </div>
     `).join('');
+    }
 
-    document.getElementById('tx-block-ribbon').innerHTML = realTransactionsData.map((tx, idx) => `
+    function buildRibbonHTML(rows) {
+      return rows.map((tx, idx) => `
       <div class="block-pill-card" data-tx-hash="${tx.hash}">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--accent-orange);font-weight:700;">BLOCK #${tx.block}</span>
@@ -5032,12 +5045,142 @@
         <div style="font-size:11px;color:var(--text-secondary);">${tx.amount} · ${tx.timestamp}</div>
       </div>
     `).join('');
+    }
 
-    document.querySelectorAll('.clickable-tx, .block-pill-card, .podium-card').forEach(row => {
-      row.addEventListener('click', () => {
-        location.hash = `#/transactions/${row.dataset.txHash}`;
+    /* Render every archive surface (dashboard table, transactions-page
+       table, wallet table, podium, ribbon) from the given rows, and
+       attach the row click handlers scoped to those surfaces. The live
+       table attaches its own handlers; scoping avoids double-binding
+       when the archive is re-rendered after the live list loads. */
+    function renderArchive(rows) {
+      document.getElementById('dashboard-tx-table-mount').innerHTML = buildTxTableHTML(rows);
+      document.getElementById('transactions-page-table-mount').innerHTML = buildTxTableHTML(rows);
+      document.getElementById('wallet-tx-table-mount').innerHTML = buildTxTableHTML(rows);
+      document.getElementById('tx-podium-grid').innerHTML = buildPodiumHTML(rows);
+      document.getElementById('tx-block-ribbon').innerHTML = buildRibbonHTML(rows);
+      document.querySelectorAll('#dashboard-tx-table-mount .clickable-tx, #transactions-page-table-mount .clickable-tx, #wallet-tx-table-mount .clickable-tx, #tx-podium-grid .podium-card, #tx-block-ribbon .block-pill-card').forEach(row => {
+        row.addEventListener('click', () => {
+          location.hash = `#/transactions/${row.dataset.txHash}`;
+        });
       });
-    });
+    }
+
+    renderArchive(realTransactionsData);
+
+    /* Live settlement list (facilitator records, newest first). The list
+       comes from GET /api/payments — the facilitator's stored payment
+       rows, ordered by updated_at DESC. It is the only live source the
+       list uses: no hashes are hardcoded here, and no live verification
+       is performed per row (the detail inspector is the only place live
+       chain evidence is shown). Row status follows the STORED state
+       only: a finalized row shows FINALIZED — STORED STATE, never a
+       live-verification badge; any other state shows NOT FINALIZED.
+       Block, amount and fee are not part of the list response, so those
+       cells honestly read "not available" — inspect the row for the
+       evidence. One fetch, no retry: on any failure the section shows
+       an error and the archive below is unaffected. */
+    function liveRowStateBadge(state) {
+      if (state === 'finalized') {
+        return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">FINALIZED — STORED STATE</span>';
+      }
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED — ' + escapeHtml(String(state || 'unknown')).toUpperCase() + '</span>';
+    }
+    function formatLiveTxTime(updatedAt) {
+      const ms = Number(updatedAt);
+      if (!Number.isFinite(ms)) return 'not available';
+      return formatBlockTimeWib(new Date(ms).toISOString());
+    }
+    function buildLiveTxTableHTML(payments) {
+      return `
+        <table class="tx-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Status</th>
+              <th>Tx Hash (CCDScan)</th>
+              <th>Block</th>
+              <th>Amount</th>
+              <th>Proof Progress</th>
+              <th>Sponsored Fee</th>
+              <th>Time (WIB)</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${payments.map((p, idx) => `
+              <tr class="clickable-tx" data-tx-hash="${escapeHtml(p.transactionHash || p.paymentDigest)}">
+                <td><span class="rank-num">${idx + 1}</span></td>
+                <td>${liveRowStateBadge(p.state)}</td>
+                <td>${p.transactionHash ? `<a class="tx-link" target="_blank" rel="noopener" href="${escapeHtml(ccdscanTxUrl(p.transactionHash))}" onclick="event.stopPropagation()">${escapeHtml(p.transactionHash.slice(0, 8))}…${escapeHtml(p.transactionHash.slice(-8))} ↗</a>` : `<span style="font-family:var(--font-mono);font-size:12px;">${escapeHtml(p.paymentDigest.slice(0, 8))}…${escapeHtml(p.paymentDigest.slice(-8))}</span>`}</td>
+                <td>not available</td>
+                <td><strong>not available</strong></td>
+                <td>${p.state === 'finalized' ? `<div class="orange-progress-wrap"><div class="orange-progress-track"><div class="orange-progress-fill" style="width:100%"></div></div><span style="font-size:10.5px;">100%</span></div>` : `<span style="font-size:11.5px;">${escapeHtml(String(p.state || 'unknown'))}</span>`}</td>
+                <td>not available</td>
+                <td>${formatLiveTxTime(p.updatedAt)}</td>
+                <td><a href="#/transactions/${escapeHtml(p.transactionHash || p.paymentDigest)}" class="btn-sm-ghost" onclick="event.stopPropagation()">Inspect →</a></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+    function applyArchiveDedup(livePayments) {
+      // A payment that appears in the live list must not also appear in
+      // the historical archive: drop archive rows whose hash is listed
+      // live, and re-render every archive surface from the kept rows.
+      // Today there is no overlap; this guards future settlements whose
+      // hash matches an archive row.
+      const liveIds = new Set();
+      livePayments.forEach(p => {
+        if (p.transactionHash) liveIds.add(p.transactionHash);
+        if (p.paymentDigest) liveIds.add(p.paymentDigest);
+      });
+      const kept = realTransactionsData.filter(tx => !liveIds.has(tx.hash));
+      if (kept.length === realTransactionsData.length) return;
+      renderArchive(kept);
+    }
+    async function loadLiveTxTable() {
+      const mount = document.getElementById('live-tx-table-mount');
+      if (!mount) return;
+      mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Loading live settlement records from the facilitator…</p>';
+      let res;
+      try {
+        res = await fetch(apiUrl('/api/payments'));
+      } catch {
+        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator could not be reached. The historical archive below is unaffected.</p>';
+        return;
+      }
+      if (!res.ok) {
+        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable (HTTP ' + res.status + '). The historical archive below is unaffected.</p>';
+        return;
+      }
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator returned an unreadable response. The historical archive below is unaffected.</p>';
+        return;
+      }
+      const payments = Array.isArray(data && data.payments)
+        ? data.payments.filter(p => p && typeof p.paymentDigest === 'string' && (p.transactionHash === null || p.transactionHash === undefined || typeof p.transactionHash === 'string'))
+        : null;
+      if (payments === null) {
+        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — unexpected response shape. The historical archive below is unaffected.</p>';
+        return;
+      }
+      if (payments.length === 0) {
+        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">No live settlements recorded yet.</p>';
+        return;
+      }
+      mount.innerHTML = buildLiveTxTableHTML(payments);
+      mount.querySelectorAll('.clickable-tx').forEach(row => {
+        row.addEventListener('click', () => {
+          location.hash = '#/transactions/' + row.dataset.txHash;
+        });
+      });
+      applyArchiveDedup(payments);
+    }
+    loadLiveTxTable();
 
     /* Payment detail inspector (live, API-driven). The settlement evidence
        for the requested hash is fetched from GET /api/payments/:id and

@@ -110,6 +110,24 @@ export function createHttpFacilitator(opts: HttpFacilitatorOptions): ConsumerFac
         clearTimeout(timer);
       }
     },
+    async listPayments(limit?: number) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), timeoutMs);
+      try {
+        const query = limit === undefined ? '' : `?limit=${encodeURIComponent(String(limit))}`;
+        const res = await fetch(`${base}/payments${query}`, { headers, signal: ac.signal });
+        const text = await res.text();
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = { error: 'invalid_json', raw: text.slice(0, 200) };
+        }
+        return { status: res.status, body };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
   };
 }
 

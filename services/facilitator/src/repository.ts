@@ -272,6 +272,15 @@ export interface SettlementRepository {
   transitions(paymentDigest: string): TransitionRow[];
   listRecoverable(): PaymentRow[];
   listOutcomeUnknown(): PaymentRow[];
+  /**
+   * List stored payments, newest first, bounded by `limit`.
+   *
+   * Read-only. Ordered by `updated_at DESC` with `payment_digest ASC` as
+   * the deterministic tie-breaker (the digest is the primary key, so the
+   * order is total). `limit` is the caller's responsibility: the HTTP
+   * route validates it (integer, 1..100) before calling this.
+   */
+  listPayments(limit: number): PaymentRow[];
   recoverablePayments(): PaymentRow[];
   pendingCount(): number;
   close(): void;
@@ -836,6 +845,13 @@ export class SqliteSettlementRepository implements SettlementRepository {
   }
   listOutcomeUnknown(): PaymentRow[] {
     return this.listRecoverable();
+  }
+  listPayments(limit: number): PaymentRow[] {
+    return this.db
+      .prepare(
+        'SELECT payment_digest, requirements_key, state, tx_hash, created_at, updated_at, attempted FROM payments ORDER BY updated_at DESC, payment_digest ASC LIMIT ?',
+      )
+      .all(limit) as unknown as PaymentRow[];
   }
   recoverablePayments(): PaymentRow[] {
     return this.listRecoverable();
