@@ -96,7 +96,8 @@ test('05. live row status follows the stored state only', () => {
   ok(listBody.includes('liveRowStateBadge(p.state)'), 'badge keys off the stored state');
   notOk(listBody.includes('LIVE TESTNET VERIFICATION'), 'no live-verification badge in the list code');
   notOk(listBody.includes('badge-live'), 'no live badge class in the list code');
-  notOk(listBody.includes('v.available'), 'list never reads live verification evidence');
+  ok(listBody.includes('v.available === true'), 'evidence is read only through the strict live-proof gate');
+  ok(listBody.includes('renderLiveProofProgress(p)'), 'the proof cell renders through the evidence gate');
 });
 
 test('06. live rows that also appear in the archive are dropped from it', () => {
@@ -121,6 +122,80 @@ test('08. live rows honestly show not available for block, amount and fee', () =
   ok(listBody.includes('formatLiveTxTime(p.updatedAt)'), 'row time comes from the stored updated_at');
   ok(listBody.includes('#/transactions/'), 'rows link to the detail inspector');
   ok(listBody.includes('ccdscanTxUrl(p.transactionHash)'), 'rows link to CCDScan when a tx hash exists');
+});
+
+// ── behavioural probes: extract the live functions from the page ──────────────
+
+function extractFunctionSource(name: string): string {
+  const start = html.indexOf(`function ${name}(`);
+  ok(start >= 0, `function ${name} exists`);
+  let depth = 0;
+  for (let j = html.indexOf('{', start); j < html.length; j++) {
+    if (html[j] === '{') depth++;
+    else if (html[j] === '}') {
+      depth--;
+      if (depth === 0) return html.slice(start, j + 1);
+    }
+  }
+  throw new Error(`unbalanced function ${name}`);
+}
+
+const liveProofProgress = new Function(`return ${extractFunctionSource('liveProofProgress')}`)() as unknown as (p: unknown) => {
+  percent: number | null;
+  label: string;
+};
+const escapeHtmlForProbe = (value: unknown): string =>
+  String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+const liveRowStateBadge = new Function('escapeHtml', `return ${extractFunctionSource('liveRowStateBadge')}`)(escapeHtmlForProbe) as unknown as (state: unknown) => string;
+
+test('09. stored finalized without live evidence never renders 100%', () => {
+  notOk(listBody.includes('width:100%'), 'no hardcoded 100% in the live list code');
+  const proof = liveProofProgress({ state: 'finalized', transactionHash: 'a'.repeat(64) });
+  eq(proof.percent, null, 'no percent from stored state');
+  ok(String(proof.label).includes('NOT VERIFIED'), 'label says not verified');
+});
+
+test('10. stored finalized keeps the FINALIZED — STORED STATE label', () => {
+  ok(liveRowStateBadge('finalized').includes('FINALIZED — STORED STATE'), 'stored-state label kept');
+  ok(liveRowStateBadge('outcome_unknown').includes('NOT FINALIZED'), 'non-finalized keeps NOT FINALIZED');
+  notOk(liveRowStateBadge('outcome_unknown').includes('FINALIZED — STORED STATE'), 'no stored-finalized label on non-finalized');
+});
+
+test('11. stored non-finalized gets no proof and no finality badge', () => {
+  const proof = liveProofProgress({ state: 'outcome_unknown' });
+  eq(proof.percent, null, 'no percent');
+  const badge = liveRowStateBadge('outcome_unknown');
+  notOk(badge.includes('FINALIZED — STORED STATE'), 'no finalized badge');
+  notOk(badge.includes('badge-live'), 'no live badge');
+});
+
+test('12. genuine live evidence renders the actual verified progress', () => {
+  const evidence = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  const proof = liveProofProgress({ state: 'finalized', verification: evidence });
+  eq(proof.percent, 100, 'verified evidence renders 100%');
+  ok(proof.label.includes('VERIFIED'), 'label marks verified');
+});
+
+test('13. partial or forged evidence fails closed', () => {
+  const base = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  const cases: unknown[] = [
+    { ...base, finalized: false },
+    { ...base, available: false },
+    { ...base, observed: 'rejected' },
+    { ...base, source: '' },
+    { ...base, blockHash: 'short' },
+    { ...base, blockHash: 'z'.repeat(64) },
+    null,
+  ];
+  for (const bad of cases) {
+    eq(liveProofProgress({ state: 'finalized', verification: bad }).percent, null, 'evidence rejected');
+  }
+});
+
+test('14. the historical archive never receives the live proof gate or a live badge', () => {
+  ok(archiveBody.includes('HISTORICAL ARCHIVE'), 'archive keeps its label');
+  notOk(archiveBody.includes('liveProofProgress'), 'archive does not call the live proof gate');
+  notOk(archiveBody.includes('badge-live'), 'archive has no live badge');
 });
 
 // ═══ runner ═════════════════════════════════════════════════════════════

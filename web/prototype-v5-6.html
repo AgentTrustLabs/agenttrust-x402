@@ -5085,6 +5085,28 @@
       }
       return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED — ' + escapeHtml(String(state || 'unknown')).toUpperCase() + '</span>';
     }
+    /* Proof Progress is driven ONLY by live verification evidence, never by
+       the stored payment state. The list endpoint returns stored rows with
+       no verification section, so a stored 'finalized' row must NOT render
+       as 100%: stored state is not proof of finality. A row renders real
+       progress only when it carries genuine evidence (available + finalized
+       + observed finalized + non-empty source + 64-hex block hash);
+       otherwise the cell reads NOT VERIFIED. */
+    function liveProofProgress(p) {
+      const v = p && p.verification;
+      const verified = !!v && v.available === true && v.finalized === true &&
+        v.observed === 'finalized' && typeof v.source === 'string' && v.source.length > 0 &&
+        typeof v.blockHash === 'string' && /^[0-9a-fA-F]{64}$/.test(v.blockHash);
+      if (!verified) return { percent: null, label: 'NOT VERIFIED — evidence unavailable' };
+      return { percent: 100, label: 'VERIFIED FINALITY' };
+    }
+    function renderLiveProofProgress(p) {
+      const proof = liveProofProgress(p);
+      if (proof.percent === null) {
+        return '<span style="font-size:11.5px;color:var(--text-secondary);">' + escapeHtml(proof.label) + '</span>';
+      }
+      return '<div class="orange-progress-wrap"><div class="orange-progress-track"><div class="orange-progress-fill" style="width:' + proof.percent + '%"></div></div><span style="font-size:10.5px;">' + proof.percent + '%</span></div>';
+    }
     function formatLiveTxTime(updatedAt) {
       const ms = Number(updatedAt);
       if (!Number.isFinite(ms)) return 'not available';
@@ -5114,7 +5136,7 @@
                 <td>${p.transactionHash ? `<a class="tx-link" target="_blank" rel="noopener" href="${escapeHtml(ccdscanTxUrl(p.transactionHash))}" onclick="event.stopPropagation()">${escapeHtml(p.transactionHash.slice(0, 8))}…${escapeHtml(p.transactionHash.slice(-8))} ↗</a>` : `<span style="font-family:var(--font-mono);font-size:12px;">${escapeHtml(p.paymentDigest.slice(0, 8))}…${escapeHtml(p.paymentDigest.slice(-8))}</span>`}</td>
                 <td>not available</td>
                 <td><strong>not available</strong></td>
-                <td>${p.state === 'finalized' ? `<div class="orange-progress-wrap"><div class="orange-progress-track"><div class="orange-progress-fill" style="width:100%"></div></div><span style="font-size:10.5px;">100%</span></div>` : `<span style="font-size:11.5px;">${escapeHtml(String(p.state || 'unknown'))}</span>`}</td>
+                <td>${renderLiveProofProgress(p)}</td>
                 <td>not available</td>
                 <td>${formatLiveTxTime(p.updatedAt)}</td>
                 <td><a href="#/transactions/${escapeHtml(p.transactionHash || p.paymentDigest)}" class="btn-sm-ghost" onclick="event.stopPropagation()">Inspect →</a></td>
