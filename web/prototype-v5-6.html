@@ -4058,15 +4058,13 @@
                 <span class="eyebrow-label">WALLET BALANCE</span>
                 <h2 class="card-title" style="font-size:18px;margin-top:2px;">Concordium Account Session</h2>
               </div>
-              <span class="badge-placeholder">NOT IMPLEMENTED</span>
+              <span class="badge-placeholder">EMBEDDED WALLET</span>
             </div>
 
             <div class="empty-balance-readout">
               <span style="font-family:var(--font-mono);font-size:11px;color:var(--accent-orange);font-weight:700;text-transform:uppercase;">Session Status</span>
-              <div style="font-size:18px;font-weight:800;color:var(--text-primary);">DISCONNECTED — no wallet connected, no balance available</div>
-              <p style="font-size:12.5px;color:var(--text-secondary);">
-                Wallet connection is not implemented in this iteration. No fake address and no fake balance are shown.
-              </p>
+              <div id="demo-wallet-mount"></div>
+              <pre id="demo-wallet-status" style="white-space:pre-wrap;font-size:12.5px;color:var(--text-secondary);">Loading Wallet Context…</pre>
             </div>
 
             <div class="vault-terminal-readout">
@@ -4694,6 +4692,7 @@
        from the Vercel env var AGENTTRUST_API_BASE_URL. Empty = same origin
        (local dev / same-origin backend). -->
   <script>window.AGENTTRUST_API_BASE_URL = '__AGENTTRUST_API_BASE_URL__';</script>
+  <script>window.AGENTTRUST_WALLET_ORIGIN = '__AGENTTRUST_WALLET_ORIGIN__';</script>
   <script type="module">
     import * as THREE from 'three';
 
@@ -5079,6 +5078,10 @@
        cells honestly read "not available" — inspect the row for the
        evidence. One fetch, no retry: on any failure the section shows
        an error and the archive below is unaffected. */
+    function liveSourceBadge(p) {
+      const src = p && p.source === 'browser' ? 'BROWSER' : 'CLI';
+      return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:9.5px;font-weight:700;letter-spacing:.04em;margin-left:4px;">' + src + '</span>';
+    }
     function liveRowStateBadge(state) {
       if (state === 'finalized') {
         return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">FINALIZED — STORED STATE</span>';
@@ -5132,7 +5135,7 @@
             ${payments.map((p, idx) => `
               <tr class="clickable-tx" data-tx-hash="${escapeHtml(p.transactionHash || p.paymentDigest)}">
                 <td><span class="rank-num">${idx + 1}</span></td>
-                <td>${liveRowStateBadge(p.state)}</td>
+                <td>${liveRowStateBadge(p.state)}${liveSourceBadge(p)}</td>
                 <td>${p.transactionHash ? `<a class="tx-link" target="_blank" rel="noopener" href="${escapeHtml(ccdscanTxUrl(p.transactionHash))}" onclick="event.stopPropagation()">${escapeHtml(p.transactionHash.slice(0, 8))}…${escapeHtml(p.transactionHash.slice(-8))} ↗</a>` : `<span style="font-family:var(--font-mono);font-size:12px;">${escapeHtml(p.paymentDigest.slice(0, 8))}…${escapeHtml(p.paymentDigest.slice(-8))}</span>`}</td>
                 <td>not available</td>
                 <td><strong>not available</strong></td>
@@ -5412,6 +5415,30 @@
           <div class="inspector-field" style="grid-column: 1 / -1;">
             <span class="inspector-label">Finalization Status &amp; Evidence</span>
             <span class="inspector-val" style="font-weight:400;">${statusNotice}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Payment Reference</span>
+            <span class="inspector-val">${escapeHtml(String(d.paymentDigest || 'not available'))}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Payment Source</span>
+            <span class="inspector-val">${escapeHtml(d.source === 'browser' ? 'BROWSER CHECKOUT' : 'CLI')}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Resource / Service</span>
+            <span class="inspector-val">${escapeHtml(String((d.resource && d.resource.url) || d.resourceUrl || 'not available'))}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Sender</span>
+            <span class="inspector-val">${escapeHtml(String(d.sender || 'not available'))}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Recipient</span>
+            <span class="inspector-val">${escapeHtml(String(d.recipient || req.payTo || 'not available'))}</span>
+          </div>
+          <div class="inspector-field">
+            <span class="inspector-label">Sponsor</span>
+            <span class="inspector-val">${escapeHtml(String(d.sponsor || 'not available'))}</span>
           </div>
           <div class="inspector-field">
             <span class="inspector-label">Network</span>
@@ -6386,13 +6413,14 @@
     });
 
     function bindModalButtons() {
+      // Real checkout flow (web/x402-checkout.js). The demo-only modal is gone:
+      // without a wallet/SDK adapter the modal says BLOCKED and no payment is
+      // attempted, instead of pretending a demo payment.
       document.querySelectorAll('.open-pay-modal').forEach(btn => {
         btn.onclick = () => {
           const svc = btn.dataset.service ? ` (${btn.dataset.service})` : '';
-          openModal(
-            `Pay with x402${svc}`,
-            'Demo only - no wallet, no signing, no CCD moves. The 4 real Concordium Testnet x402 transactions are linked in the Payment Evidence table on the Transactions page.'
-          );
+          if (window.__x402CheckoutStart) { window.__x402CheckoutStart(btn); return; }
+          openModal(`Pay with x402${svc}`, 'BLOCKED - browser wallet/SDK adapter not loaded. No payment was attempted.');
         };
       });
     }
@@ -7221,5 +7249,39 @@
 
     handleRouteChange();
   </script>
+<script type="module" src="./demo-wallet.js"></script>
+<script type="module">
+  // Real x402 checkout wiring. The wallet adapter is provided by the host page
+  // (browser wallet + SDK); if absent, the flow reports BLOCKED, never a fake payment.
+  import { runCheckout, renderCheckout } from './x402-checkout.js';
+  const __apiBaseRaw = window.AGENTTRUST_API_BASE_URL || '';
+  const __apiBase = __apiBaseRaw.startsWith('__') ? '' : __apiBaseRaw.replace(/\/+$/, '');
+  const apiUrl = (path) => (__apiBase ? __apiBase + path : path);
+  window.__x402CheckoutStart = async (btn) => {
+    const adapter = window.__agenttrustWalletAdapter;
+    const modal = document.getElementById('demo-modal');
+    const heading = document.getElementById('modal-heading');
+    const body = document.getElementById('modal-text');
+    if (!adapter) {
+      heading.textContent = 'x402 checkout — DEMO';
+      body.textContent = 'Wallet adapter not configured. No wallet, no signing, no CCD moves. Verified Testnet settlement evidence remains available in the Transactions page.';
+      modal.classList.add('open');
+      return;
+    }
+    heading.textContent = `Pay with x402${btn.dataset.service ? ` (${btn.dataset.service})` : ''}`;
+    body.textContent = 'Preparing request…';
+    modal.classList.add('open');
+    const state = await runCheckout({
+      fetchResource: () => fetch(adapter.resourceUrl ?? apiUrl('/protected'), { headers: { accept: 'application/json' } }),
+      fetchImpl: (url, init) => fetch(url, init),
+      prepareUrl: adapter.prepareUrl ?? apiUrl('/prepare'),
+      confirmUrl: adapter.confirmUrl ?? apiUrl('/confirm'),
+      wallet: adapter.wallet,
+      sdkFromJSON: adapter.sdkFromJSON,
+      toJSON: adapter.toJSON,
+    });
+    body.innerHTML = renderCheckout(state);
+  };
+</script>
 </body>
 </html>

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; frame-src http://127.0.0.1:4591; connect-src 'none'; object-src 'none'; base-uri 'none'" />
+  <title>AgentTrust Wallet Context demo</title>
+</head>
+<body>
+  <h1>Wallet Context shell demo</h1>
+  <iframe id="wallet-frame" src="http://127.0.0.1:4591/" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
+  <button id="hello" type="button">wallet.hello</button>
+  <button id="status" type="button">wallet.getStatus</button>
+  <button id="lock" type="button">wallet.lock</button>
+  <pre id="log"></pre>
+  <script type="module" src="/parent-demo.js"></script>
+</body>
+</html>

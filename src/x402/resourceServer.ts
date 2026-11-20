@@ -101,6 +101,8 @@ export interface X402ResourceServerOptions {
    * never write, sign, or submit.
    */
   paymentDetail?: Pick<ConsumerFacilitator, 'getPaymentDetail' | 'listPayments'>;
+  /** Optional read-only fallback for browser payments when the CLI detail has no record. */
+  browserPaymentDetail?: (id: string) => Promise<{ status: number; body: unknown } | null>;
 }
 
 /** The Agent Card route: the on-chain URI path for CIS-8004 Token #1004. */
@@ -356,7 +358,7 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
       // only a validated `limit` is passed. A facilitator that is down
       // yields 503; no port means the route does not exist (404);
       // non-GET is 405.
-      if (url === '/api/payments') {
+      if (url === '/api/payments' || url === '/api/payments/') {
         if (method !== 'GET') {
           json(res, 405, { error: 'method not allowed' }, { allow: 'GET', ...cors });
           return;
@@ -395,7 +397,7 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
       // SDK's network mapping, never a hardcoded URL). A facilitator
       // that is down yields 503; an unknown payment yields the
       // facilitator's 404. Non-GET on this path is 405.
-      if (url.startsWith('/api/payments/')) {
+      if (url.startsWith('/api/payments/') && url !== '/api/payments/') {
         if (method !== 'GET') {
           json(res, 405, { error: 'method not allowed' }, { allow: 'GET', ...cors });
           return;
@@ -425,6 +427,18 @@ export function createX402ResourceHandler(opts: X402ResourceServerOptions): (req
             const explorerUrl = network && txHash ? (sdkExplorerTxUrl(network, txHash) ?? null) : null;
             json(res, status, { ...b, explorerUrl }, cors);
             return;
+          }
+          if (status === 404 && opts.browserPaymentDetail) {
+            const browser = await opts.browserPaymentDetail(id);
+            if (browser && browser.body && typeof browser.body === 'object' && !Array.isArray(browser.body)) {
+              const b = browser.body as Record<string, unknown>;
+              const req = b.requirements && typeof b.requirements === 'object' ? (b.requirements as Record<string, unknown>) : null;
+              const network = req && typeof req.network === 'string' ? req.network : null;
+              const txHash = typeof b.transactionHash === 'string' ? b.transactionHash : null;
+              const explorerUrl = network && txHash ? (sdkExplorerTxUrl(network, txHash) ?? null) : null;
+              json(res, browser.status, { ...b, explorerUrl }, cors);
+              return;
+            }
           }
           json(res, status, body, cors);
         } catch {

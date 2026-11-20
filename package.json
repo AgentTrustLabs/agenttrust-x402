@@ -2,7 +2,7 @@
   "name": "agenttrust",
   "version": "0.1.0",
   "private": true,
-  "description": "AgentTrust x402 — Concordium Agent Registry integration for multi-agent trust and commerce",
+  "description": "AgentTrust x402 \u2014 Concordium Agent Registry integration for multi-agent trust and commerce",
   "type": "module",
   "workspaces": [
     "services/facilitator"
@@ -21,7 +21,7 @@
     "agenttrust-mcp": "./dist/mcp/server.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:wallet-context",
     "pretest": "npm run build:peercred && tsc",
     "test": "node test/run.mjs",
     "verify": "tsc && node dist/cli/verify.js",
@@ -33,7 +33,9 @@
     "cli": "node --import tsx --experimental-vm-modules dist/cli/index.js",
     "build:peercred": "sh scripts/build-peercred.sh",
     "prebuild": "npm run build:peercred",
-    "postinstall": "npm run build:peercred"
+    "postinstall": "npm run build:peercred",
+    "build:wallet-context": "esbuild src/wallet/wallet-context-entry.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=dist/wallet-context-bundle.js",
+    "build:production-config": "node scripts/build-production-config.mjs"
   },
   "dependencies": {
     "@concordium/web-sdk": "^12.0.2",

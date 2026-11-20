@@ -26,7 +26,7 @@ import { GrpcConcordiumTransport } from './grpcConcordiumTransport.js';
 import type { ConcordiumGrpcClientLike } from './grpcConcordiumTransport.js';
 import { probeSigningService } from './signingService.js';
 import { createMockSigner, createLedgerSigner, type MockSubmissionBehaviour, type SponsorSigner } from './signer.js';
-import { IpcAuthorizationClient } from './authorization.js';
+import { IpcAuthorizationClient, type AuthorizationClient } from './authorization.js';
 import { FacilitatorCore, type CoreOptions } from './core.js';
 import { buildOperatorAuth } from './auth.js';
 import { ReconciliationService } from './reconcile.js';
@@ -34,6 +34,10 @@ import { getPaymentDetail } from './paymentDetail.js';
 import { FixtureEvidenceVerifier, type EvidenceVerifier } from './evidence.js';
 import { ConcordiumEvidenceVerifier, type ConcordiumStatusClient } from './concordiumEvidence.js';
 import type { FacilitatorConfig } from './config.js';
+import { BrowserPaymentBridge, type PrepareRequest, type ConfirmRequest } from './browserBridge.js';
+import { SqliteBrowserPaymentStore, browserPaymentPublic, browserPaymentDetail } from './browserPaymentStore.js';
+import { createBrowserChainVerifier } from './browserChainAdapter.js';
+import { BrowserSubmissionService } from './browserSubmission.js';
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -278,6 +282,14 @@ export async function startFacilitator(
      * exercise ownership/permission checks without real secret material on disk.
      */
     walletFileInspector?: (path: string) => WalletFileInspection;
+    /** Browser-initiated sponsored flow. Absent → built from startup dependencies when valid. */
+    browserBridge?: BrowserPaymentBridge;
+    /** TEST ONLY: replace the signing-service reachability probe. */
+    signingServiceProbe?: typeof probeSigningService;
+    /** TEST ONLY: replace the Authorization Owner client. */
+    authorizationClient?: AuthorizationClient;
+    /** TEST ONLY: replace the sponsor signer without changing the CLI path. */
+    sponsorSignerOverride?: SponsorSigner;
   } = {},
 ): Promise<StartedFacilitator> {
   const config = loadConfig(env);
@@ -301,7 +313,7 @@ export async function startFacilitator(
       }
     }
 
-    const unreachable = await probeSigningService(
+    const unreachable = await (opts.signingServiceProbe ?? probeSigningService)(
       config.signingServiceSocket!,
       config.signingServiceTimeoutMs,
     );
@@ -315,22 +327,19 @@ export async function startFacilitator(
   // The V1 submitter is injected here. The signer never builds a transport
   // itself (see ipcSponsorSigner.ts); with no submitter it stays fail-closed, which is
   // exactly the behaviour we want when the node endpoint is absent.
+  const grpcClient = opts.nodeClient ?? (config.nodeHost !== null && config.nodePort !== null
+    ? (new ConcordiumGRPCNodeClient(
+        config.nodeHost,
+        config.nodePort,
+        config.nodeUseTls ? credentials.createSsl() : credentials.createInsecure(),
+      ) as never)
+    : undefined);
   const submitter =
     config.mode === 'real' && config.nodeHost !== null && config.nodePort !== null
-      ? new ConcordiumTransactionSubmitter(
-          new GrpcConcordiumTransport(
-            opts.nodeClient ??
-              (new ConcordiumGRPCNodeClient(
-                config.nodeHost,
-                config.nodePort,
-                config.nodeUseTls ? credentials.createSsl() : credentials.createInsecure(),
-              ) as never),
-          ),
-        )
+      ? new ConcordiumTransactionSubmitter(new GrpcConcordiumTransport(grpcClient as never))
       : undefined;
 
-  const signer: SponsorSigner =
-    config.mode === 'real'
+  const signer: SponsorSigner = opts.sponsorSignerOverride ?? (config.mode === 'real'
       ? createIpcSponsorSigner({
           sponsorAddress: config.sponsorAddress!,
           network: config.network,
@@ -363,15 +372,15 @@ export async function startFacilitator(
             // Unset, the mock signer derives its own placeholder as before.
             ...(config.mockSponsorAddress ? { placeholderAddress: config.mockSponsorAddress } : {}),
             ...(behaviour ? { behaviour } : {}),
-          });
+          }));
   // When an Authorization Owner socket is configured, the facilitator speaks the
   // IPC protocol and never opens the authorization database. Real mode requires
   // the socket (loadConfig enforces it), so the local mock-only client is only
   // reachable in mock/test mode. When unset in mock mode the core falls back to
   // the local client, which can never authorize a real settlement.
-  const authorization = config.authorizationSocket
+  const authorization: AuthorizationClient | undefined = opts.authorizationClient ?? (config.authorizationSocket
     ? new IpcAuthorizationClient(config.authorizationSocket)
-    : undefined;
+    : undefined);
 
   // ── Production sender verification wiring ────────────────────────
   // Selection rule (fail-closed):
@@ -379,6 +388,7 @@ export async function startFacilitator(
   //   - `mock` mode: 'passthrough' is the default; 'sdk' is allowed but never implied.
   // There is no implicit environment fallback that selects passthrough in production.
   let senderVerifier: ((txJson: unknown) => Promise<SenderVerificationResult>) | undefined;
+  let accountProvider: GrpcAccountInfoProvider | undefined;
   if (config.senderVerification === 'sdk') {
     if (config.nodeHost === null || config.nodePort === null) {
       throw new ConfigurationError(
@@ -395,6 +405,7 @@ export async function startFacilitator(
         network: config.network,
         timeoutMs: config.senderVerificationTimeoutMs,
       });
+      accountProvider = provider;
     } catch (e) {
       throw new ConfigurationError(`failed to construct AccountInfoProvider: ${(e as Error).message}`);
     }
@@ -454,7 +465,7 @@ export async function startFacilitator(
   // same directory) fails startup (fail-closed): the facilitator could
   // rewrite Owner authorization state. An unreachable owner does not fail
   // startup — it makes readiness unhealthy until it appears (see /healthz).
-  if (config.mode === 'real' && authorization) {
+  if (config.mode === 'real' && authorization instanceof IpcAuthorizationClient) {
     const check = await checkOwnerDbSeparation(authorization, config.dbPath, 10_000, config.signingServiceUid);
     if (check.reachable && !check.separated) {
       throw new ConfigurationError(
@@ -483,6 +494,40 @@ export async function startFacilitator(
   const verifier = opts.verifier ?? (await buildVerifier(config));
   const reconciler = new ReconciliationService({ repository: core.store, verifier });
 
+  // Browser-initiated sponsored flow. Fail closed: no Owner client, no real
+  // AccountInfo provider, or no node client means the routes do not exist.
+  // Read-only listing/detail need the browser table even when the bridge is
+  // inactive; the table is created lazily and never rewrites CLI rows.
+  const browserStore = new SqliteBrowserPaymentStore(config.dbPath);
+  const browserBridge = opts.browserBridge ?? (() => {
+    if (!authorization || !accountProvider || !grpcClient) return undefined;
+    return new BrowserPaymentBridge({
+      network: config.network,
+      sponsorAddress: signer.info().address,
+      maxEnergy: config.maxEnergy,
+      maxFeeMicroCcd: String(config.maxFeeMicroCcd),
+      authorization,
+      signer,
+      store: browserStore,
+      chain: createBrowserChainVerifier(grpcClient as never, config.network),
+      accountProvider,
+      // Bridge verifies via its own SDK path using the SAME accountProvider; CLI senderVerifier untouched.
+      ...(opts.now ? { now: opts.now } : {}),
+    });
+  })();
+
+  const browserSubmission = browserBridge && submitter && accountProvider
+    ? new BrowserSubmissionService({
+        store: browserStore,
+        submitter,
+        accountProvider,
+        network: config.network,
+        maxEnergy: config.maxEnergy,
+        maxFeeMicroCcd: config.maxFeeMicroCcd,
+        ...(opts.now ? { now: opts.now } : {}),
+      })
+    : null;
+
   const server = createServer((req, res) => {
     void (async () => {
       const url = req.url ?? '/';
@@ -495,7 +540,7 @@ export async function startFacilitator(
         // unhealthy (503). The probe is read-only and creates no approval,
         // signature, or settlement. Mock mode has no external owner; the
         // in-process local client is always reachable.
-        if (config.mode === 'real' && authorization) {
+        if (config.mode === 'real' && authorization instanceof IpcAuthorizationClient) {
           const check = await checkOwnerDbSeparation(authorization, config.dbPath, 2000, config.signingServiceUid);
           const reachable = check.reachable && check.separated;
           json(res, reachable ? 200 : 503, {
@@ -513,6 +558,32 @@ export async function startFacilitator(
       }
       if (method === 'GET' && url === '/supported') {
         json(res, 200, core.getSupported());
+        return;
+      }
+      // Browser-initiated sponsored flow. The bridge is injected; without it the
+      // routes do not exist at all (404), exactly like an unreconciled route.
+      if (method === 'POST' && url === '/prepare') {
+        if (!browserBridge) { json(res, 404, { ok: false, reason: 'not found' }); return; }
+        const body = await readBody(req);
+        if (!body.ok) { json(res, body.status, { ok: false, reason: body.message }); return; }
+        const r = await browserBridge.prepare(body.value as PrepareRequest);
+        json(res, r.ok ? 200 : r.status, r);
+        return;
+      }
+      if (method === 'POST' && url === '/confirm') {
+        if (!browserBridge) { json(res, 404, { ok: false, reason: 'not found' }); return; }
+        const body = await readBody(req);
+        if (!body.ok) { json(res, body.status, { ok: false, reason: body.message }); return; }
+        const r = await browserBridge.confirm(body.value as ConfirmRequest);
+        json(res, r.ok ? 200 : r.status, r);
+        return;
+      }
+      if (method === 'POST' && url === '/submit') {
+        if (!browserSubmission) { json(res, 404, { ok: false, reason: 'not found' }); return; }
+        const body = await readBody(req);
+        if (!body.ok) { json(res, body.status, { ok: false, reason: body.message }); return; }
+        const r = await browserSubmission.submit(body.value as { paymentRef: string; signedTransaction: Record<string, unknown> });
+        json(res, r.ok ? 200 : r.status, r);
         return;
       }
       if (method === 'POST' && url === '/verify') {
@@ -590,9 +661,12 @@ export async function startFacilitator(
             return;
           }
         }
-        const rows = core.store.listPayments(limit);
-        json(res, 200, {
-          payments: rows.map((r) => ({
+        const cliRows = core.store.listPayments(limit);
+        const cliHashes = new Set(cliRows.map((r) => r.tx_hash).filter((h): h is string => typeof h === 'string'));
+        const browserRows = browserStore.listBrowserPayments(limit)
+          .filter((r) => !r.tx_hash || !cliHashes.has(r.tx_hash));
+        const payments = [
+          ...cliRows.map((r) => ({
             paymentDigest: r.payment_digest,
             state: r.state,
             transactionHash: r.tx_hash,
@@ -600,9 +674,9 @@ export async function startFacilitator(
             updatedAt: r.updated_at,
             attempted: r.attempted,
           })),
-          count: rows.length,
-          limit,
-        });
+          ...browserRows.map((r) => browserPaymentPublic(r)),
+        ].sort((a, b) => Number(b['updatedAt']) - Number(a['updatedAt'])).slice(0, limit);
+        json(res, 200, { payments, count: payments.length, limit });
         return;
       }
       if (method === 'GET' && url.startsWith('/payment/')) {
@@ -616,6 +690,13 @@ export async function startFacilitator(
           return;
         }
         const result = await getPaymentDetail({ repository: core.store, verifier }, segment);
+        if (!result.ok && result.code !== 'invalid_request') {
+          const browserRow = browserStore.getBrowserPayment(segment) ?? browserStore.getBrowserPaymentByTxHash(segment);
+          if (browserRow) {
+            json(res, 200, browserPaymentDetail(browserRow));
+            return;
+          }
+        }
         if (!result.ok) {
           json(res, result.code === 'invalid_request' ? 400 : 404, {
             ok: false,
@@ -663,7 +744,7 @@ export async function startFacilitator(
   return {
     url: `http://${config.host === '::1' ? '[::1]' : config.host}:${port}`,
     core,
-    close: () => new Promise<void>(resolve => server.close(() => resolve())),
+    close: () => new Promise<void>(resolve => server.close(() => { browserStore?.close(); resolve(); })),
   };
 }
 

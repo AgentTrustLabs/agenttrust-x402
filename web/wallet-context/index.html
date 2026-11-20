@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="referrer" content="no-referrer" />
+  <title>AgentTrust Wallet Context (Testnet)</title>
+  <!-- CSP header (frame-ancestors) is set by the dev server; meta CSP is only for defense in depth. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; object-src 'none'; base-uri 'none'" />
+  <script src="/wallet-config.js"></script>
+  <script src="/issuance-config.js"></script>
+</head>
+<body>
+  <h1>Wallet Context — Testnet</h1>
+  <div id="v2-wallet"></div>
+  <div id="v2-approval"></div>
+  <pre id="v2-identity-result"></pre>
+  <p id="v2-error"></p>
+  <label>Wallet id <input id="wallet-id" type="text" autocomplete="off" /></label>
+  <fieldset>
+    <legend>Create</legend>
+    <label>Password <input id="create-password" type="password" autocomplete="new-password" /></label>
+    <button id="create-btn" type="button">Create wallet</button>
+  </fieldset>
+  <fieldset>
+    <legend>Unlock</legend>
+    <label>Password <input id="unlock-password" type="password" autocomplete="current-password" /></label>
+    <button id="unlock-btn" type="button">Unlock</button>
+  </fieldset>
+  <fieldset>
+    <legend>HD derivation (test-only synthetic seed, stays in iframe)</legend>
+    <label>Wallet id <input id="hd-wallet-id" type="text" autocomplete="off" /></label>
+    <label>Seed (128 hex) <input id="hd-seed" type="text" autocomplete="off" /></label>
+    <label>IDP index <input id="hd-ip-index" type="number" value="3" /></label>
+    <label>Identity index <input id="hd-identity-index" type="number" value="0" /></label>
+    <label>Credential index <input id="hd-cred-index" type="number" value="0" /></label>
+    <label>Verify key (64 hex) <input id="hd-public-key" type="text" autocomplete="off" /></label>
+    <button id="hd-init-btn" type="button">Initialize HD session</button>
+  </fieldset>
+  <button id="lock-btn" type="button">Lock</button>
+  <button id="delete-btn" type="button">Delete wallet</button>
+  <div id="wallet-status"></div>
+  <script type="module" src="/dist/wallet-context-bundle.js"></script>
+</body>
+</html>
