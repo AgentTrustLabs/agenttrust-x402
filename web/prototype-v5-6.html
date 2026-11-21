@@ -3610,7 +3610,7 @@
           </div>
           <div class="beacon-row">
             <span>x402 Proofs</span>
-            <span style="color:var(--text-primary);font-weight:700;">4 Live Txs</span>
+            <span style="color:var(--text-primary);font-weight:700;"><span id="live-tx-count">—</span> Live Txs</span>
           </div>
         </div>
 
@@ -5197,6 +5197,18 @@
     function liveTxTableSignature(payments) {
       return JSON.stringify(payments.map(p => [p.paymentDigest, p.state, p.transactionHash, p.updatedAt, p.blockHeight, p.amount, p.sponsorFeeMicroCcd, p.sender, p.recipient]));
     }
+    /* The sidebar "x402 Proofs" KPI shows the same live record count as the
+       Transactions table, driven from the same /api/payments payload — no
+       extra request. It is updated only when the table (re-)renders (or the
+       initial load finds the list empty), so it always equals the number of
+       rows actually shown: a failed or unchanged refresh leaves the last
+       valid count untouched, and while the first load is still pending the
+       KPI honestly shows "—" instead of a stale number or 0. */
+    function updateLiveTxKpi(payments) {
+      const el = document.getElementById('live-tx-count');
+      if (!el) return;
+      el.textContent = String(payments.length);
+    }
     async function loadLiveTxTable(isRefresh) {
       const mount = document.getElementById('live-tx-table-mount');
       if (!mount) return;
@@ -5234,6 +5246,7 @@
       }
       if (payments.length === 0) {
         if (isRefresh) return;
+        updateLiveTxKpi(payments);
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">No live settlements recorded yet.</p>';
         return;
       }
@@ -5241,6 +5254,7 @@
       if (isRefresh && signature === lastLiveTxSignature) return;
       lastLiveTxSignature = signature;
       mount.innerHTML = buildLiveTxTableHTML(payments);
+      updateLiveTxKpi(payments);
       mount.querySelectorAll('.clickable-tx').forEach(row => {
         row.addEventListener('click', () => {
           location.hash = '#/transactions/' + row.dataset.txHash;
