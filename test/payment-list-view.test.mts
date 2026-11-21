@@ -7,9 +7,12 @@
  *   - the live section exists above the archive section, with its own
  *     mount; the archive section is headed "Earlier Settlements —
  *     11 November 2026" and labelled HISTORICAL ARCHIVE;
- *   - the list fetches `apiUrl('/api/payments')` exactly once, with no
- *     retry, and no live payment hash is hardcoded anywhere in the list
- *     code;
+ *   - the list fetches `apiUrl('/api/payments')` from a single call site,
+ *     with no retry-on-failure; it re-fetches on a 30-second timer and on
+ *     navigation to the Transactions page, but only while that page is
+ *     visible, and a refresh never replaces the table with an error and
+ *     never re-renders an unchanged payload; the initial route change
+ *     skips its refresh because the initial load already fetched;
  *   - archive rows (buildTxTableHTML, podium) carry HISTORICAL ARCHIVE
  *     and no LIVE - TESTNET badge;
  *   - live row status follows the stored state only: finalized shows
@@ -18,8 +21,9 @@
  *   - live rows that also appear in the archive are dropped from the
  *     archive (deduplication), and the loading / empty / error states
  *     exist;
- *   - block, amount and fee cells for live rows honestly read
- *     "not available" (the list response carries none of them).
+ *   - block, amount, fee, sender and recipient cells render the real
+ *     values from the enriched list response, and honestly read
+ *     "not available" only when the evidence is absent.
  *
  * Static analysis only — no browser, no server. The inspector and its
  * F1 gate are covered by payment-detail-view.test.mts, not here.
@@ -68,11 +72,11 @@ test('01. live section sits above the archive section, each with its own mount',
   ok(html.includes('HISTORICAL ARCHIVE'), 'archive label present');
 });
 
-test('02. the list fetches GET /api/payments exactly once, with no retry', () => {
+test('02. the list fetches GET /api/payments from a single call site, with no retry-on-failure', () => {
   const fetches = (listBody.match(/fetch\(apiUrl\('\/api\/payments'\)\)/g) ?? []).length;
   eq(fetches, 1, 'one list fetch');
   notOk(listBody.includes('setTimeout'), 'no retry timer in the list code');
-  notOk(listBody.includes('setInterval'), 'no polling in the list code');
+  notOk(listBody.includes('setInterval'), 'no timer inside the loader itself');
   ok(listBody.includes("await fetch(apiUrl('/api/payments'))"), 'fetch uses the configured API base');
 });
 
@@ -116,9 +120,16 @@ test('07. loading, empty and error states exist and name the archive as unaffect
   ok(listBody.includes('The historical archive below is unaffected'), 'error states point at the intact archive');
 });
 
-test('08. live rows honestly show not available for block, amount and fee', () => {
-  const cells = (listBody.match(/not available/g) ?? []).length;
-  ok(cells >= 3, `at least three "not available" cells, got ${cells}`);
+test('08. live rows render the real block, amount, fee, sender and recipient from the enriched list', () => {
+  ok(listBody.includes('formatLiveBlock(p)'), 'block cell renders the enriched block height');
+  ok(listBody.includes('formatLiveAmount(p)'), 'amount cell renders the enriched amount');
+  ok(listBody.includes('formatLiveFee(p)'), 'fee cell renders the enriched sponsor fee');
+  ok(listBody.includes('shortAddr(p.sender)'), 'sender cell renders the enriched sender');
+  ok(listBody.includes('shortAddr(p.recipient)'), 'recipient cell renders the enriched recipient');
+  ok(html.includes('function formatLiveBlock'), 'block formatter exists');
+  ok(html.includes('function formatLiveAmount'), 'amount formatter exists');
+  ok(html.includes('function formatLiveFee'), 'fee formatter exists');
+  ok(html.includes('function shortAddr'), 'address shortener exists');
   ok(listBody.includes('formatLiveTxTime(p.updatedAt)'), 'row time comes from the stored updated_at');
   ok(listBody.includes('#/transactions/'), 'rows link to the detail inspector');
   ok(listBody.includes('ccdscanTxUrl(p.transactionHash)'), 'rows link to CCDScan when a tx hash exists');
@@ -148,6 +159,16 @@ const escapeHtmlForProbe = (value: unknown): string =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 const liveRowStateBadge = new Function('escapeHtml', `return ${extractFunctionSource('liveRowStateBadge')}`)(escapeHtmlForProbe) as unknown as (state: unknown) => string;
 const renderLiveProofProgress = new Function('escapeHtml', 'liveProofProgress', `return ${extractFunctionSource('renderLiveProofProgress')}`)(escapeHtmlForProbe, liveProofProgress) as unknown as (p: unknown) => string;
+const formatLiveBlock = new Function('escapeHtml', `return ${extractFunctionSource('formatLiveBlock')}`)(escapeHtmlForProbe) as unknown as (p: unknown) => string;
+const formatLiveAmount = new Function('escapeHtml', `return ${extractFunctionSource('formatLiveAmount')}`)(escapeHtmlForProbe) as unknown as (p: unknown) => string;
+const shortAddr = new Function('escapeHtml', `return ${extractFunctionSource('shortAddr')}`)(escapeHtmlForProbe) as unknown as (addr: unknown) => string;
+const formatMicroCcdProbe = (micro: unknown): string => {
+  if (micro === null || micro === undefined || micro === '') return 'not available';
+  const n = Number(micro);
+  if (!Number.isFinite(n)) return 'not available';
+  return (n / 1000000).toFixed(6) + ' CCD';
+};
+const formatLiveFee = new Function('formatMicroCcd', `return ${extractFunctionSource('formatLiveFee')}`)(formatMicroCcdProbe) as unknown as (p: unknown) => string;
 
 test('09. stored finalized without live evidence never renders 100%', () => {
   notOk(listBody.includes('width:100%'), 'no hardcoded 100% in the live list code');
@@ -229,6 +250,55 @@ test('17. partial or forged evidence renders fail-closed, never 100%', () => {
     notOk(html.includes('100%'), 'no percentage');
     notOk(html.includes('VERIFIED FINALITY'), 'no verified label');
   }
+});
+
+test('18. the live formatters render real enriched values and fall back to not available', () => {
+  eq(formatLiveBlock({ blockHeight: '51105034' }), '#51105034', 'real block height');
+  eq(formatLiveBlock({ blockHeight: null }), 'not available', 'no block without evidence');
+  eq(formatLiveBlock({}), 'not available', 'no block on a bare row');
+  eq(formatLiveAmount({ amount: '1', asset: 'CCD' }), '1 µCCD', 'real amount');
+  eq(formatLiveAmount({ amount: null, asset: 'CCD' }), 'not available', 'no amount without evidence');
+  eq(formatLiveAmount({ amount: 'abc', asset: 'CCD' }), 'not available', 'non-numeric amount rejected');
+  eq(formatLiveFee({ sponsorFeeMicroCcd: '5108270' }), '5.108270 CCD', 'real sponsor fee');
+  eq(formatLiveFee({ sponsorFeeMicroCcd: null }), 'not available', 'no fee without evidence');
+  eq(shortAddr('abcdefghijklmnopqr'), 'abcdefgh…klmnopqr', 'long address truncated');
+  eq(shortAddr('short'), 'short', 'short address kept whole');
+  eq(shortAddr(null), 'not available', 'no address without evidence');
+  eq(shortAddr(''), 'not available', 'empty address is not available');
+});
+
+test('19. the live table auto-refreshes on a timer, silently and only when visible', () => {
+  ok(html.includes('setInterval(refreshLiveTxTable, 30000)'), '30-second refresh timer exists');
+  const loader = extractFunctionSource('loadLiveTxTable');
+  const refresher = extractFunctionSource('refreshLiveTxTable');
+  ok(refresher.includes("document.querySelector('#page-transactions.active')"), 'refresh only while the Transactions page is visible');
+  ok(refresher.includes('document.hidden'), 'refresh skips a hidden tab');
+  ok(refresher.includes('loadLiveTxTable(true)'), 'refresh reuses the loader in refresh mode');
+  ok(loader.includes('isRefresh'), 'loader distinguishes initial load from refresh');
+  ok(loader.includes('if (isRefresh) return;'), 'a failed refresh keeps the last good render');
+  ok(loader.includes('lastLiveTxSignature'), 'refresh tracks the last rendered payload');
+  ok(loader.includes('signature === lastLiveTxSignature'), 'an unchanged payload is not re-rendered');
+  const sig = extractFunctionSource('liveTxTableSignature');
+  ok(sig.includes('p.state'), 'signature covers status changes');
+  ok(sig.includes('p.updatedAt'), 'signature covers record updates');
+  ok(sig.includes('p.blockHeight'), 'signature covers new block evidence');
+  ok(sig.includes('p.paymentDigest'), 'signature covers new payments');
+});
+
+test('20. navigating to the Transactions page refreshes the live table', () => {
+  const router = extractFunctionSource('handleRouteChange');
+  ok(router.includes("if (baseRoute === 'transactions')"), 'router has a transactions hook');
+  ok(router.includes('refreshLiveTxTable()'), 'router refreshes the live table');
+  ok(router.indexOf('refreshLiveTxTable()') > router.indexOf("if (baseRoute === 'transactions')"), 'refresh is inside the transactions branch');
+});
+
+test('21. the initial route change does not duplicate the initial list fetch', () => {
+  const router = extractFunctionSource('handleRouteChange');
+  ok(html.includes('let initialRouteChangePending = true'), 'guard starts pending at load');
+  ok(router.includes('initialRouteChangePending'), 'router checks the initial-route guard');
+  ok(router.includes('initialRouteChangePending = false'), 'router clears the guard after the first route change');
+  ok(router.includes('refreshLiveTxTable()'), 'later navigations still refresh');
+  ok(router.indexOf('initialRouteChangePending = false') < router.indexOf('refreshLiveTxTable()'), 'guard is cleared before any refresh call site');
 });
 
 test('14. the historical archive never receives the live proof gate or a live badge', () => {
