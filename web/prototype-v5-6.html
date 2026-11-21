@@ -5069,16 +5069,36 @@
 
     /* Live settlement list (facilitator records, newest first). The list
        comes from GET /api/payments — the facilitator's stored payment
-       rows, ordered by updated_at DESC. It is the only live source the
-       list uses: no hashes are hardcoded here, and no live verification
-       is performed per row (the detail inspector is the only place live
-       chain evidence is shown). Row status follows the STORED state
-       only: a finalized row shows FINALIZED — STORED STATE, never a
-       live-verification badge; any other state shows NOT FINALIZED.
-       Block, amount and fee are not part of the list response, so those
-       cells honestly read "not available" — inspect the row for the
-       evidence. One fetch, no retry: on any failure the section shows
-       an error and the archive below is unaffected. */
+       rows, enriched by the resource server with each payment's detail
+       (requirements + live chain evidence), ordered by updated_at DESC.
+       It is the only live source the list uses: no hashes are hardcoded
+       here, and the resource server only returns payments routed through
+       AgentTrust. Row status follows the STORED state only: a finalized
+       row shows FINALIZED — STORED STATE, never a live-verification
+       badge; any other state shows NOT FINALIZED. Block, amount and
+       sponsored fee now come from the enriched list response, so those
+       cells show the real values when the evidence is available and
+       honestly read "not available" when it is not — inspect the row
+       for the full evidence. One fetch, no retry: on any failure the
+       section shows an error and the archive below is unaffected. */
+    function shortAddr(addr) {
+      if (typeof addr !== 'string' || addr === '') return 'not available';
+      return escapeHtml(addr.length > 16 ? addr.slice(0, 8) + '…' + addr.slice(-8) : addr);
+    }
+    function formatLiveAmount(p) {
+      if (p && (p.amount === null || p.amount === undefined || p.amount === '')) return 'not available';
+      const amt = String(p.amount);
+      if (!/^\d+$/.test(amt)) return 'not available';
+      return amt + ' µ' + escapeHtml(p.asset ? String(p.asset) : 'CCD');
+    }
+    function formatLiveFee(p) {
+      if (!p || p.sponsorFeeMicroCcd === null || p.sponsorFeeMicroCcd === undefined || p.sponsorFeeMicroCcd === '') return 'not available';
+      return formatMicroCcd(p.sponsorFeeMicroCcd);
+    }
+    function formatLiveBlock(p) {
+      if (!p || p.blockHeight === null || p.blockHeight === undefined || p.blockHeight === '') return 'not available';
+      return '#' + escapeHtml(String(p.blockHeight));
+    }
     function liveRowStateBadge(state) {
       if (state === 'finalized') {
         return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">FINALIZED — STORED STATE</span>';
@@ -5120,6 +5140,8 @@
               <th>Rank</th>
               <th>Status</th>
               <th>Tx Hash (CCDScan)</th>
+              <th>Sender</th>
+              <th>Recipient</th>
               <th>Block</th>
               <th>Amount</th>
               <th>Proof Progress</th>
@@ -5134,10 +5156,12 @@
                 <td><span class="rank-num">${idx + 1}</span></td>
                 <td>${liveRowStateBadge(p.state)}</td>
                 <td>${p.transactionHash ? `<a class="tx-link" target="_blank" rel="noopener" href="${escapeHtml(ccdscanTxUrl(p.transactionHash))}" onclick="event.stopPropagation()">${escapeHtml(p.transactionHash.slice(0, 8))}…${escapeHtml(p.transactionHash.slice(-8))} ↗</a>` : `<span style="font-family:var(--font-mono);font-size:12px;">${escapeHtml(p.paymentDigest.slice(0, 8))}…${escapeHtml(p.paymentDigest.slice(-8))}</span>`}</td>
-                <td>not available</td>
-                <td><strong>not available</strong></td>
+                <td><span style="font-family:var(--font-mono);font-size:12px;">${shortAddr(p.sender)}</span></td>
+                <td><span style="font-family:var(--font-mono);font-size:12px;">${shortAddr(p.recipient)}</span></td>
+                <td>${formatLiveBlock(p)}</td>
+                <td><strong>${formatLiveAmount(p)}</strong></td>
                 <td>${renderLiveProofProgress(p)}</td>
-                <td>not available</td>
+                <td>${formatLiveFee(p)}</td>
                 <td>${formatLiveTxTime(p.updatedAt)}</td>
                 <td><a href="#/transactions/${escapeHtml(p.transactionHash || p.paymentDigest)}" class="btn-sm-ghost" onclick="event.stopPropagation()">Inspect →</a></td>
               </tr>
@@ -5161,18 +5185,34 @@
       if (kept.length === realTransactionsData.length) return;
       renderArchive(kept);
     }
-    async function loadLiveTxTable() {
+    /* Live table auto-refresh: the list is re-fetched every 30 seconds while
+       the Transactions page is visible, and on every navigation to it after
+       the initial load, so a newly settled payment and any status change appear without a page
+       reload. A refresh is silent: on any fetch failure, or when the payload
+       is unchanged (same digest/state/hash/updatedAt/evidence per row), the
+       last good render stays untouched — a refresh never replaces the table
+       with an error and never re-renders identical rows. Loading, error and
+       empty states are shown only by the initial load. */
+    let lastLiveTxSignature = null;
+    function liveTxTableSignature(payments) {
+      return JSON.stringify(payments.map(p => [p.paymentDigest, p.state, p.transactionHash, p.updatedAt, p.blockHeight, p.amount, p.sponsorFeeMicroCcd, p.sender, p.recipient]));
+    }
+    async function loadLiveTxTable(isRefresh) {
       const mount = document.getElementById('live-tx-table-mount');
       if (!mount) return;
-      mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Loading live settlement records from the facilitator…</p>';
+      if (!isRefresh) {
+        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Loading live settlement records from the facilitator…</p>';
+      }
       let res;
       try {
         res = await fetch(apiUrl('/api/payments'));
       } catch {
+        if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator could not be reached. The historical archive below is unaffected.</p>';
         return;
       }
       if (!res.ok) {
+        if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable (HTTP ' + res.status + '). The historical archive below is unaffected.</p>';
         return;
       }
@@ -5180,6 +5220,7 @@
       try {
         data = await res.json();
       } catch {
+        if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator returned an unreadable response. The historical archive below is unaffected.</p>';
         return;
       }
@@ -5187,13 +5228,18 @@
         ? data.payments.filter(p => p && typeof p.paymentDigest === 'string' && (p.transactionHash === null || p.transactionHash === undefined || typeof p.transactionHash === 'string'))
         : null;
       if (payments === null) {
+        if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — unexpected response shape. The historical archive below is unaffected.</p>';
         return;
       }
       if (payments.length === 0) {
+        if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">No live settlements recorded yet.</p>';
         return;
       }
+      const signature = liveTxTableSignature(payments);
+      if (isRefresh && signature === lastLiveTxSignature) return;
+      lastLiveTxSignature = signature;
       mount.innerHTML = buildLiveTxTableHTML(payments);
       mount.querySelectorAll('.clickable-tx').forEach(row => {
         row.addEventListener('click', () => {
@@ -5202,7 +5248,17 @@
       });
       applyArchiveDedup(payments);
     }
+    function refreshLiveTxTable() {
+      if (document.hidden) return;
+      if (!document.querySelector('#page-transactions.active')) return;
+      return loadLiveTxTable(true);
+    }
+    /* The initial route change runs right after this initial load, so its
+       refresh would fetch the same payload a second time. Skip it once;
+       every later navigation refreshes normally. */
+    let initialRouteChangePending = true;
     loadLiveTxTable();
+    setInterval(refreshLiveTxTable, 30000);
 
     /* Payment detail inspector (live, API-driven). The settlement evidence
        for the requested hash is fetched from GET /api/payments/:id and
@@ -6564,6 +6620,13 @@
       }
       if (baseRoute === 'providers') {
         loadLiveRegistry();
+      }
+      if (baseRoute === 'transactions') {
+        if (initialRouteChangePending) {
+          initialRouteChangePending = false;
+        } else {
+          refreshLiveTxTable();
+        }
       }
       if (baseRoute === 'transactions' && subParam) {
         renderTxDetailInspector(subParam);
