@@ -25,14 +25,13 @@ const parentOrigins = (process.env.AGENTTRUST_PARENT_ORIGINS ?? siteOrigin).trim
 function isHttpsOrigin(v) {
   try { const u = new URL(v); return u.protocol === 'https:' && u.origin === v && !v.includes('*'); } catch { return false; }
 }
-if (walletOrigin) {
-  if (!isHttpsOrigin(walletOrigin)) throw new Error('AGENTTRUST_WALLET_ORIGIN must be explicit HTTPS origin');
-  if (parentOrigins && walletOrigin === parentOrigins) throw new Error('AGENTTRUST_WALLET_ORIGIN must differ from parent origin');
-  if (!parentOrigins) throw new Error('AGENTTRUST_PARENT_ORIGINS or AGENTTRUST_SITE_ORIGIN required with wallet origin');
-  for (const p of parentOrigins.split(',').map((s) => s.trim()).filter(Boolean)) {
-    if (!isHttpsOrigin(p)) throw new Error(`invalid parent origin: ${p}`);
-    if (p === walletOrigin) throw new Error('parent origin must differ from wallet origin');
-  }
+if (!walletOrigin) throw new Error('AGENTTRUST_WALLET_ORIGIN is required for production build (explicit HTTPS origin, must differ from parent origin)');
+if (!isHttpsOrigin(walletOrigin)) throw new Error('AGENTTRUST_WALLET_ORIGIN must be explicit HTTPS origin');
+if (parentOrigins && walletOrigin === parentOrigins) throw new Error('AGENTTRUST_WALLET_ORIGIN must differ from parent origin');
+if (!parentOrigins) throw new Error('AGENTTRUST_PARENT_ORIGINS or AGENTTRUST_SITE_ORIGIN required with wallet origin');
+for (const p of parentOrigins.split(',').map((s) => s.trim()).filter(Boolean)) {
+  if (!isHttpsOrigin(p)) throw new Error(`invalid parent origin: ${p}`);
+  if (p === walletOrigin) throw new Error('parent origin must differ from wallet origin');
 }
 
 // Root build produces dist/wallet, wallet-context bundle, and backend assets.

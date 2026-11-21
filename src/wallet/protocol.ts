@@ -13,8 +13,10 @@ export const WALLET_PROTOCOL_VERSION = 1 as const;
 export const WALLET_METHODS = ['wallet.hello', 'wallet.getStatus', 'wallet.lock', 'wallet.signTransaction'] as const;
 export type WalletMethod = (typeof WALLET_METHODS)[number];
 
-export const WALLET_PARENT_ORIGIN = 'http://127.0.0.1:4590';
-export const WALLET_CONTEXT_ORIGIN = 'http://127.0.0.1:4591';
+// Test/dev placeholder origins only (used by tests as an arbitrary origin pair).
+// Production origins come from the runtime config, never from these constants.
+export const WALLET_PARENT_ORIGIN = 'https://app.test.local';
+export const WALLET_CONTEXT_ORIGIN = 'https://wallet.test.local';
 
 export interface HelloPayload {
   /** Parent declares its own origin; the shell still checks event.origin. */
