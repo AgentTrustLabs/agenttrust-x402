@@ -3390,7 +3390,7 @@
   <!-- HONESTY BANNER (Preserved Verbatim) -->
   <div class="honesty-banner">
     <span class="badge-demo">Honesty Notice</span>
-    <span>Production registry is currently empty; all dashboard KPIs, charts, provider volumes, and the 98.7 score are simulated preview data (<strong style="color:#D97706">DEMO</strong>). Only Token <strong>#1004</strong> and the <strong>4 Concordium Testnet x402 transactions</strong> below are real on-chain records (<strong style="color:#4D7C0F">LIVE - TESTNET</strong>).</span>
+    <span>Demo dashboard KPIs, charts, provider volumes, and the 98.7 score are simulated preview data (<strong style="color:#D97706">DEMO</strong>). See <a href="#/providers">Providers</a> for live registry results and recorded provider verification, not a fresh verification by this page. See <a href="#/transactions">Transactions</a> for API payment records and finality evidence; outcome_unknown records are not finalized. These read-only views do not make a payment.</span>
   </div>
 
   <!-- vAPI GLOBAL WHITE TOP BAR WITH HAMBURGER (TABLET/NARROW), PRODUCT-ICON ROW, SEARCH, DOCS & WALLET PILL -->
@@ -3470,13 +3470,13 @@
             <span class="badge-live">TESTNET</span>
           </div>
           <div class="notify-popover-item">
-            <strong>Production Registry:</strong> Empty (0 registered providers on <code>GET /api/services</code>). All 6 directory operators are <span class="badge-demo">DEMO</span>.
+            <strong>Production Registry:</strong> See <a href="#/providers" class="text-link">live registry results</a> from <code>GET /api/services</code>. Provider verification is recorded registry status, not a fresh check by this page. Preview directory operators are <span class="badge-demo">DEMO</span>.
           </div>
           <div class="notify-popover-item">
             <strong>CIS-8004 Token #1004:</strong> Minted on Concordium Testnet <code>&lt;12802,0&gt;</code>; <code>verifyAgent</code> is <span class="badge-pending">PENDING</span>.
           </div>
           <div class="notify-popover-item">
-            <strong>x402 Settlements:</strong> 4 verified 1 µCCD sponsored Testnet transactions (<a href="#/transactions" class="text-link" id="notify-tx-link">Inspect →</a>).
+            <strong>x402 Payment Records:</strong> See <code>GET /api/payments</code> results and finality evidence (<a href="#/transactions" class="text-link" id="notify-tx-link">Inspect →</a>). Total records are not a finalized-payment count; outcome_unknown is not finalized. Viewing records does not make a payment.
           </div>
         </div>
       </div>
@@ -3609,8 +3609,8 @@
             <span style="color:var(--text-primary);font-weight:700;">&lt;12802,0&gt;</span>
           </div>
           <div class="beacon-row">
-            <span>x402 Proofs</span>
-            <span style="color:var(--text-primary);font-weight:700;"><span id="live-tx-count">—</span> Live Txs</span>
+            <span>x402 Records</span>
+            <span style="color:var(--text-primary);font-weight:700;"><span id="live-tx-count">—</span> Records</span>
           </div>
         </div>
 
@@ -3644,7 +3644,7 @@
             <h1 class="hero-title">AgentTrust x402. Trusted agent infrastructure.</h1>
             <div class="hero-orange-rule"></div>
             <p class="hero-desc">
-              Discover agent services, inspect on-chain identity records, and settle micropayments with x402 on Concordium. Production registry is currently empty; Token #1004 and 4 Testnet settlements are live.
+              Discover agent services, inspect on-chain identity records, and settle micropayments with x402 on Concordium. See Providers for live registry results and Transactions for payment records and finality evidence. Preview content is labeled DEMO; viewing API records does not make a payment.
             </p>
             <div class="chip-row" style="margin-top:4px;">
               <a href="#/discover" class="btn-black-pill">Explore Services <span>→</span></a>
@@ -3664,12 +3664,12 @@
             <div class="streak-pills">
               <div class="streak-pill done">MINT<br/>#1004 ✓</div>
               <div class="streak-pill done">SHA-256<br/>2,777 B ✓</div>
-              <div class="streak-pill done">x402<br/>4 TXS ✓</div>
+              <div class="streak-pill">x402<br/><a href="#/transactions" class="text-link">Records →</a></div>
               <div class="streak-pill">VERIFY<br/>PENDING</div>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;padding-top:4px;border-top:1px solid var(--border-hairline);">
               <span style="color:var(--text-secondary);">Contract <code>&lt;12802,0&gt;</code></span>
-              <a href="#/transactions" class="text-link">Inspect 4 Proofs →</a>
+              <a href="#/transactions" class="text-link">Inspect Payment Records →</a>
             </div>
           </div>
         </div>
@@ -3869,7 +3869,7 @@
               <span class="eyebrow-label">02 // OPERATOR DIRECTORY</span>
               <h1 class="vapi-page-h1">Agent Service Providers <span class="badge-demo">DEMO DIRECTORY</span></h1>
               <p class="providers-intro-copy">
-                Directory of x402-compatible agent operators, per-call microCCD pricing, and simulated volume benchmarks. The production service registry is currently empty; all six operators below are simulated preview profiles and never receive a Verified badge.
+                Live registered services appear in the API-backed panel below. The separate preview directory contains six simulated operator profiles with demo pricing and volume benchmarks; these preview profiles never receive a Verified badge.
               </p>
             </div>
             <div class="providers-meta-pill-cluster" aria-label="Directory Provenance Summary">
@@ -3899,7 +3899,7 @@
                 <h2 class="card-title">Registered Providers — <code>GET /api/services</code></h2>
                 <span id="live-registry-badge-slot"><span class="badge-inconclusive">LOADING</span></span>
               </div>
-              <span class="live-registry-sub">Real-time query against the production discovery endpoint. Only verified registered services appear in this panel.</span>
+              <span class="live-registry-sub">Read-only query against the production discovery endpoint. Provider verification and its checkedAt timestamp are recorded registry results, not a fresh verification performed by this page.</span>
             </div>
             <div class="live-registry-telemetry">
               <span id="live-registry-status" class="live-registry-status-pill" aria-live="polite">GET /api/services · Loading...</span>
@@ -3943,7 +3943,7 @@
             <span class="eyebrow-label">03 // CALL &amp; ROUTER CATALOG</span>
             <h1 class="vapi-page-h1">Discover Agent Services <span class="badge-demo">EXAMPLE / DEMO CATALOG</span></h1>
             <p style="font-size:13.5px;color:var(--text-secondary);margin-top:4px;">
-              Inspect HTTP 402 payment headers, per-call microCCD rates, and simulated endpoint schemas. Production service registry is empty.
+              Inspect demo HTTP 402 payment headers, per-call microCCD rates, and simulated endpoint schemas. See <a href="#/providers" class="text-link">Providers</a> for live registry results.
             </p>
           </div>
           <div class="chip-row" id="discover-category-chips"></div>
@@ -3963,7 +3963,7 @@
               <span class="card-title">x402 Service Endpoints &amp; Rate Schedule</span>
               <span class="badge-demo">DEMO</span>
             </div>
-            <span class="badge-demo">NO LIVE ENDPOINTS</span>
+            <span class="badge-demo">DEMO ENDPOINTS ONLY</span>
           </div>
           <div class="tx-table-wrap" id="discover-router-table-mount"></div>
         </div>
@@ -4116,7 +4116,7 @@
                 </div>
                 <div class="kv-row" style="border-left-color:var(--accent-orange);">
                   <span class="kv-label">Concordium Mainnet / Production Status</span>
-                  <span class="kv-val">Production registry is currently empty; <code>verifyAgent</code> for token 1004 is <strong>PENDING</strong>.</span>
+                  <span class="kv-val">See <a href="#/providers" class="text-link">Providers</a> for live service registry results; <code>verifyAgent</code> for token 1004 is <strong>PENDING</strong>.</span>
                 </div>
               </div>
             </div>
@@ -4413,9 +4413,9 @@
         <div class="vapi-page-header">
           <div>
             <span class="eyebrow-label">08 // SETTLEMENTS LEADERBOARD &amp; RECEIPTS</span>
-            <h1 class="vapi-page-h1">Verified Testnet Settlements <span class="badge-live">LIVE - TESTNET</span></h1>
+            <h1 class="vapi-page-h1">Testnet Payment Records &amp; Evidence</h1>
             <p style="font-size:13.5px;color:var(--text-secondary);margin-top:4px;">
-              Four verified 1 microCCD sponsored x402 settlement transactions recorded on Concordium Testnet on 11 Nov 2026. Select any podium card or ledger row to inspect cryptographic proof.
+              Live payment records come from GET /api/payments. Total records, finalized payments with evidence, and outcome_unknown records are distinct; outcome_unknown is never finalized. The podium and block selector show the historical archive from 11 Nov 2026. Inspect a row for evidence; viewing records does not make a payment.
             </p>
           </div>
           <a href="#/identity" class="btn-sm-ghost">Token #1004 Passport →</a>
@@ -4435,6 +4435,7 @@
           <div class="card-header">
             <span class="card-title">Live Settlements — Facilitator Records</span>
           </div>
+          <p id="live-payment-summary" role="status" aria-live="polite">Loading payment records from GET /api/payments… Counts are not yet available. This read-only request does not make a payment.</p>
           <div class="tx-table-wrap" id="live-tx-table-mount"></div>
         </div>
 
@@ -4453,8 +4454,8 @@
            ===================================================================== -->
       <section class="page-view" id="page-analytics" data-page="analytics">
         <div class="notice-banner">
-          <span><strong>Honesty Notice:</strong> All chart series, category distributions, and KPI metrics on this page are simulated preview telemetry (<span class="badge-demo">DEMO</span>). Real on-chain settlements consist strictly of the 4 Concordium Testnet transactions.</span>
-          <a href="#/transactions" class="btn-sm-ghost">View 4 Real Testnet Txs →</a>
+          <span><strong>Honesty Notice:</strong> All chart series, category distributions, and KPI metrics on this page are simulated preview telemetry (<span class="badge-demo">DEMO</span>). See Transactions for API payment records, finality evidence, and the separately labeled historical archive.</span>
+          <a href="#/transactions" class="btn-sm-ghost">View Payment Records →</a>
         </div>
 
         <div class="stats-grid" id="analytics-stats-grid"></div>
@@ -4514,8 +4515,8 @@
             </div>
 
             <div class="inspector-field">
-              <span class="inspector-label">Real On-Chain Benchmark (Concordium Testnet)</span>
-              <span class="inspector-val" style="font-weight:700;">4 Verified Transfers · 1 µCCD each · 100% Sponsored</span>
+              <span class="inspector-label">Historical Benchmark (Concordium Testnet)</span>
+              <span class="inspector-val" style="font-weight:700;">4 Historical Transfers · 1 µCCD each · 100% Sponsored</span>
             </div>
           </div>
         </div>
@@ -4601,7 +4602,7 @@
                 </div>
                 <div class="kv-row" style="border-left-color:var(--accent-orange);">
                   <span class="kv-label">Simulated Preview Telemetry (DEMO)</span>
-                  <span class="kv-val">All directory providers, service catalog endpoints, 98.7 trust score, and chart series are simulated preview data. Production registry is empty.</span>
+                  <span class="kv-val">Preview directory providers, demo service catalog endpoints, the 98.7 trust score, and chart series are simulated data. The separate live registry panel derives its results from GET /api/services; recorded provider verification is not a fresh verification by this page.</span>
                 </div>
                 <div class="kv-row" id="settings-card-boundaries" style="border-left-color:#7C3AED;">
                   <span class="kv-label">Wallet, Agent &amp; Permission Boundaries</span>
@@ -4616,7 +4617,7 @@
             <span class="eyebrow-label" style="margin-bottom:8px;display:block;">RELATED PROTOCOL PAGES</span>
             <ul class="docs-side-list">
               <li><a href="#/identity">Token #1004 Passport</a></li>
-              <li><a href="#/transactions">4 Testnet Settlements</a></li>
+              <li><a href="#/transactions">Testnet Payment Records</a></li>
               <li><a href="#/permissions">Permission Draft Rules</a></li>
               <li><a href="#/wallet">Wallet Boundary</a></li>
             </ul>
@@ -4684,7 +4685,7 @@
         <span class="badge-demo" id="modal-badge">DEMO</span>
       </div>
       <p class="modal-body" id="modal-text">
-        Demo only - no wallet, no signing, no CCD moves. To inspect real on-chain x402 settlements, see the 4 verified Concordium Testnet transactions in the Payment Evidence table.
+        Demo only - no wallet, no signing, no CCD moves. See Transactions for API payment records, finality evidence, and the separately labeled historical archive. Viewing those records does not make a payment.
       </p>
       <button type="button" class="btn-orange" id="close-modal-btn" style="align-self:flex-end;">Understood</button>
     </div>
@@ -5047,22 +5048,57 @@
     `).join('');
     }
 
+    // PM-01 follow-up: the archive surfaces renderArchive() mutates, in
+    // render order. The snapshot captures all five so a late archive-render
+    // failure can restore every one of them, not just the live table.
+    const ARCHIVE_SURFACE_IDS = [
+      'dashboard-tx-table-mount',
+      'transactions-page-table-mount',
+      'wallet-tx-table-mount',
+      'tx-podium-grid',
+      'tx-block-ribbon',
+    ];
+    // PM-01 follow-up: listener tracking. A WeakSet per surface family keys
+    // on the row elements themselves: fresh nodes after an innerHTML
+    // replacement are different objects and are bound normally, while the
+    // same nodes on a retry are skipped, so a row never gets a duplicate
+    // handler. The need-rebind flags record a failed binding attempt so a
+    // later unchanged-payload refresh can recover the missing handlers
+    // without requiring a different payment payload.
+    const boundLiveTxRows = new WeakSet();
+    const boundArchiveRows = new WeakSet();
+    let liveTxListenersNeedRebind = false;
+    let archiveListenersNeedRebind = false;
+
     /* Render every archive surface (dashboard table, transactions-page
        table, wallet table, podium, ribbon) from the given rows, and
        attach the row click handlers scoped to those surfaces. The live
        table attaches its own handlers; scoping avoids double-binding
        when the archive is re-rendered after the live list loads. */
+    // PM-01 follow-up: archive row-listener binding, extracted so the
+    // render path and the rollback path bind exactly the same listeners.
+    // Rows already bound (same element objects, e.g. an unchanged-payload
+    // refresh recovering from a failed binding) are skipped via the
+    // WeakSet, so no row gets a duplicate handler. The flag clears only
+    // when the whole pass succeeds; a throw leaves it set for the next
+    // refresh to retry.
+    function bindArchiveRowListeners() {
+      document.querySelectorAll('#dashboard-tx-table-mount .clickable-tx, #transactions-page-table-mount .clickable-tx, #wallet-tx-table-mount .clickable-tx, #tx-podium-grid .podium-card, #tx-block-ribbon .block-pill-card').forEach(row => {
+        if (boundArchiveRows.has(row)) return;
+        row.addEventListener('click', () => {
+          location.hash = `#/transactions/${row.dataset.txHash}`;
+        });
+        boundArchiveRows.add(row);
+      });
+      archiveListenersNeedRebind = false;
+    }
     function renderArchive(rows) {
       document.getElementById('dashboard-tx-table-mount').innerHTML = buildTxTableHTML(rows);
       document.getElementById('transactions-page-table-mount').innerHTML = buildTxTableHTML(rows);
       document.getElementById('wallet-tx-table-mount').innerHTML = buildTxTableHTML(rows);
       document.getElementById('tx-podium-grid').innerHTML = buildPodiumHTML(rows);
       document.getElementById('tx-block-ribbon').innerHTML = buildRibbonHTML(rows);
-      document.querySelectorAll('#dashboard-tx-table-mount .clickable-tx, #transactions-page-table-mount .clickable-tx, #wallet-tx-table-mount .clickable-tx, #tx-podium-grid .podium-card, #tx-block-ribbon .block-pill-card').forEach(row => {
-        row.addEventListener('click', () => {
-          location.hash = `#/transactions/${row.dataset.txHash}`;
-        });
-      });
+      bindArchiveRowListeners();
     }
 
     renderArchive(realTransactionsData);
@@ -5105,17 +5141,23 @@
       }
       return '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:10.5px;font-weight:700;letter-spacing:.04em;">NOT FINALIZED — ' + escapeHtml(String(state || 'unknown')).toUpperCase() + '</span>';
     }
-    /* Proof Progress is driven ONLY by live verification evidence, never by
-       the stored payment state. The list endpoint returns stored rows with
-       no verification section, so a stored 'finalized' row must NOT render
-       as 100%: stored state is not proof of finality. A row renders real
-       progress only when it carries genuine evidence (available + finalized
-       + observed finalized + non-empty source + 64-hex block hash);
-       otherwise the cell reads NOT VERIFIED. */
+    /* Proof Progress is 100% only when BOTH the stored state is `finalized`
+       AND the row carries genuine live evidence (available + finalized
+       + observed finalized + non-blank source + 64-hex block hash).
+       A whitespace-only source is not evidence: live facilitator values
+       are channel identifiers such as 'concordium-grpc' (verified
+       2026-11-22 against GET /api/payments). Stored state alone is not
+       proof of finality: a stored 'finalized' row without evidence must
+       NOT render as 100%. Evidence alone is not enough either: a row whose
+       stored state is not `finalized` (e.g. outcome_unknown, or a chain
+       observation ahead of stored reconciliation) must NOT render as 100%
+       — this matches the detail inspector, which requires stored finalized
+       plus live evidence for its LIVE VERIFICATION badge. Otherwise the
+       cell reads NOT VERIFIED. */
     function liveProofProgress(p) {
       const v = p && p.verification;
-      const verified = !!v && v.available === true && v.finalized === true &&
-        v.observed === 'finalized' && typeof v.source === 'string' && v.source.length > 0 &&
+      const verified = p && p.state === 'finalized' && p.finalized !== false && !!v && v.available === true && v.finalized === true &&
+        v.observed === 'finalized' && typeof v.source === 'string' && v.source.trim().length > 0 &&
         typeof v.blockHash === 'string' && /^[0-9a-fA-F]{64}$/.test(v.blockHash);
       if (!verified) return { percent: null, label: 'NOT VERIFIED — evidence unavailable' };
       return { percent: 100, label: 'VERIFIED FINALITY' };
@@ -5130,7 +5172,13 @@
     function formatLiveTxTime(updatedAt) {
       const ms = Number(updatedAt);
       if (!Number.isFinite(ms)) return 'not available';
-      return formatBlockTimeWib(new Date(ms).toISOString());
+      // A finite timestamp can still be outside the Date range (e.g.
+      // 1e20): new Date(ms) is Invalid and toISOString() throws. Validate
+      // the constructed date before formatting, so a bad timestamp can
+      // never break the whole table render.
+      const d = new Date(ms);
+      if (Number.isNaN(d.getTime())) return 'not available';
+      return formatBlockTimeWib(d.toISOString());
     }
     function buildLiveTxTableHTML(payments) {
       return `
@@ -5170,19 +5218,24 @@
         </table>
       `;
     }
-    function applyArchiveDedup(livePayments) {
+    function applyArchiveDedup(livePayments, forceRender = false) {
       // A payment that appears in the live list must not also appear in
       // the historical archive: drop archive rows whose hash is listed
       // live, and re-render every archive surface from the kept rows.
       // Today there is no overlap; this guards future settlements whose
       // hash matches an archive row.
+      // PM-01 follow-up: when forceRender is set (a repair is in
+      // progress), rebuild every archive surface even when there is no
+      // overlap — the early return below would otherwise leave damaged
+      // archive surfaces untouched, since a no-overlap payload never
+      // triggers renderArchive on its own.
       const liveIds = new Set();
       livePayments.forEach(p => {
         if (p.transactionHash) liveIds.add(p.transactionHash);
         if (p.paymentDigest) liveIds.add(p.paymentDigest);
       });
       const kept = realTransactionsData.filter(tx => !liveIds.has(tx.hash));
-      if (kept.length === realTransactionsData.length) return;
+      if (kept.length === realTransactionsData.length && !forceRender) return;
       renderArchive(kept);
     }
     /* Live table auto-refresh: the list is re-fetched every 30 seconds while
@@ -5191,39 +5244,268 @@
        reload. A refresh is silent: on any fetch failure, or when the payload
        is unchanged (same digest/state/hash/updatedAt/evidence per row), the
        last good render stays untouched — a refresh never replaces the table
-       with an error and never re-renders identical rows. Loading, error and
-       empty states are shown only by the initial load. */
+       with an error and never re-renders identical rows. The one exception
+       is a repair-required display (PM-01 follow-up): an identical payload
+       then fully re-renders instead of taking the unchanged shortcut, so
+       a mixed display can be repaired. Loading and error states are shown
+       only by the initial load; an empty state is also rendered by a
+       refresh, but only when no successful snapshot exists yet (INT-01).
+       Snapshot application is atomic (PM-01): a render failure restores
+       the previously displayed snapshot exactly instead of leaving a
+       partially applied one. */
     let lastLiveTxSignature = null;
+    // INT-01: whether a successful payment snapshot has ever been rendered.
+    // Distinguishes "no successful snapshot yet" (an empty response must
+    // render the empty state) from "a snapshot is already displayed" (an
+    // empty refresh retains the last good render).
+    let hasSuccessfulLiveTxSnapshot = false;
+    // INT-03: request generation for the payment list. Every loadLiveTxTable
+    // invocation takes the next generation; only the newest generation may
+    // apply data, update state, or report an error, so an older response
+    // or failure can never overwrite newer displayed state.
+    let liveTxRequestSeq = 0;
+    // PM-01 follow-up: explicit content-health state. A failed content
+    // restoration persistently marks the display repair-required; the last
+    // committed signature and the successful-snapshot flag alone do not
+    // prove the display is consistent. liveTxRestoreFailedStep retains
+    // the first failed restoration step for diagnostics, and
+    // liveTxRestoreFailedDetail its bounded error message
+    // (the message only — never the exception object, stack, or any
+    // payment payload). A listener-only failure never sets these; it is
+    // tracked by the need-rebind flags instead.
+    let liveTxDisplayRepairRequired = false;
+    let liveTxRestoreFailedStep = null;
+    let liveTxRestoreFailedDetail = null;
     function liveTxTableSignature(payments) {
-      return JSON.stringify(payments.map(p => [p.paymentDigest, p.state, p.transactionHash, p.updatedAt, p.blockHeight, p.amount, p.sponsorFeeMicroCcd, p.sender, p.recipient]));
+      return JSON.stringify(payments.map(p => [p.paymentDigest, p.state, p.transactionHash, p.updatedAt, p.blockHeight, p.amount, p.sponsorFeeMicroCcd, p.sender, p.recipient, p.asset, p.finalized, p.verification]));
     }
-    /* The sidebar "x402 Proofs" KPI shows the same live record count as the
+    /* The sidebar "x402 Records" KPI shows the same live record count as the
        Transactions table, driven from the same /api/payments payload — no
        extra request. It is updated only when the table (re-)renders (or the
-       initial load finds the list empty), so it always equals the number of
+       initial load finds the list empty, or a refresh finds the list empty
+       before any successful snapshot), so it always equals the number of
        rows actually shown: a failed or unchanged refresh leaves the last
        valid count untouched, and while the first load is still pending the
        KPI honestly shows "—" instead of a stale number or 0. */
+    let lastLivePaymentSummary = '';
+    function setLivePaymentStatus(message) {
+      const summary = document.getElementById('live-payment-summary');
+      if (summary) summary.textContent = (lastLivePaymentSummary ? lastLivePaymentSummary + ' ' : '') + message + ' Read-only: no payment is made by this page.';
+      const count = document.getElementById('live-tx-count');
+      if (count) count.title = message;
+    }
     function updateLiveTxKpi(payments) {
       const el = document.getElementById('live-tx-count');
-      if (!el) return;
+      // PM-01-R1: the KPI mount is required. A missing mount is a content
+      // failure, not a silent skip: throw so the loader's catch restores
+      // the previous snapshot and reports it, instead of publishing
+      // success for a display whose count was never written.
+      if (!el) throw new Error('required KPI mount live-tx-count is missing');
       el.textContent = String(payments.length);
+      // Stored finality and evidence-backed finality are two different
+      // counts: a row is stored-finalized when its stored state is
+      // `finalized`; it is evidence-backed only when it also passes the
+      // proof gate. Stored state alone is never presented as verified
+      // settlement evidence — the summary names both counts separately.
+      const storedFinalizedCount = payments.filter(p => p && p.state === 'finalized').length;
+      const evidenceBackedFinalizedCount = payments.filter(p => p && p.state === 'finalized' && liveProofProgress(p).percent === 100).length;
+      const unknown = payments.filter(p => p && p.state === 'outcome_unknown').length;
+      lastLivePaymentSummary = payments.length + ' total payment records in the returned list; ' + storedFinalizedCount + ' stored finalized (state only, not evidence); ' + evidenceBackedFinalizedCount + ' finalized with evidence; ' + unknown + ' outcome_unknown (not finalized).';
+      // PM-01-R1: this helper updates the KPI count and the stored summary
+      // only. It must not publish a success status: the loader publishes
+      // the success status only after every required content operation
+      // has completed, so a repair warning is never replaced mid-repair.
+    }
+    // PM-01: row-listener binding, extracted so the render path and the
+    // rollback path bind exactly the same listeners. Rows already bound
+    // (same element objects, e.g. an unchanged-payload refresh recovering
+    // from a failed binding) are skipped via the WeakSet, so no row gets
+    // a duplicate handler. The flag clears only when the whole pass
+    // succeeds; a throw leaves it set for the next refresh to retry.
+    function bindLiveTxRowListeners() {
+      const mount = document.getElementById('live-tx-table-mount');
+      if (!mount) return;
+      mount.querySelectorAll('.clickable-tx').forEach(row => {
+        if (boundLiveTxRows.has(row)) return;
+        row.addEventListener('click', () => {
+          location.hash = '#/transactions/' + row.dataset.txHash;
+        });
+        boundLiveTxRows.add(row);
+      });
+      liveTxListenersNeedRebind = false;
+    }
+    // PM-01: capture the currently displayed live snapshot (table markup,
+    // KPI text, summary, successful-snapshot flag) so a failed render can
+    // restore it exactly instead of leaving a partially applied one.
+    // PM-01 follow-up: capture every archive surface renderArchive()
+    // mutates as well — a missing mount captures as null and is skipped
+    // on restore (it cannot be restored into a mount that does not
+    // exist), so the whole payment display, not just the live table,
+    // is rolled back together.
+    function captureLiveTxSnapshot() {
+      const mount = document.getElementById('live-tx-table-mount');
+      const kpiEl = document.getElementById('live-tx-count');
+      const archive = {};
+      ARCHIVE_SURFACE_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        archive[id] = el ? el.innerHTML : null;
+      });
+      return {
+        html: mount ? mount.innerHTML : '',
+        kpi: kpiEl ? kpiEl.textContent : '',
+        summary: lastLivePaymentSummary,
+        flag: hasSuccessfulLiveTxSnapshot,
+        archive,
+        // PM-01 follow-up: the capture carries the display's health, so
+        // rolling back to an already-mixed snapshot cannot clear
+        // repair-required or lose the original failed step.
+        repairRequired: liveTxDisplayRepairRequired,
+        restoreFailedStep: liveTxRestoreFailedStep,
+        restoreFailedDetail: liveTxRestoreFailedDetail,
+      };
+    }
+    // PM-01: restore a previously captured snapshot. Re-binds row listeners
+    // on the restored rows; if re-binding itself throws, the restored
+    // content still stands and the caller still reports RENDER ERROR, so
+    // the failure is never presented as success.
+    // PM-01 follow-up: Restoration proceeds step by step (live table, KPI,
+    // archive surfaces, live listeners, archive listeners) so a failure in
+    // one surface does not skip the remaining ones. Returns null when every
+    // content step succeeded, or the name of the first content step that
+    // failed ('live-table', 'kpi', 'archive:<id>'). A non-null return means
+    // the display may be mixed: the caller must report RESTORE FAILED and
+    // never claim the previous snapshot was fully retained. A failed
+    // listener re-bind does not make the return non-null — the content IS
+    // the previous snapshot — but it sets the need-rebind flag so the next
+    // unchanged-payload refresh can recover the missing handlers.
+    // Content-health semantics: the logical state (summary, flag, health,
+    // failed step) is restored from the capture first, so rolling back to
+    // an already-mixed snapshot keeps repair-required and its original
+    // failed step. Any NEW content failure during this restore marks the
+    // display repair-required and replaces the step with the freshest one,
+    // recording the bounded error message. A missing required
+    // live/KPI mount is a failed content step, not a silent skip.
+    function restoreLiveTxSnapshot(prev) {
+      let failedStep = null;
+      const fail = (step, err) => {
+        if (!failedStep) {
+          failedStep = step;
+          liveTxDisplayRepairRequired = true;
+          liveTxRestoreFailedStep = step;
+          if (err) {
+            const message = err && err.message ? String(err.message) : String(err);
+            liveTxRestoreFailedDetail = message.slice(0, 120);
+          } else {
+            // No exception accompanies a missing mount: record an accurate
+            // detail for this step instead of keeping a previous failure's
+            // message, which would pair a new step with an unrelated error.
+            liveTxRestoreFailedDetail = 'required mount ' + step + ' is missing';
+          }
+        }
+      };
+      // Plain assignments cannot throw; the logical state (summary, flag,
+      // health, failed step) is restored even when a DOM step failed, so
+      // it keeps describing the last committed snapshot. The status
+      // message reports the mixed display explicitly in that case.
+      lastLivePaymentSummary = prev.summary;
+      hasSuccessfulLiveTxSnapshot = prev.flag;
+      liveTxDisplayRepairRequired = !!prev.repairRequired;
+      liveTxRestoreFailedStep = prev.restoreFailedStep || null;
+      liveTxRestoreFailedDetail = prev.restoreFailedDetail || null;
+      try {
+        const mount = document.getElementById('live-tx-table-mount');
+        if (!mount) fail('live-table');
+        else mount.innerHTML = prev.html;
+      } catch (err) { fail('live-table', err); }
+      try {
+        const kpiEl = document.getElementById('live-tx-count');
+        if (!kpiEl) fail('kpi');
+        else kpiEl.textContent = prev.kpi;
+      } catch (err) { fail('kpi', err); }
+      ARCHIVE_SURFACE_IDS.forEach(id => {
+        if (prev.archive[id] === null || prev.archive[id] === undefined) return;
+        const el = document.getElementById(id);
+        if (!el) { fail('archive:' + id); return; }
+        try { el.innerHTML = prev.archive[id]; } catch (err) { fail('archive:' + id, err); }
+      });
+      try {
+        bindLiveTxRowListeners();
+      } catch {
+        // Content stands; the missing listeners are recorded for the
+        // next unchanged-payload refresh to recover — the display itself
+        // is the previous snapshot, so a listener failure is not a
+        // mixed-surface restore failure (no RESTORE FAILED here).
+        liveTxListenersNeedRebind = true;
+      }
+      try {
+        bindArchiveRowListeners();
+      } catch {
+        archiveListenersNeedRebind = true;
+      }
+      return failedStep;
+    }
+    // PM-01: report a render failure from the currently displayed state.
+    // The prefix reflects whether a successful snapshot remains displayed
+    // (STALE) or none ever has (ERROR) — never the summary the failed
+    // render itself populated.
+    // PM-01 follow-up: when the display is repair-required, a render
+    // failure must not claim the previous snapshot was retained — it may
+    // be mixed — so the status reports REPAIR REQUIRED with the retained
+    // failed step instead of STALE. The cause is the bounded
+    // error message only (the exception object, stack, and payment
+    // payloads are never preserved or exposed).
+    function reportLiveTxRenderError(err) {
+      const detail = err && err.message ? String(err.message).slice(0, 120) : '';
+      const cause = detail ? ' (cause: ' + detail + ')' : '';
+      if (liveTxDisplayRepairRequired) {
+        setLivePaymentStatus('RENDER ERROR — live payment table could not be rendered. REPAIR REQUIRED' + (liveTxRestoreFailedStep ? ' (' + liveTxRestoreFailedStep + ')' : '') + ' — the displayed payment surfaces may be mixed; the previous snapshot was not fully repaired.' + cause);
+        return;
+      }
+      setLivePaymentStatus((hasSuccessfulLiveTxSnapshot ? 'STALE — last displayed records and counts retained. ' : 'ERROR — counts unavailable. ') + 'RENDER ERROR — live payment table could not be rendered.' + cause);
+    }
+    // PM-01 follow-up: report a rollback failure distinctly from the
+    // original render error. The display may be mixed (a surface was only
+    // partly restored), so the status must NOT claim the previous snapshot
+    // was retained (no STALE) and must name the failed restoration step
+    // for diagnosis. The cause is the bounded restore error
+    // message recorded during the restore. The original render error's
+    // exception is NOT preserved here — only the generic RENDER ERROR
+    // words and the restore step/cause survive; do not claim otherwise.
+    function reportLiveTxRestoreError(failedStep) {
+      const detail = liveTxRestoreFailedDetail ? ' (cause: ' + liveTxRestoreFailedDetail + ')' : '';
+      setLivePaymentStatus('RENDER ERROR — live payment table could not be rendered. RESTORE FAILED (' + failedStep + ') — the displayed payment surfaces may be mixed; the previous snapshot was NOT fully restored.' + detail);
     }
     async function loadLiveTxTable(isRefresh) {
       const mount = document.getElementById('live-tx-table-mount');
       if (!mount) return;
+      // INT-03: this invocation's generation. Any older invocation that is
+      // still pending becomes stale the moment a newer one starts.
+      const seq = ++liveTxRequestSeq;
+      const isStale = () => seq !== liveTxRequestSeq;
       if (!isRefresh) {
+        setLivePaymentStatus('Loading GET /api/payments… Counts are not yet available.');
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Loading live settlement records from the facilitator…</p>';
       }
       let res;
       try {
         res = await fetch(apiUrl('/api/payments'));
       } catch {
+        // INT-03: an older failure must not mark newer displayed state
+        // stale or erroneous.
+        if (isStale()) return;
+        // PM-01 follow-up: while the display is repair-required, a failed
+        // request must not overwrite the repair warning with a STALE or
+        // ERROR retention claim — the warning stays until a repair
+        // succeeds.
+        if (!liveTxDisplayRepairRequired) setLivePaymentStatus(lastLivePaymentSummary ? 'STALE — refresh failed: network unavailable. Last displayed records and counts are retained.' : 'ERROR — payment API could not be reached; counts unavailable.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator could not be reached. The historical archive below is unaffected.</p>';
         return;
       }
+      if (isStale()) return;
       if (!res.ok) {
+        // PM-01 follow-up: same repair-warning guard as the network path.
+        if (!liveTxDisplayRepairRequired) setLivePaymentStatus((lastLivePaymentSummary ? 'STALE — last displayed records and counts retained. ' : 'ERROR — counts unavailable. ') + 'Payment API returned HTTP ' + res.status + '.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable (HTTP ' + res.status + '). The historical archive below is unaffected.</p>';
         return;
@@ -5232,35 +5514,153 @@
       try {
         data = await res.json();
       } catch {
+        // INT-03: same as above — a stale unreadable response changes nothing.
+        if (isStale()) return;
+        // PM-01 follow-up: same repair-warning guard as the network path.
+        if (!liveTxDisplayRepairRequired) setLivePaymentStatus((lastLivePaymentSummary ? 'STALE — last displayed records and counts retained. ' : 'Counts unavailable. ') + 'MALFORMED RESPONSE — payment API returned unreadable JSON.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator returned an unreadable response. The historical archive below is unaffected.</p>';
         return;
       }
-      const payments = Array.isArray(data && data.payments)
-        ? data.payments.filter(p => p && typeof p.paymentDigest === 'string' && (p.transactionHash === null || p.transactionHash === undefined || typeof p.transactionHash === 'string'))
+      if (isStale()) return;
+      const payments = data && !Array.isArray(data) && Array.isArray(data.payments) && data.payments.every(p =>
+        p && typeof p === 'object' && !Array.isArray(p) &&
+        typeof p.paymentDigest === 'string' && p.paymentDigest.trim() !== '' &&
+        typeof p.state === 'string' && p.state.trim() !== '' &&
+        (p.transactionHash === null || p.transactionHash === undefined || typeof p.transactionHash === 'string'))
+        ? data.payments
         : null;
       if (payments === null) {
+        // PM-01 follow-up: same repair-warning guard as the network path.
+        if (!liveTxDisplayRepairRequired) setLivePaymentStatus((lastLivePaymentSummary ? 'STALE — last displayed records and counts retained. ' : 'Counts unavailable. ') + 'MALFORMED RESPONSE — unexpected payment list or record shape.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — unexpected response shape. The historical archive below is unaffected.</p>';
         return;
       }
       if (payments.length === 0) {
-        if (isRefresh) return;
-        updateLiveTxKpi(payments);
-        mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">No live settlements recorded yet.</p>';
+        // PM-01 follow-up: while the display is repair-required, an empty
+        // response must perform a complete empty-state rendering — empty
+        // live markup, KPI, and a full archive rebuild — to clear the
+        // repair state. It never merely retains the mixed display as
+        // stale, and it never clears the warning on a partial result:
+        // any failure restores the previous (mixed) display and keeps
+        // the repair warning.
+        if (liveTxDisplayRepairRequired) {
+          const prev = captureLiveTxSnapshot();
+          try {
+            mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">No live settlements recorded yet.</p>';
+            updateLiveTxKpi(payments);
+            hasSuccessfulLiveTxSnapshot = true;
+            renderArchive(realTransactionsData);
+          } catch (err) {
+            const failedStep = restoreLiveTxSnapshot(prev);
+            if (failedStep) reportLiveTxRestoreError(failedStep);
+            else reportLiveTxRenderError(err);
+            return;
+          }
+          // The empty display is now fully consistent with the empty
+          // response, but no payload describes it: invalidate the
+          // committed signature so the next nonempty response always
+          // fully renders instead of taking the unchanged shortcut.
+          liveTxDisplayRepairRequired = false;
+          liveTxRestoreFailedStep = null;
+          liveTxRestoreFailedDetail = null;
+          lastLiveTxSignature = null;
+          // PM-01-R1: publish the EMPTY status only after the complete
+          // empty rendering and the repair-state clearance, never
+          // mid-repair.
+          setLivePaymentStatus('EMPTY — API returned no payment records.');
+          return;
+        }
+        if (isRefresh && hasSuccessfulLiveTxSnapshot) {
+          // A snapshot is already displayed: retain the last good render
+          // and disclose that it does not describe this empty response.
+          setLivePaymentStatus('STALE — API returned an empty list; previously displayed records and counts are retained and do not describe this response.');
+          return;
+        }
+        // INT-01: no successful snapshot exists yet (the initial load
+        // failed, or this is the initial load). A valid empty response IS
+        // the first successful snapshot — render the empty state and set
+        // the KPI to 0 instead of leaving error markup and an unavailable
+        // KPI behind. PM-01: same atomic discipline as the nonempty path —
+        // success state is committed only after the empty markup, KPI, and
+        // status are all applied; a failure restores the previous display.
+        const prev = captureLiveTxSnapshot();
+        try {
+          mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">No live settlements recorded yet.</p>';
+          updateLiveTxKpi(payments);
+          hasSuccessfulLiveTxSnapshot = true;
+        } catch (err) {
+          const failedStep = restoreLiveTxSnapshot(prev);
+          if (failedStep) reportLiveTxRestoreError(failedStep);
+          else reportLiveTxRenderError(err);
+          return;
+        }
+        // PM-01-R1: publish the EMPTY status only after the empty markup
+        // and KPI are applied — never before, and never after a failure.
+        setLivePaymentStatus('EMPTY — API returned no payment records.');
         return;
       }
       const signature = liveTxTableSignature(payments);
-      if (isRefresh && signature === lastLiveTxSignature) return;
+      if (isRefresh && signature === lastLiveTxSignature) {
+        // PM-01 follow-up: the unchanged shortcut is gated on content
+        // consistency. When repair is required, an identical response
+        // must fully re-render below instead of taking the listener-only
+        // shortcut — and it must not clear the repair warning first, so
+        // the success status is written only inside the healthy branch.
+        if (!liveTxDisplayRepairRequired) {
+          setLivePaymentStatus('Latest API request succeeded. Counts describe the displayed list, not an all-time total.');
+          // A prior rollback may have left the displayed rows without
+          // listeners (re-binding failed while the failure was armed).
+          // Recover them on the unchanged path so interactivity returns
+          // without requiring a different payload. Each binder skips
+          // rows that are already bound (WeakSet), so no row gets a
+          // duplicate handler; a failure here leaves the flag set and
+          // the next refresh retries.
+          if (liveTxListenersNeedRebind) {
+            try { bindLiveTxRowListeners(); } catch { /* flag stays set */ }
+          }
+          if (archiveListenersNeedRebind) {
+            try { bindArchiveRowListeners(); } catch { /* flag stays set */ }
+          }
+          return;
+        }
+        // Repair required: fall through to the full render below.
+      }
+      // PM-01: atomic snapshot application. Prepare the full render output
+      // first, then apply it; on any failure restore the previously
+      // displayed snapshot exactly (live table, KPI, summary, flag, and
+      // every archive surface) and report RENDER ERROR from the restored
+      // state — or RESTORE FAILED, naming the step, when restoration
+      // itself fails. The signature is committed only after the complete
+      // application succeeds, so an identical response can retry.
+      const prev = captureLiveTxSnapshot();
+      try {
+        const tableHtml = buildLiveTxTableHTML(payments);
+        mount.innerHTML = tableHtml;
+        updateLiveTxKpi(payments);
+        hasSuccessfulLiveTxSnapshot = true;
+        bindLiveTxRowListeners();
+        applyArchiveDedup(payments, liveTxDisplayRepairRequired);
+      } catch (err) {
+        const failedStep = restoreLiveTxSnapshot(prev);
+        if (failedStep) reportLiveTxRestoreError(failedStep);
+        else reportLiveTxRenderError(err);
+        return;
+      }
+      // Commit only after the complete application succeeds: the new
+      // signature and a consistent display, together. A repair that
+      // succeeds here also clears the repair state and diagnostics.
       lastLiveTxSignature = signature;
-      mount.innerHTML = buildLiveTxTableHTML(payments);
-      updateLiveTxKpi(payments);
-      mount.querySelectorAll('.clickable-tx').forEach(row => {
-        row.addEventListener('click', () => {
-          location.hash = '#/transactions/' + row.dataset.txHash;
-        });
-      });
-      applyArchiveDedup(payments);
+      liveTxDisplayRepairRequired = false;
+      liveTxRestoreFailedStep = null;
+      liveTxRestoreFailedDetail = null;
+      // PM-01-R1: publish the success status only now, after every
+      // required content operation (live table, KPI, listeners, archive
+      // surfaces) has completed and the signature and health are
+      // committed. An earlier publication would replace the repair
+      // warning while archive surfaces were still mixed.
+      setLivePaymentStatus('API response received. Counts describe the displayed list, not an all-time total.');
     }
     function refreshLiveTxTable() {
       if (document.hidden) return;
@@ -5880,7 +6280,7 @@
     function getServiceVerificationBadge(s) {
       const vStatus = s.providerVerification && s.providerVerification.status;
       if (s.status === 'active' && s.available === true && vStatus === 'verified') {
-        return { badgeHtml: '<span class="badge-live">VERIFIED · LIVE</span>', labelText: 'VERIFIED (TRUSTED)' };
+        return { badgeHtml: '<span class="badge-live">VERIFIED · RECORDED</span>', labelText: 'VERIFIED — RECORDED STATUS' };
       }
       if (vStatus === 'rejected') {
         return { badgeHtml: '<span class="badge-failed">REJECTED</span>', labelText: 'REJECTED' };
@@ -5927,6 +6327,7 @@
           </div>
 
           <p class="provider-card-desc">${escapeHtml(s.description)}</p>
+          <p class="provider-card-desc">Recorded provider verification decision: ${s.providerVerification && typeof s.providerVerification.decision === 'string' && s.providerVerification.decision.trim() ? escapeHtml(s.providerVerification.decision) : 'not recorded'}. Checked at: ${s.providerVerification && typeof s.providerVerification.checkedAt === 'string' && s.providerVerification.checkedAt.trim() ? escapeHtml(s.providerVerification.checkedAt) : 'not recorded'}. This page reads the registry; it does not perform a fresh provider verification.</p>
 
           <div class="provider-metrics-strip">
             <div class="provider-metric-cell">
@@ -6052,42 +6453,42 @@
         const services = data.services;
 
         if (statusEl) {
-          statusEl.textContent = 'GET /api/services · ' + res.status + ' · ' + services.length + ' registered';
+          statusEl.textContent = 'GET /api/services · ' + res.status + ' · ' + services.length + ' services returned · response received ' + new Date().toISOString() + ' · snapshot, not continuous monitoring';
         }
 
         if (!services.length) {
           /* State 2: AVAILABLE — EMPTY (HTTP 200 with 0 services) */
           if (panelEl) panelEl.setAttribute('data-registry-state', 'empty');
-          if (badgeSlotEl) badgeSlotEl.innerHTML = '<span class="badge-verified">API ONLINE · 0 REGISTERED</span>';
+          if (badgeSlotEl) badgeSlotEl.innerHTML = '<span class="badge-inconclusive">API ONLINE · 0 RESULTS</span>';
           listEl.innerHTML = `
             <div class="registry-empty-box">
               <div class="registry-empty-main">
                 <div class="registry-state-icon" aria-hidden="true">0</div>
                 <div>
-                  <div class="registry-empty-text">No providers registered yet — the production service registry is empty. Register a provider to appear here. Demo operators below are simulated preview data, not live providers.</div>
+                  <div class="registry-empty-text">No services returned for this query. An empty result does not establish that the entire registry is empty; check any search or category filters. Demo operators below are simulated preview data, not live providers.</div>
                   <div class="registry-empty-meta">
                     <span>Endpoint: GET ${escapeHtml(requestUrl)}</span>
                     <span>·</span>
                     <span>HTTP 200 OK</span>
                     <span>·</span>
-                    <span>0 active provider records</span>
+                    <span>0 services returned</span>
                   </div>
                 </div>
               </div>
-              <span class="badge-inconclusive">EMPTY REGISTRY</span>
+              <span class="badge-inconclusive">EMPTY RESULT</span>
             </div>
           `;
           return;
         }
 
         /* Non-empty Live Registry response: inspect verification status per service */
-        const verifiedCount = services.filter(s => s.status === 'active' && s.available === true && s.providerVerification.status === 'verified').length;
+        const verifiedCount = services.filter(s => s.status === 'active' && s.available === true && s.providerVerification && s.providerVerification.status === 'verified').length;
         if (verifiedCount > 0) {
           if (panelEl) panelEl.setAttribute('data-registry-state', 'live');
-          if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-live">${verifiedCount} VERIFIED · LIVE</span>`;
+          if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-live">${verifiedCount} ACTIVE &amp; AVAILABLE · VERIFIED (RECORDED)</span>`;
         } else {
-          if (panelEl) panelEl.setAttribute('data-registry-state', 'empty');
-          if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-pending">${services.length} REGISTERED · 0 VERIFIED</span>`;
+          if (panelEl) panelEl.setAttribute('data-registry-state', 'available');
+          if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-inconclusive">${services.length} RETURNED · 0 ACTIVE, AVAILABLE &amp; VERIFIED</span>`;
         }
         listEl.innerHTML = `<div class="provider-cards-grid">${services.map(s => buildLiveServiceCardHTML(s)).join('')}</div>`;
         bindModalButtons();
@@ -6461,7 +6862,7 @@
           const svc = btn.dataset.service ? ` (${btn.dataset.service})` : '';
           openModal(
             `Pay with x402${svc}`,
-            'Demo only - no wallet, no signing, no CCD moves. The 4 real Concordium Testnet x402 transactions are linked in the Payment Evidence table on the Transactions page.'
+            'Demo only - no wallet, no signing, no CCD moves. See Transactions for API payment records, finality evidence, and the separately labeled historical archive. Total records are not a finalized-payment count; outcome_unknown is not finalized. Viewing records does not make a payment.'
           );
         };
       });
@@ -7041,8 +7442,8 @@
         title: 'Service health',
         statusText: 'INCONCLUSIVE',
         badgeHtml: '<span class="badge-inconclusive">INCONCLUSIVE</span>',
-        note: 'No public endpoint is deployed and the production registry is empty, so there is nothing to check yet.',
-        meta: 'Endpoint probe: INCONCLUSIVE (Production registry empty)',
+        note: 'This panel does not perform a service-health check. See Providers for live registry results and Discover for the separate read-only GET /protected challenge probe; a registry read is not a health check.',
+        meta: 'Service health: not checked by this panel',
         colorHex: 0x6b7280
       },
       {
