@@ -169,6 +169,8 @@ const formatMicroCcdProbe = (micro: unknown): string => {
   return (n / 1000000).toFixed(6) + ' CCD';
 };
 const formatLiveFee = new Function('formatMicroCcd', `return ${extractFunctionSource('formatLiveFee')}`)(formatMicroCcdProbe) as unknown as (p: unknown) => string;
+const formatBlockTimeWib = new Function(`return ${extractFunctionSource('formatBlockTimeWib')}`)() as unknown as (iso: string) => string;
+const formatLiveTxTime = new Function('formatBlockTimeWib', `return ${extractFunctionSource('formatLiveTxTime')}`)(formatBlockTimeWib) as unknown as (updatedAt: unknown) => string;
 
 test('09. stored finalized without live evidence never renders 100%', () => {
   notOk(listBody.includes('width:100%'), 'no hardcoded 100% in the live list code');
@@ -283,6 +285,8 @@ test('19. the live table auto-refreshes on a timer, silently and only when visib
   ok(sig.includes('p.updatedAt'), 'signature covers record updates');
   ok(sig.includes('p.blockHeight'), 'signature covers new block evidence');
   ok(sig.includes('p.paymentDigest'), 'signature covers new payments');
+  ok(sig.includes('p.verification'), 'signature covers finality evidence changes');
+  ok(sig.includes('p.finalized'), 'signature covers stored finalized changes');
 });
 
 test('20. navigating to the Transactions page refreshes the live table', () => {
@@ -299,6 +303,66 @@ test('21. the initial route change does not duplicate the initial list fetch', (
   ok(router.includes('initialRouteChangePending = false'), 'router clears the guard after the first route change');
   ok(router.includes('refreshLiveTxTable()'), 'later navigations still refresh');
   ok(router.indexOf('initialRouteChangePending = false') < router.indexOf('refreshLiveTxTable()'), 'guard is cleared before any refresh call site');
+});
+
+test('22. a null or missing payment never throws the proof gate (Sol v3 regression)', () => {
+  for (const row of [null, undefined]) {
+    const proof = liveProofProgress(row);
+    eq(proof.percent, null, 'no percent from a missing row');
+    ok(String(proof.label).includes('NOT VERIFIED'), 'label says not verified');
+    const html = renderLiveProofProgress(row);
+    ok(html.includes('NOT VERIFIED'), 'renders the not-verified label');
+    notOk(html.includes('100%'), 'no percentage from a missing row');
+  }
+});
+
+test('23. genuine evidence without a stored finalized state never renders 100% (Sol v3 regression)', () => {
+  const evidence = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  // Evidence alone must not imply finality: the stored state has to agree,
+  // matching the detail inspector's stored-finalized-plus-live-evidence rule.
+  for (const row of [
+    { state: 'outcome_unknown', finalized: false, verification: evidence },
+    { state: 'pending', verification: evidence },
+    { state: 'finalized', finalized: false, verification: evidence },
+  ]) {
+    eq(liveProofProgress(row).percent, null, 'no percent without stored finalized state');
+    const html = renderLiveProofProgress(row);
+    ok(html.includes('NOT VERIFIED'), 'renders the not-verified label');
+    notOk(html.includes('100%'), 'no percentage');
+  }
+  // Control: stored finalized plus the same evidence still renders 100%.
+  eq(liveProofProgress({ state: 'finalized', finalized: true, verification: evidence }).percent, 100, 'stored finalized plus evidence renders 100%');
+});
+
+test('24. a whitespace-only evidence source is rejected (audit B1 regression)', () => {
+  const base = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  // Blank sources ('   ', tab/newline mix, empty — empty already covered by
+  // tests 13/17, repeated here so the B1 case list is self-contained) must
+  // fail closed at the gate and at the renderer, exactly like forged evidence.
+  for (const source of ['   ', ' \t\n ', '']) {
+    const proof = liveProofProgress({ state: 'finalized', verification: { ...base, source } });
+    eq(proof.percent, null, 'blank source never passes the gate');
+    const html = renderLiveProofProgress({ state: 'finalized', verification: { ...base, source } });
+    ok(html.includes('NOT VERIFIED'), 'blank source renders not-verified');
+    notOk(html.includes('100%'), 'blank source renders no percentage');
+    notOk(html.includes('VERIFIED FINALITY'), 'blank source renders no verified label');
+  }
+  // Control: the same evidence with a real source still renders 100%.
+  eq(liveProofProgress({ state: 'finalized', verification: base }).percent, 100, 'valid source still passes the gate');
+  const html = renderLiveProofProgress({ state: 'finalized', verification: base });
+  ok(html.includes('100%'), 'valid source renders the percentage');
+  ok(html.includes('VERIFIED FINALITY'), 'valid source renders the verified label');
+});
+
+test('25. a finite out-of-range timestamp formats as not available (INT-02 regression)', () => {
+  // The production formatter, extracted from the page: new Date(1e20) is
+  // Invalid and toISOString() throws, so the formatter must validate the
+  // constructed date instead of letting the exception break the table.
+  eq(formatLiveTxTime(1e20), 'not available', 'out-of-range finite timestamp is not available');
+  eq(formatLiveTxTime(-1e20), 'not available', 'negative out-of-range timestamp is not available');
+  eq(formatLiveTxTime(NaN), 'not available', 'NaN is not available');
+  eq(formatLiveTxTime('garbage'), 'not available', 'non-numeric timestamp is not available');
+  ok(formatLiveTxTime(1000).includes('WIB'), 'a valid timestamp still renders a WIB time');
 });
 
 test('14. the historical archive never receives the live proof gate or a live badge', () => {
