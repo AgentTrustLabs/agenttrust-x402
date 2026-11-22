@@ -6482,7 +6482,7 @@
         }
 
         /* Non-empty Live Registry response: inspect verification status per service */
-        const verifiedCount = services.filter(s => s.status === 'active' && s.available === true && s.providerVerification.status === 'verified').length;
+        const verifiedCount = services.filter(s => s.status === 'active' && s.available === true && s.providerVerification && s.providerVerification.status === 'verified').length;
         if (verifiedCount > 0) {
           if (panelEl) panelEl.setAttribute('data-registry-state', 'live');
           if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-live">${verifiedCount} ACTIVE &amp; AVAILABLE · VERIFIED (RECORDED)</span>`;
