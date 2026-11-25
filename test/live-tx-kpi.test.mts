@@ -49,6 +49,24 @@ function extractFunctionSource(name: string): string {
   throw new Error(`unbalanced function ${name}`);
 }
 
+function extractConstObject(name: string): unknown {
+  const start = html.indexOf(`const ${name} = {`);
+  ok(start >= 0, `const ${name} exists`);
+  const brace = html.indexOf('{', start);
+  let depth = 0;
+  for (let j = brace; j < html.length; j++) {
+    if (html[j] === '{') depth++;
+    else if (html[j] === '}') {
+      depth--;
+      if (depth === 0) return new Function(`return ${html.slice(brace, j + 1)}`)();
+    }
+  }
+  throw new Error(`unbalanced const ${name}`);
+}
+
+// The live table's Network column reads this map (verbatim from the page).
+const TESTNET_NETWORK_LABELS = extractConstObject('TESTNET_NETWORK_LABELS') as Record<string, string>;
+
 // ── static: the KPI element ──────────────────────────────────────────────────
 
 test('01. the beacon KPI is a live element, not a hardcoded count', () => {
@@ -187,7 +205,7 @@ function makeHarness(opts: { fetchImpl?: FetchLike } = {}) {
   const loaderSrc = extractFunctionSource('loadLiveTxTable');
   const asyncLoaderSrc = loaderSrc.startsWith('async ') ? loaderSrc : `async ${loaderSrc}`;
   const harness = new Function('document', 'fetch', 'apiUrl', 'buildLiveTxTableHTML', 'applyArchiveDedup', 'location',
-    `let lastLiveTxSignature = null;\nlet lastLivePaymentSummary = '';\nlet hasSuccessfulLiveTxSnapshot = false;\nlet liveTxRequestSeq = 0;\nlet liveTxDisplayRepairRequired = false;\nlet liveTxRestoreFailedStep = null;\nlet liveTxRestoreFailedDetail = null;\nconst ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount', 'tx-podium-grid', 'tx-block-ribbon'];\nconst boundLiveTxRows = new WeakSet();\nconst boundArchiveRows = new WeakSet();\nlet liveTxListenersNeedRebind = false;\nlet archiveListenersNeedRebind = false;\n${extractFunctionSource('liveProofProgress')}\n${extractFunctionSource('setLivePaymentStatus')}\n${extractFunctionSource('liveTxTableSignature')}\n${extractFunctionSource('updateLiveTxKpi')}\n${extractFunctionSource('bindLiveTxRowListeners')}\n${extractFunctionSource('bindArchiveRowListeners')}\n${extractFunctionSource('captureLiveTxSnapshot')}\n${extractFunctionSource('restoreLiveTxSnapshot')}\n${extractFunctionSource('reportLiveTxRenderError')}\n${extractFunctionSource('reportLiveTxRestoreError')}\n${asyncLoaderSrc}\n${extractFunctionSource('refreshLiveTxTable')}\nreturn { loadLiveTxTable, refreshLiveTxTable, updateLiveTxKpi, get lastLivePaymentSummary() { return lastLivePaymentSummary; } };`)
+    `let lastLiveTxSignature = null;\nlet lastLivePaymentSummary = '';\nlet hasSuccessfulLiveTxSnapshot = false;\nlet liveTxRequestSeq = 0;\nlet liveTxDisplayRepairRequired = false;\nlet liveTxRestoreFailedStep = null;\nlet liveTxRestoreFailedDetail = null;\nconst ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount'];\nconst boundLiveTxRows = new WeakSet();\nconst boundArchiveRows = new WeakSet();\nlet liveTxListenersNeedRebind = false;\nlet archiveListenersNeedRebind = false;\n${extractFunctionSource('liveProofProgress')}\n${extractFunctionSource('setLivePaymentStatus')}\n${extractFunctionSource('liveTxTableSignature')}\n${extractFunctionSource('updateLiveTxKpi')}\n${extractFunctionSource('bindLiveTxRowListeners')}\n${extractFunctionSource('bindArchiveRowListeners')}\n${extractFunctionSource('captureLiveTxSnapshot')}\n${extractFunctionSource('restoreLiveTxSnapshot')}\n${extractFunctionSource('reportLiveTxRenderError')}\n${extractFunctionSource('reportLiveTxRestoreError')}\n${asyncLoaderSrc}\n${extractFunctionSource('refreshLiveTxTable')}\nreturn { loadLiveTxTable, refreshLiveTxTable, updateLiveTxKpi, get lastLivePaymentSummary() { return lastLivePaymentSummary; } };`)
     (documentStub, opts.fetchImpl ?? fetchStub, (p: string) => p, buildStub, () => {}, { hash: '' }) as unknown as {
       loadLiveTxTable: (isRefresh?: boolean) => Promise<void>;
       refreshLiveTxTable: () => Promise<void> | void;
@@ -253,6 +271,7 @@ function makeRealRendererHarness(opts: { failFirstTableRender?: boolean } = {}) 
     'escapeHtml', 'liveProofProgress', 'liveRowStateBadge', 'shortAddr',
     'formatMicroCcd', 'formatBlockTimeWib', 'formatLiveBlock',
     'formatLiveAmount', 'formatLiveFee', 'formatLiveTxTime',
+    'formatLiveNetwork', 'formatLiveEnergy',
     'renderLiveProofProgress', 'ccdscanTxUrl', 'buildLiveTxTableHTML',
   ].map(extractFunctionSource);
   const loaderSrc = extractFunctionSource('loadLiveTxTable');
@@ -265,7 +284,7 @@ function makeRealRendererHarness(opts: { failFirstTableRender?: boolean } = {}) 
     'let liveTxDisplayRepairRequired = false;',
     'let liveTxRestoreFailedStep = null;',
     'let liveTxRestoreFailedDetail = null;',
-    "const ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount', 'tx-podium-grid', 'tx-block-ribbon'];",
+    "const ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount'];",
     'const boundLiveTxRows = new WeakSet();',
     'const boundArchiveRows = new WeakSet();',
     'let liveTxListenersNeedRebind = false;',
@@ -284,8 +303,8 @@ function makeRealRendererHarness(opts: { failFirstTableRender?: boolean } = {}) 
     extractFunctionSource('refreshLiveTxTable'),
     'return { loadLiveTxTable, refreshLiveTxTable, updateLiveTxKpi, formatLiveTxTime, buildLiveTxTableHTML };',
   ];
-  const harness = new Function('document', 'fetch', 'apiUrl', 'applyArchiveDedup', 'location', parts.join('\n'))
-    (documentStub, fetchStub, (p: string) => p, () => {}, { hash: '' }) as unknown as {
+  const harness = new Function('document', 'fetch', 'apiUrl', 'applyArchiveDedup', 'location', 'TESTNET_NETWORK_LABELS', parts.join('\n'))
+    (documentStub, fetchStub, (p: string) => p, () => {}, { hash: '' }, TESTNET_NETWORK_LABELS) as unknown as {
       loadLiveTxTable: (isRefresh?: boolean) => Promise<void>;
       refreshLiveTxTable: () => Promise<void> | void;
       updateLiveTxKpi: (payments: unknown[]) => void;
@@ -399,6 +418,7 @@ function makeAtomicHarness() {
     'escapeHtml', 'liveProofProgress', 'liveRowStateBadge', 'shortAddr',
     'formatMicroCcd', 'formatBlockTimeWib', 'formatLiveBlock',
     'formatLiveAmount', 'formatLiveFee', 'formatLiveTxTime',
+    'formatLiveNetwork', 'formatLiveEnergy',
     'renderLiveProofProgress', 'ccdscanTxUrl', 'buildLiveTxTableHTML',
   ].map(extractFunctionSource);
   const loaderSrc = extractFunctionSource('loadLiveTxTable');
@@ -411,7 +431,7 @@ function makeAtomicHarness() {
     'let liveTxDisplayRepairRequired = false;',
     'let liveTxRestoreFailedStep = null;',
     'let liveTxRestoreFailedDetail = null;',
-    "const ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount', 'tx-podium-grid', 'tx-block-ribbon'];",
+    "const ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount'];",
     'const boundLiveTxRows = new WeakSet();',
     'const boundArchiveRows = new WeakSet();',
     'let liveTxListenersNeedRebind = false;',
@@ -432,8 +452,8 @@ function makeAtomicHarness() {
     extractFunctionSource('refreshLiveTxTable'),
     'return { loadLiveTxTable, refreshLiveTxTable, updateLiveTxKpi, get lastLiveTxSignature() { return lastLiveTxSignature; }, get hasSuccessfulLiveTxSnapshot() { return hasSuccessfulLiveTxSnapshot; }, get lastLivePaymentSummary() { return lastLivePaymentSummary; }, get liveTxDisplayRepairRequired() { return liveTxDisplayRepairRequired; }, get liveTxRestoreFailedStep() { return liveTxRestoreFailedStep; } };',
   ];
-  const harness = new Function('document', 'fetch', 'apiUrl', 'renderArchive', 'location', parts.join('\n'))
-    (documentStub, fetchStub, (p: string) => p, renderArchiveStub, { hash: '' }) as unknown as {
+  const harness = new Function('document', 'fetch', 'apiUrl', 'renderArchive', 'location', 'TESTNET_NETWORK_LABELS', parts.join('\n'))
+    (documentStub, fetchStub, (p: string) => p, renderArchiveStub, { hash: '' }, TESTNET_NETWORK_LABELS) as unknown as {
       loadLiveTxTable: (isRefresh?: boolean) => Promise<void>;
       refreshLiveTxTable: () => Promise<void> | void;
       updateLiveTxKpi: (payments: unknown[]) => void;
@@ -467,8 +487,8 @@ function makeAtomicHarness() {
   };
 }
 
-// The five archive surfaces renderArchive() mutates, in render order.
-const ARCHIVE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount', 'tx-podium-grid', 'tx-block-ribbon'] as const;
+// The three archive surfaces renderArchive() mutates, in render order.
+const ARCHIVE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount'] as const;
 
 type FullRowStub = {
   dataset: { txHash: string };
@@ -478,8 +498,8 @@ type FullRowStub = {
 };
 
 // Full-atomic harness (PM-01 follow-up): the REAL production archive
-// renderer (renderArchive + its three builders + bindArchiveRowListeners)
-// and all five real archive surfaces, so a late archive failure is a
+// renderer (renderArchive + buildTxTableHTML + bindArchiveRowListeners)
+// and all three real archive surfaces, so a late archive failure is a
 // failure of production code after real DOM mutation — not a stub that
 // throws before mutating. Archive rows carry the full field set the
 // builders render. Failure injection is per-surface and per-operation:
@@ -660,9 +680,10 @@ function makeFullAtomicHarness(opts: { fetchImpl?: FetchLike } = {}) {
     'escapeHtml', 'liveProofProgress', 'liveRowStateBadge', 'shortAddr',
     'formatMicroCcd', 'formatBlockTimeWib', 'formatLiveBlock',
     'formatLiveAmount', 'formatLiveFee', 'formatLiveTxTime',
+    'formatLiveNetwork', 'formatLiveEnergy',
     'renderLiveProofProgress', 'ccdscanTxUrl', 'buildLiveTxTableHTML',
   ].map(extractFunctionSource);
-  const archiveFns = ['buildTxTableHTML', 'buildPodiumHTML', 'buildRibbonHTML'].map(extractFunctionSource);
+  const archiveFns = ['buildTxTableHTML'].map(extractFunctionSource);
   const loaderSrc = extractFunctionSource('loadLiveTxTable');
   const asyncLoaderSrc = loaderSrc.startsWith('async ') ? loaderSrc : `async ${loaderSrc}`;
   const parts = [
@@ -673,7 +694,7 @@ function makeFullAtomicHarness(opts: { fetchImpl?: FetchLike } = {}) {
     'let liveTxDisplayRepairRequired = false;',
     'let liveTxRestoreFailedStep = null;',
     'let liveTxRestoreFailedDetail = null;',
-    "const ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount', 'tx-podium-grid', 'tx-block-ribbon'];",
+    "const ARCHIVE_SURFACE_IDS = ['dashboard-tx-table-mount', 'transactions-page-table-mount', 'wallet-tx-table-mount'];",
     'const boundLiveTxRows = new WeakSet();',
     'const boundArchiveRows = new WeakSet();',
     'let liveTxListenersNeedRebind = false;',
@@ -694,17 +715,15 @@ function makeFullAtomicHarness(opts: { fetchImpl?: FetchLike } = {}) {
     extractFunctionSource('reportLiveTxRestoreError'),
     asyncLoaderSrc,
     extractFunctionSource('refreshLiveTxTable'),
-    'return { loadLiveTxTable, refreshLiveTxTable, updateLiveTxKpi, buildLiveTxTableHTML, buildTxTableHTML, buildPodiumHTML, buildRibbonHTML, get lastLiveTxSignature() { return lastLiveTxSignature; }, get hasSuccessfulLiveTxSnapshot() { return hasSuccessfulLiveTxSnapshot; }, get lastLivePaymentSummary() { return lastLivePaymentSummary; }, get liveTxDisplayRepairRequired() { return liveTxDisplayRepairRequired; }, get liveTxRestoreFailedStep() { return liveTxRestoreFailedStep; }, get liveTxRestoreFailedDetail() { return liveTxRestoreFailedDetail; } };',
+    'return { loadLiveTxTable, refreshLiveTxTable, updateLiveTxKpi, buildLiveTxTableHTML, buildTxTableHTML, get lastLiveTxSignature() { return lastLiveTxSignature; }, get hasSuccessfulLiveTxSnapshot() { return hasSuccessfulLiveTxSnapshot; }, get lastLivePaymentSummary() { return lastLivePaymentSummary; }, get liveTxDisplayRepairRequired() { return liveTxDisplayRepairRequired; }, get liveTxRestoreFailedStep() { return liveTxRestoreFailedStep; }, get liveTxRestoreFailedDetail() { return liveTxRestoreFailedDetail; } };',
   ];
-  const harness = new Function('document', 'fetch', 'apiUrl', 'location', parts.join('\n'))
-    (documentStub, opts.fetchImpl ?? fetchStub, (p: string) => p, { hash: '' }) as unknown as {
+  const harness = new Function('document', 'fetch', 'apiUrl', 'location', 'TESTNET_NETWORK_LABELS', parts.join('\n'))
+    (documentStub, opts.fetchImpl ?? fetchStub, (p: string) => p, { hash: '' }, TESTNET_NETWORK_LABELS) as unknown as {
       loadLiveTxTable: (isRefresh?: boolean) => Promise<void>;
       refreshLiveTxTable: () => Promise<void> | void;
       updateLiveTxKpi: (payments: unknown[]) => void;
       buildLiveTxTableHTML: (payments: unknown[]) => string;
       buildTxTableHTML: (rows: unknown[]) => string;
-      buildPodiumHTML: (rows: unknown[]) => string;
-      buildRibbonHTML: (rows: unknown[]) => string;
       readonly lastLiveTxSignature: string | null;
       readonly hasSuccessfulLiveTxSnapshot: boolean;
       readonly lastLivePaymentSummary: string;
@@ -843,18 +862,27 @@ test('12. KPI and table always use the same record set', async () => {
 // ── Sol v3 regressions: the payment summary counts ───────────────────────────
 
 test('13. summary separates total records, stored finalized, finalized-with-evidence, and outcome_unknown', async () => {
-  const h = makeHarness();
+  // Real production renderer: the stored-vs-evidence distinction Sol
+  // keeps is at row level (badges), not in the summary — the Sol §6
+  // summary counts returned records, evidence-backed finalized, and
+  // unknown outcomes only. The "Stored Finalized" KPI card (loadRealStats)
+  // still displays the stored count separately (asserted in test 17).
+  const h = makeRealRendererHarness();
   const five = ['a', 'b', 'c', 'd'].map((c, i) => payEv(c.repeat(64), 'finalized', 1000 + i));
   five.push(pay('e'.repeat(64), 'outcome_unknown', 1004));
   h.setPayload({ payments: five });
   await h.harness.loadLiveTxTable();
   eq(h.kpi.textContent, '5', 'KPI counts all 5 records');
   eq(h.rows(), 5, 'table has 5 rows');
-  ok(h.summary.textContent.includes('5 total payment records'), 'summary states the total');
-  ok(h.summary.textContent.includes('4 stored finalized'), 'summary counts stored finalized separately');
+  ok(h.summary.textContent.includes('5 returned records'), 'summary states the total');
   ok(h.summary.textContent.includes('4 finalized with evidence'), 'summary counts evidence-backed finalized separately');
-  ok(h.summary.textContent.includes('1 outcome_unknown (not finalized)'), 'summary counts outcome_unknown separately');
+  ok(h.summary.textContent.includes('1 unknown outcomes'), 'summary counts outcome_unknown separately');
   notOk(h.summary.textContent.includes('5 finalized'), 'summary never claims all 5 are finalized');
+  // The stored-vs-evidence distinction survives at row level: the 4
+  // evidenced rows show the Finalized badge, the outcome_unknown row
+  // shows the unknown badge — never conflated.
+  eq((h.mount.innerHTML.match(/>Finalized</g) || []).length, 4, 'each evidenced finalized row shows the Finalized badge');
+  ok(h.mount.innerHTML.includes('Outcome unknown · not finalized'), 'the outcome_unknown row shows the unknown badge');
 });
 
 test('14. a malformed row rejects the whole list, never a silent partial count', async () => {
@@ -906,7 +934,10 @@ test('16. network failure labels the summary ERROR, then STALE on refresh', asyn
 });
 
 test('17. summary counts stored finalized and evidence-backed finalized separately (audit B2 regression)', async () => {
-  const h = makeHarness();
+  // Real production renderer: Sol §6 keeps the stored-vs-evidence
+  // distinction at row level (badges) and in the "Stored Finalized"
+  // KPI card; the summary counts evidence-backed finalized only.
+  const h = makeRealRendererHarness();
   // 2 stored-finalized records, only 1 with valid evidence, plus 1 outcome_unknown.
   const evidenced = payEv('a'.repeat(64), 'finalized', 1000);
   const storedOnly = pay('b'.repeat(64), 'finalized', 1001); // stored finalized, no verification at all
@@ -915,23 +946,33 @@ test('17. summary counts stored finalized and evidence-backed finalized separate
   await h.harness.loadLiveTxTable();
   eq(h.kpi.textContent, '3', 'KPI counts all 3 records');
   eq(h.rows(), 3, 'table has 3 rows');
-  ok(h.summary.textContent.includes('3 total payment records'), 'summary states the total');
-  ok(h.summary.textContent.includes('2 stored finalized'), 'summary counts stored finalized separately');
+  ok(h.summary.textContent.includes('3 returned records'), 'summary states the total');
   ok(h.summary.textContent.includes('1 finalized with evidence'), 'summary counts evidence-backed finalized separately');
-  ok(h.summary.textContent.includes('1 outcome_unknown (not finalized)'), 'summary counts outcome_unknown separately');
+  ok(h.summary.textContent.includes('1 unknown outcomes'), 'summary counts outcome_unknown separately');
   notOk(h.summary.textContent.includes('2 finalized with evidence'), 'stored finality is never presented as evidence-backed');
+  // Row level: the evidenced row is Finalized, the stored-only row is
+  // "Stored as finalized" — the distinction is visible, not conflated.
+  eq((h.mount.innerHTML.match(/>Finalized</g) || []).length, 1, 'the evidenced row shows the Finalized badge');
+  eq((h.mount.innerHTML.match(/>Stored as finalized</g) || []).length, 1, 'the stored-only row shows the Stored as finalized badge');
+  // The stored count is still displayed separately as the dashboard's
+  // "Stored Finalized" KPI card, counted from stored state (not evidence).
+  ok(extractFunctionSource('loadRealStats').includes("realStatsCardHTML('Stored Finalized', finalized"), 'the dashboard still counts stored finalized separately from the evidence-backed summary count');
 });
 
 test('18. a whitespace-only evidence source is not counted as evidence-backed finalized (audit B1 regression)', async () => {
-  const h = makeHarness();
+  // Real production renderer: the whitespace-source row must show the
+  // "Stored as finalized" badge (stored state) and never the Finalized
+  // badge or an evidence-backed count.
+  const h = makeRealRendererHarness();
   const blank = { ...payEv('a'.repeat(64), 'finalized', 1000), verification: { ...evidence, source: '   ' } };
   const valid = payEv('b'.repeat(64), 'finalized', 1001);
   h.setPayload({ payments: [blank, valid] });
   await h.harness.loadLiveTxTable();
   eq(h.kpi.textContent, '2', 'KPI still counts both records in the total');
-  ok(h.summary.textContent.includes('2 stored finalized'), 'whitespace-source record still counts as stored finalized');
   ok(h.summary.textContent.includes('1 finalized with evidence'), 'whitespace-source record contributes zero to the evidence-backed count');
   notOk(h.summary.textContent.includes('2 finalized with evidence'), 'whitespace source is never counted as evidence');
+  eq((h.mount.innerHTML.match(/>Finalized</g) || []).length, 1, 'only the valid row shows the Finalized badge');
+  eq((h.mount.innerHTML.match(/>Stored as finalized</g) || []).length, 1, 'the whitespace-source row still counts as stored finalized');
 });
 
 test('19. a null record does not throw the KPI updater and counts stay correct (re-audit latent null dereference)', () => {
@@ -943,10 +984,10 @@ test('19. a null record does not throw the KPI updater and counts stay correct (
   // element (which only a status publication updates).
   h.harness.updateLiveTxKpi([null]);
   eq(h.kpi.textContent, '1', 'KPI total follows the current behaviour (payments.length)');
-  ok(h.harness.lastLivePaymentSummary.includes('1 total payment records'), 'summary states the total');
-  ok(h.harness.lastLivePaymentSummary.includes('0 stored finalized'), 'null is not stored finalized');
+  ok(h.harness.lastLivePaymentSummary.includes('1 returned records'), 'summary states the total');
   ok(h.harness.lastLivePaymentSummary.includes('0 finalized with evidence'), 'null is not evidence-backed finalized');
-  ok(h.harness.lastLivePaymentSummary.includes('0 outcome_unknown (not finalized)'), 'null is not outcome_unknown');
+  ok(h.harness.lastLivePaymentSummary.includes('0 unknown outcomes'), 'null is not outcome_unknown');
+  notOk(h.harness.lastLivePaymentSummary.includes('1 finalized with evidence'), 'null is never counted as evidence-backed');
 
   // Mixed input: null alongside one of each real record type.
   const h2 = makeHarness();
@@ -955,10 +996,10 @@ test('19. a null record does not throw the KPI updater and counts stay correct (
   const unknown = pay('c'.repeat(64), 'outcome_unknown', 1002);
   h2.harness.updateLiveTxKpi([null, evidenced, storedOnly, unknown]);
   eq(h2.kpi.textContent, '4', 'KPI counts all 4 entries');
-  ok(h2.harness.lastLivePaymentSummary.includes('4 total payment records'), 'summary states the total');
-  ok(h2.harness.lastLivePaymentSummary.includes('2 stored finalized'), 'stored-finalized count stays correct with a null present');
+  ok(h2.harness.lastLivePaymentSummary.includes('4 returned records'), 'summary states the total');
   ok(h2.harness.lastLivePaymentSummary.includes('1 finalized with evidence'), 'evidence-backed count stays correct with a null present');
-  ok(h2.harness.lastLivePaymentSummary.includes('1 outcome_unknown (not finalized)'), 'outcome-unknown count stays correct with a null present');
+  ok(h2.harness.lastLivePaymentSummary.includes('1 unknown outcomes'), 'outcome-unknown count stays correct with a null present');
+  notOk(h2.harness.lastLivePaymentSummary.includes('2 finalized with evidence'), 'the stored-only row is never counted as evidence-backed');
 });
 
 // ── INT-01/INT-02/INT-03 regressions (Sol integration audit 7307515) ───────
@@ -976,31 +1017,33 @@ test('20. a failed initial load followed by a successful empty refresh renders t
   ok(h.mount.innerHTML.includes('No live settlements recorded yet'), 'empty state renders');
   notOk(h.mount.innerHTML.includes('Live settlements unavailable'), 'the previous error message is gone');
   ok(h.summary.textContent.includes('EMPTY'), 'summary reports the empty response');
-  ok(h.summary.textContent.includes('0 total payment records'), 'summary states the empty total');
+  ok(h.summary.textContent.includes('0 returned records'), 'summary states the empty total');
 });
 
-test('21. a finite out-of-range timestamp renders "not available" and the loader recovers (INT-02 regression)', async () => {
+test('21. a finite out-of-range timestamp formats as "not available" and the loader recovers (INT-02 regression)', async () => {
   // Real production renderer: the stubbed rows in makeHarness cannot
-  // exercise formatLiveTxTime or buildLiveTxTableHTML at all.
+  // exercise formatLiveTxTime or buildLiveTxTableHTML at all. Sol §6
+  // removed the Time column from the table — the time is shown in the
+  // receipt inspector — so the formatter is asserted directly here.
   const h = makeRealRendererHarness();
   const bad = pay('a'.repeat(64), 'finalized', 1e20);
   h.setPayload({ payments: [bad] });
   await h.harness.loadLiveTxTable();
   eq(h.kpi.textContent, '1', 'KPI is 1');
   eq(h.rows(), 1, 'table has 1 row');
-  ok(h.mount.innerHTML.includes('not available'), 'the out-of-range timestamp renders as not available');
+  eq(h.harness.formatLiveTxTime(1e20), 'not available', 'the out-of-range timestamp formats as not available');
   // The loader publishes its 'API response received' status only after
   // the complete render commits (PM-01-R1), so that is the
   // successful-render marker.
   ok(h.summary.textContent.includes('API response received'), 'the response is presented as successfully rendered');
-  ok(h.summary.textContent.includes('1 total payment records'), 'the summary describes the rendered record');
+  ok(h.summary.textContent.includes('1 returned records'), 'the summary describes the rendered record');
   // A valid payload then re-renders normally through the same loader.
   const good = pay('a'.repeat(64), 'finalized', 1000);
   h.setPayload({ payments: [good] });
   await h.harness.refreshLiveTxTable();
   eq(h.kpi.textContent, '1', 'KPI is still 1 after the valid refresh');
   eq(h.rows(), 1, 'table still has 1 row');
-  ok(h.mount.innerHTML.includes('WIB'), 'the valid timestamp renders a real WIB time');
+  ok(h.harness.formatLiveTxTime(1000).includes('WIB'), 'the valid timestamp formats as a real WIB time');
 });
 
 test('22. a rendering failure does not commit the signature, so the next identical load recovers (INT-02 regression)', async () => {
@@ -1042,7 +1085,7 @@ test('23. an older response cannot overwrite a newer one (INT-03 regression)', a
   eq(h.kpi.textContent, '6', 'the older response did not change the KPI');
   eq(h.rows(), 6, 'the older response did not change the table');
   eq(h.mount.innerHTML, shown, 'the older response did not re-render the table');
-  ok(h.summary.textContent.includes('6 total payment records'), 'the summary still describes the newer response');
+  ok(h.summary.textContent.includes('6 returned records'), 'the summary still describes the newer response');
 });
 
 test('24. an older failure cannot mark newer successful data stale (INT-03 regression)', async () => {
@@ -1125,7 +1168,7 @@ test('26. an identical response retries after a late failure and applies cleanly
   eq(h.rows(), 6, 'table has 6 rows from B');
   ok(h.mount.innerHTML.includes(h.digestB), 'the B row is displayed');
   notOk(h.harness.lastLiveTxSignature === sigA, 'signature B is committed after success');
-  ok(h.summary.textContent.includes('6 total payment records'), 'summary describes B');
+  ok(h.summary.textContent.includes('6 returned records'), 'summary describes B');
   notOk(h.summary.textContent.includes('RENDER ERROR'), 'no render error remains');
   eq(h.dedupCalls().length, 3, 'dedup ran for A, the failed B, and the retry');
 });
@@ -1148,7 +1191,7 @@ test('27. returning to the prior payload after B renders A, not a stale-signatur
   eq(h.mount.innerHTML, htmlA, 'the table shows A again');
   eq(h.kpi.textContent, '5', 'KPI is 5 again');
   eq(h.harness.lastLiveTxSignature, sigA, 'the signature is A again');
-  ok(h.summary.textContent.includes('5 total payment records'), 'summary describes A');
+  ok(h.summary.textContent.includes('5 returned records'), 'summary describes A');
 });
 
 test('28. a failed first-ever empty render commits no success state, and the retry applies it (PM-01 Test D)', async () => {
@@ -1229,7 +1272,7 @@ test('30. a late failure at listener registration restores the prior snapshot (P
 // ── PM-01 follow-up: complete atomic payment-surface rollback ──────────
 // (Sol re-audit 7307662: archive mutations survived a failed snapshot
 // application). These tests run the REAL production archive renderer
-// against all five real archive surfaces, with failure injected at a
+// against all three real archive surfaces, with failure injected at a
 // later real archive mutation boundary — after earlier surfaces mutated.
 
 test('31. a late failure inside the real archive renderer restores every live and archive surface to A (PM-01 follow-up Test A)', async () => {
@@ -1249,10 +1292,8 @@ test('31. a late failure inside the real archive renderer restores every live an
     h.harness.buildTxTableHTML(keptA),
     h.harness.buildTxTableHTML(keptA),
     h.harness.buildTxTableHTML(keptA),
-    h.harness.buildPodiumHTML(keptA),
-    h.harness.buildRibbonHTML(keptA),
   ].join('\n');
-  eq(h.archiveHtml(), expectedArchiveA, 'all five archive surfaces show the A-filtered archive');
+  eq(h.archiveHtml(), expectedArchiveA, 'all three archive surfaces show the A-filtered archive');
   // B: the real renderer mutates the first two archive surfaces for B
   // ([z] only) and then throws at the third (wallet) surface.
   const payloadB = [pay(h.digestB, 'finalized', 2000), ...base5()];
@@ -1298,11 +1339,9 @@ test('32. an identical response retries after a partial archive failure and appl
     h.harness.buildTxTableHTML(keptB),
     h.harness.buildTxTableHTML(keptB),
     h.harness.buildTxTableHTML(keptB),
-    h.harness.buildPodiumHTML(keptB),
-    h.harness.buildRibbonHTML(keptB),
   ].join('\n');
-  eq(h.archiveHtml(), expectedArchiveB, 'all five archive surfaces consistently show the B-filtered archive');
-  ok(h.summary.textContent.includes('6 total payment records'), 'summary describes B');
+  eq(h.archiveHtml(), expectedArchiveB, 'all three archive surfaces consistently show the B-filtered archive');
+  ok(h.summary.textContent.includes('6 returned records'), 'summary describes B');
   notOk(h.summary.textContent.includes('RENDER ERROR'), 'no render error remains');
   for (const p of payloadB) eq(h.liveRowHandlers(p.paymentDigest), 1, 'each B row was bound exactly once');
 });
@@ -1329,7 +1368,7 @@ test('33. returning to the prior payload after B renders A on every surface, not
   eq(h.kpi.textContent, '5', 'KPI is 5 again');
   eq(h.harness.lastLiveTxSignature, sigA, 'the signature is A again');
   ok(h.mount.sets > setsA, 'the return to A re-rendered the table instead of skipping');
-  ok(h.summary.textContent.includes('5 total payment records'), 'summary describes A');
+  ok(h.summary.textContent.includes('5 returned records'), 'summary describes A');
 });
 
 test('34. a failure inside the restoration itself is reported as RESTORE FAILED, never as a retained snapshot (PM-01 follow-up Test D)', async () => {
@@ -1367,8 +1406,8 @@ test('34. a failure inside the restoration itself is reported as RESTORE FAILED,
   notOk(h.harness.lastLiveTxSignature === sigA, 'signature B is committed after recovery');
   notOk(h.summary.textContent.includes('RESTORE FAILED'), 'no restore failure remains after recovery');
   // Part 2: an archive-surface restoration fails. B renders, the archive
-  // renderer throws at the last surface (ribbon) after mutating the
-  // first four, and the restore's dashboard assignment throws on the
+  // renderer throws at the last surface (wallet) after mutating the
+  // first two, and the restore's dashboard assignment throws on the
   // previous A content — so the dashboard keeps the B archive while the
   // other surfaces return to A.
   h.setPayload({ payments: payloadA });
@@ -1376,7 +1415,7 @@ test('34. a failure inside the restoration itself is reported as RESTORE FAILED,
   eq(h.harness.lastLiveTxSignature, sigA, 'signature is A again before part 2');
   const dashboardA = h.archiveMounts[0].innerHTML;
   h.setPayload({ payments: payloadB });
-  h.setArchiveFailsAt(4);
+  h.setArchiveFailsAt(2);
   h.setArchiveRestoreFails(dashboardA);
   await h.harness.refreshLiveTxTable();
   ok(h.summary.textContent.includes('RESTORE FAILED'), 'the archive rollback failure is reported distinctly');
@@ -1544,8 +1583,6 @@ const fullArchiveHtml = (h: ReturnType<typeof makeFullAtomicHarness>) => [
   h.harness.buildTxTableHTML(h.archiveRows),
   h.harness.buildTxTableHTML(h.archiveRows),
   h.harness.buildTxTableHTML(h.archiveRows),
-  h.harness.buildPodiumHTML(h.archiveRows),
-  h.harness.buildRibbonHTML(h.archiveRows),
 ].join('\n');
 
 test('38. a failed rollback followed by an identical-A response forces a full content repair, not the unchanged shortcut (PM-01 repair Test 1)', async () => {
@@ -1581,12 +1618,12 @@ test('39. a failed rollback followed by an empty response performs a complete em
   eq(h.harness.lastLiveTxSignature, sigA, 'no signature is committed by the failed empty rendering');
   ok(h.mount.innerHTML.includes(h.digestB), 'the live table still shows the B row');
   // Part 2: the empty rendering succeeds — live empty state, KPI 0, and
-  // all five archive surfaces rebuilt to the full archive.
+  // all three archive surfaces rebuilt to the full archive.
   h.setEmptyRenderFails(false);
   await h.harness.refreshLiveTxTable();
   ok(h.mount.innerHTML.includes('No live settlements recorded yet'), 'the empty state renders');
   eq(h.kpi.textContent, '0', 'KPI is 0');
-  eq(h.archiveHtml(), fullArchiveHtml(h), 'all five archive surfaces were rebuilt to the full archive');
+  eq(h.archiveHtml(), fullArchiveHtml(h), 'all three archive surfaces were rebuilt to the full archive');
   ok(!h.harness.liveTxDisplayRepairRequired, 'repair state cleared after the complete empty rendering');
   eq(h.harness.liveTxRestoreFailedStep, null, 'the failed-step diagnostic is cleared');
   eq(h.harness.lastLiveTxSignature, null, 'no payload signature describes the empty display');
@@ -1635,8 +1672,6 @@ test('41. a successful repair makes every surface consistent and clears the warn
   eq(h.archiveMounts[0].innerHTML, h.harness.buildTxTableHTML([h.archiveRows[2]]), 'the dashboard archive shows the B-filtered rows');
   eq(h.archiveMounts[1].innerHTML, h.harness.buildTxTableHTML([h.archiveRows[2]]), 'the transactions-page archive shows the B-filtered rows');
   eq(h.archiveMounts[2].innerHTML, h.harness.buildTxTableHTML([h.archiveRows[2]]), 'the wallet archive shows the B-filtered rows');
-  eq(h.archiveMounts[3].innerHTML, h.harness.buildPodiumHTML([h.archiveRows[2]]), 'the podium shows the B-filtered rows');
-  eq(h.archiveMounts[4].innerHTML, h.harness.buildRibbonHTML([h.archiveRows[2]]), 'the ribbon shows the B-filtered rows');
   // PM-01-R1: the success status is the last status write, published
   // only after the complete repair — the exact summary proves it.
   eq(h.summary.textContent, h.harness.lastLivePaymentSummary + ' API response received. Counts describe the displayed list, not an all-time total. Read-only: no payment is made by this page.', 'the success status is published after the completed repair');
@@ -1648,7 +1683,7 @@ test('41. a successful repair makes every surface consistent and clears the warn
   ok(h.mount.sets > liveSetsBefore, 'the repair assigned the live table');
 });
 
-test('42. a no-overlap repair rebuilds all five archive surfaces (PM-01 repair Test 5)', async () => {
+test('42. a no-overlap repair rebuilds all three archive surfaces (PM-01 repair Test 5)', async () => {
   const h = makeFullAtomicHarness();
   const { payloadA, htmlA, archiveA, sigA } = await setupMixedDisplay(h);
   // A payload whose hashes match no archive row: dedup keeps the full
@@ -1662,7 +1697,7 @@ test('42. a no-overlap repair rebuilds all five archive surfaces (PM-01 repair T
   eq(h.kpi.textContent, '2', 'KPI is 2 after the no-overlap repair');
   eq(h.rows(), 2, 'table has 2 rows');
   h.archiveMounts.forEach((m, i) => ok(m.sets > archiveSetsBefore[i], 'archive surface ' + i + ' was rebuilt'));
-  eq(h.archiveHtml(), fullArchiveHtml(h), 'all five archive surfaces show the full archive');
+  eq(h.archiveHtml(), fullArchiveHtml(h), 'all three archive surfaces show the full archive');
   ok(!h.harness.liveTxDisplayRepairRequired, 'the display is consistent after the no-overlap repair');
   notOk(h.harness.lastLiveTxSignature === sigA, 'the new signature is committed');
 });
@@ -1674,7 +1709,7 @@ test('43. failed attempts never commit their payload signature, at any mutation 
   // Boundary 2: a failed repair attempt while repair is required — the
   // render fails late again and the rollback restores the mixed capture.
   h.setPayload({ payments: payloadB });
-  h.setArchiveFailsAt(4);
+  h.setArchiveFailsAt(2);
   await h.harness.refreshLiveTxTable();
   eq(h.harness.lastLiveTxSignature, sigA, 'signature A after the failed repair attempt');
   ok(h.harness.liveTxDisplayRepairRequired, 'repair still required');
@@ -1989,10 +2024,10 @@ test('51. an archive-listener failure publishes no intermediate success status, 
   h.setArchiveListenerFailsAt(null);
   await h.harness.refreshLiveTxTable();
   ok(!h.harness.liveTxDisplayRepairRequired, 'the display is consistent after the repair');
-  eq(h.archiveRowHandlersPerMount(h.digestOther).join(','), '1,1,1,1,1', 'every archive surface binds its row exactly once after repair');
+  eq(h.archiveRowHandlersPerMount(h.digestOther).join(','), '1,1,1', 'every archive surface binds its row exactly once after repair');
   // An unchanged-payload refresh after the repair does not duplicate handlers.
   await h.harness.refreshLiveTxTable();
-  eq(h.archiveRowHandlersPerMount(h.digestOther).join(','), '1,1,1,1,1', 'every archive surface still has exactly one handler after the unchanged refresh');
+  eq(h.archiveRowHandlersPerMount(h.digestOther).join(','), '1,1,1', 'every archive surface still has exactly one handler after the unchanged refresh');
 });
 
 test('52. a genuinely deferred response.json() cannot overwrite a newer accepted repair (PM-01-R1)', async () => {
@@ -2041,7 +2076,7 @@ test('52. a genuinely deferred response.json() cannot overwrite a newer accepted
       eq(a.live, b.live, label + ': live table unchanged');
       eq(a.kpi, b.kpi, label + ': KPI unchanged');
       eq(a.summary, b.summary, label + ': payment summary unchanged');
-      eq(a.archives.join('\n'), b.archives.join('\n'), label + ': all five archive surfaces unchanged');
+      eq(a.archives.join('\n'), b.archives.join('\n'), label + ': all three archive surfaces unchanged');
       eq(a.status, b.status, label + ': status unchanged');
       eq(a.signature, b.signature, label + ': signature unchanged');
       eq(a.repairRequired, b.repairRequired, label + ': repair-required unchanged');
@@ -2163,8 +2198,8 @@ test('53. a missing KPI mount on the first load fails the render without publish
   eq(h.kpi.textContent, '5', 'KPI is 5 after the load');
 });
 
-test('54. successful nonempty and empty repairs render exact content on all seven surfaces (PM-01-R1)', async () => {
-  // Nonempty repair: exact live table, KPI, summary, and all five
+test('54. successful nonempty and empty repairs render exact content on all six surfaces (PM-01-R1)', async () => {
+  // Nonempty repair: exact live table, KPI, summary, and all three
   // archive surfaces after a successful B repair.
   const h = makeFullAtomicHarness();
   const { payloadB, sigA } = await setupMixedDisplay(h);
@@ -2179,13 +2214,11 @@ test('54. successful nonempty and empty repairs render exact content on all seve
   eq(h.archiveMounts[0].innerHTML, h.harness.buildTxTableHTML([h.archiveRows[2]]), 'dashboard archive is exactly the B-filtered rows');
   eq(h.archiveMounts[1].innerHTML, h.harness.buildTxTableHTML([h.archiveRows[2]]), 'transactions-page archive is exactly the B-filtered rows');
   eq(h.archiveMounts[2].innerHTML, h.harness.buildTxTableHTML([h.archiveRows[2]]), 'wallet archive is exactly the B-filtered rows');
-  eq(h.archiveMounts[3].innerHTML, h.harness.buildPodiumHTML([h.archiveRows[2]]), 'podium is exactly the B-filtered rows');
-  eq(h.archiveMounts[4].innerHTML, h.harness.buildRibbonHTML([h.archiveRows[2]]), 'ribbon is exactly the B-filtered rows');
   ok(!h.harness.liveTxDisplayRepairRequired, 'the display is consistent after the repair');
   notOk(h.harness.lastLiveTxSignature === sigA, 'signature B is committed');
 
   // Empty repair: exact empty live state, KPI 0, EMPTY summary, and the
-  // full archive on all five surfaces.
+  // full archive on all three surfaces.
   const h2 = makeFullAtomicHarness();
   await setupMixedDisplay(h2);
   h2.setPayload({ payments: [] });
@@ -2196,9 +2229,176 @@ test('54. successful nonempty and empty repairs render exact content on all seve
   ok(h2.mount.innerHTML.includes('No live settlements recorded yet'), 'the live table is the exact empty state');
   eq(h2.kpi.textContent, '0', 'KPI is 0 after the empty repair');
   eq(h2.summary.textContent, h2.harness.lastLivePaymentSummary + ' EMPTY — API returned no payment records. Read-only: no payment is made by this page.', 'the summary is the exact EMPTY status');
-  eq(h2.archiveHtml(), fullArchiveHtml(h2), 'all five archive surfaces show the full archive');
+  eq(h2.archiveHtml(), fullArchiveHtml(h2), 'all three archive surfaces show the full archive');
   ok(!h2.harness.liveTxDisplayRepairRequired, 'the display is consistent after the empty repair');
   eq(h2.harness.lastLiveTxSignature, null, 'the empty repair invalidates the signature');
+});
+
+
+// ── Analytics summary: the loadRealStats harness ───────────────────────────
+// Runs the REAL loadRealStats (extracted verbatim) against a stubbed
+// apiJsonTimeout that serves the list AND the per-row detail records, so
+// the Analytics summary is exercised through the actual enrichment +
+// proof-gate path — the same path the Transactions summary uses. This is
+// the regression harness for the Analytics finality-count fix: before the
+// fix, loadRealStats labelled the stored-state count as "finalized with
+// evidence"; after it, the summary uses the proof-gated count.
+function makeLoadRealStatsHarness() {
+  const gridEl = () => ({
+    _html: '',
+    set innerHTML(v: string) { this._html = v; },
+    get innerHTML() { return this._html; },
+  });
+  const grids = { dashboard: gridEl(), analytics: gridEl() };
+  const summary = { textContent: '' };
+  const l4Count = { textContent: '' };
+  const l4Sub = { textContent: '' };
+  const verifiedTxs = { textContent: '' };
+  const documentStub = {
+    getElementById: (id: string) =>
+      (id === 'dashboard-stats-grid' ? grids.dashboard
+        : id === 'analytics-stats-grid' ? grids.analytics
+        : id === 'analytics-live-summary' ? summary
+        : id === 'dash-settlement-count' ? l4Count
+        : id === 'dash-settlement-sub' ? l4Sub
+        : id === 'dash-verified-txs' ? verifiedTxs : null),
+  };
+  let listRows: unknown[] = [];
+  const detailStub = new Map<string, { status: number; body: unknown } | Error>();
+  const stubApiJsonTimeout = async (path: string): Promise<{ status: number; body: unknown }> => {
+    if (path.startsWith('/api/payments?limit=')) return { status: 200, body: { payments: listRows } };
+    const id = decodeURIComponent(String(path).split('/').pop() || '');
+    const entry = detailStub.get(id);
+    if (entry instanceof Error) throw entry;
+    if (!entry) throw new Error('api_unreachable');
+    return entry;
+  };
+  // The harness body is assembled with array join, not a template literal:
+  // the extracted sources contain backticks and ${...}.
+  const parts = [
+    'const liveTxDetailCache = new Map();',
+    extractFunctionSource('escapeHtml'),
+    extractFunctionSource('errText'),
+    extractFunctionSource('isValidPaymentList'),
+    `async ${extractFunctionSource('fetchPaymentList')}`,
+    `async ${extractFunctionSource('enrichLiveTxRows')}`,
+    extractFunctionSource('liveProofProgress'),
+    extractFunctionSource('realStatsCardHTML'),
+    `async ${extractFunctionSource('loadRealStats')}`,
+    'return { loadRealStats };',
+  ];
+  const harness = new Function('document', 'apiJsonTimeout', parts.join('\n'))(documentStub, stubApiJsonTimeout) as unknown as {
+    loadRealStats: () => Promise<void>;
+  };
+  return {
+    harness, summary, l4Count, l4Sub, verifiedTxs, grids,
+    setList: (rows: unknown[]) => { listRows = rows; },
+    setDetail: (digest: string, body: unknown) => { detailStub.set(digest, { status: 200, body }); },
+    setDetailError: (digest: string, err: Error) => { detailStub.set(digest, err); },
+  };
+}
+
+// Detail record for a digest, as GET /api/payments/:id returns it.
+// `verification: null` means the detail carries no evidence (stored-only
+// row). `over` adjusts state/finalized for the outcome_unknown case.
+const detailFor = (digest: string, verification: unknown, over: Record<string, unknown> = {}) => ({
+  paymentDigest: digest,
+  state: 'finalized',
+  finalized: true,
+  transactionHash: digest,
+  verification,
+  ...over,
+});
+
+test('55. Analytics summary counts evidence-backed finalized, never stored-only (finality-count fix)', async () => {
+  const h = makeLoadRealStatsHarness();
+  // 2 evidenced finalized, 1 stored-only finalized (detail carries no
+  // verification), 1 outcome_unknown — raw list rows, exactly as the API
+  // returns them; the enrichment step must supply the evidence.
+  const rows = [
+    pay('a'.repeat(64), 'finalized', 1000),
+    pay('b'.repeat(64), 'finalized', 1001),
+    pay('c'.repeat(64), 'finalized', 1002),
+    pay('d'.repeat(64), 'outcome_unknown', 1003),
+  ];
+  h.setList(rows);
+  h.setDetail('a'.repeat(64), detailFor('a'.repeat(64), { ...evidence }));
+  h.setDetail('b'.repeat(64), detailFor('b'.repeat(64), { ...evidence }));
+  h.setDetail('c'.repeat(64), detailFor('c'.repeat(64), null));
+  h.setDetail('d'.repeat(64), detailFor('d'.repeat(64), { ...evidence }));
+  await h.harness.loadRealStats();
+  eq(h.summary.textContent, '4 returned records · 2 finalized with evidence · 1 unknown outcomes. Counts apply to the returned list, not all-time activity.', 'Analytics summary counts evidence-backed finalized only');
+  notOk(h.summary.textContent.includes('3 finalized with evidence'), 'stored-only finalized is never presented as evidence-backed');
+  // The stored count is still shown separately, on the Stored Finalized
+  // KPI card — only the summary's evidence-backed label changed.
+  ok(h.grids.analytics.innerHTML.includes('Stored Finalized'), 'Stored Finalized card still rendered');
+  ok(h.grids.analytics.innerHTML.includes('<span class="stat-value">3</span>'), 'Stored Finalized card still counts stored state (3)');
+  // The dashboard L4 count is a plain stored count and is unchanged.
+  eq(h.l4Count.textContent, '3 finalized', 'L4 count still counts stored finalized');
+});
+
+test('56. Analytics summary never counts outcome_unknown with genuine chain evidence as finalized', async () => {
+  const h = makeLoadRealStatsHarness();
+  const rows = [
+    pay('a'.repeat(64), 'finalized', 1000),
+    pay('b'.repeat(64), 'outcome_unknown', 1001),
+  ];
+  h.setList(rows);
+  h.setDetail('a'.repeat(64), detailFor('a'.repeat(64), { ...evidence }));
+  h.setDetail('b'.repeat(64), detailFor('b'.repeat(64), { ...evidence }, { state: 'outcome_unknown', finalized: false }));
+  await h.harness.loadRealStats();
+  eq(h.summary.textContent, '2 returned records · 1 finalized with evidence · 1 unknown outcomes. Counts apply to the returned list, not all-time activity.', 'outcome_unknown with genuine evidence is not finalized');
+  notOk(h.summary.textContent.includes('2 finalized with evidence'), 'outcome_unknown is never counted as evidence-backed');
+});
+
+test('57. Analytics summary never counts an empty or whitespace evidence source as evidence-backed', async () => {
+  const h = makeLoadRealStatsHarness();
+  const rows = [
+    pay('a'.repeat(64), 'finalized', 1000),
+    pay('b'.repeat(64), 'finalized', 1001),
+    pay('c'.repeat(64), 'finalized', 1002),
+  ];
+  h.setList(rows);
+  h.setDetail('a'.repeat(64), detailFor('a'.repeat(64), { ...evidence }));
+  h.setDetail('b'.repeat(64), detailFor('b'.repeat(64), { ...evidence, source: '   ' }));
+  h.setDetail('c'.repeat(64), detailFor('c'.repeat(64), { ...evidence, source: '' }));
+  await h.harness.loadRealStats();
+  eq(h.summary.textContent, '3 returned records · 1 finalized with evidence · 0 unknown outcomes. Counts apply to the returned list, not all-time activity.', 'empty/whitespace source contributes zero to the evidence-backed count');
+  notOk(h.summary.textContent.includes('2 finalized with evidence'), 'whitespace source is never counted as evidence');
+  notOk(h.summary.textContent.includes('3 finalized with evidence'), 'empty source is never counted as evidence');
+});
+
+test('58. Analytics and Transactions agree on the evidence-backed count for the same data', async () => {
+  const h = makeLoadRealStatsHarness();
+  // Same mixed fixture as test 55: 2 evidenced, 1 stored-only, 1 unknown.
+  const rows = [
+    pay('a'.repeat(64), 'finalized', 1000),
+    pay('b'.repeat(64), 'finalized', 1001),
+    pay('c'.repeat(64), 'finalized', 1002),
+    pay('d'.repeat(64), 'outcome_unknown', 1003),
+  ];
+  h.setList(rows);
+  h.setDetail('a'.repeat(64), detailFor('a'.repeat(64), { ...evidence }));
+  h.setDetail('b'.repeat(64), detailFor('b'.repeat(64), { ...evidence }));
+  h.setDetail('c'.repeat(64), detailFor('c'.repeat(64), null));
+  h.setDetail('d'.repeat(64), detailFor('d'.repeat(64), { ...evidence }));
+  await h.harness.loadRealStats();
+  // loadRealStats enriched the rows in place; run the Transactions KPI
+  // updater on the very same enriched rows.
+  const h2 = makeHarness();
+  h2.harness.updateLiveTxKpi(rows);
+  eq(h.summary.textContent, h2.harness.lastLivePaymentSummary, 'Analytics and Transactions summaries agree exactly for the same data');
+  ok(h.summary.textContent.includes('2 finalized with evidence'), 'both count 2 evidence-backed');
+  ok(h2.harness.lastLivePaymentSummary.includes('2 finalized with evidence'), 'Transactions counts the same 2 evidence-backed');
+});
+
+test('59. loadRealStats enriches rows and counts evidence-backed finalized through the proof gate (finality-count fix guard)', () => {
+  const src = extractFunctionSource('loadRealStats');
+  ok(src.includes('enrichLiveTxRows(payments)'), 'stats loader enriches rows from the detail endpoint before counting evidence');
+  ok(src.includes('liveProofProgress(p).percent === 100'), 'stats summary uses the proof-gated count');
+  ok(src.includes("evidenceBackedFinalizedCount + ' finalized with evidence"), 'summary labels the proof-gated count as finalized with evidence');
+  notOk(src.includes("finalized + ' finalized with evidence"), 'summary never labels the stored-state count as evidence-backed');
+  ok(src.includes("realStatsCardHTML('Stored Finalized', finalized"), 'Stored Finalized card still counts stored state');
 });
 
 // ═══ runner ═════════════════════════════════════════════════════════════
