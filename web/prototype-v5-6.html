@@ -108,6 +108,25 @@
       --space-7: 48px;
       --space-8: 64px;
       --overlay-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+      /* --at-* beautify tokens (Sol spec v2 section D.2, light theme). */
+      --at-wash: radial-gradient(ellipse at 76% 0%, #E3EEFF, transparent 63%), linear-gradient(180deg, #F8FAFC, #F4F8FE);
+      --at-glass: linear-gradient(165deg, #FFFFFF, #F5F9FF);
+      --at-edge: #C4D7F0;
+      --at-specular: #FFFFFF;
+      --at-inset: #EDF4FD;
+      --at-lift: inset 0 1px 0 var(--at-specular), 0 4px 14px #1D4ED812;
+      --at-chrome: #F8FBFF;
+      --at-muted-ink: #475569;
+      --at-form-edge: #8095B1;
+      --at-table-head: #EAF2FD;
+      --at-table-line: #D5E2F3;
+      --at-table-hover: #EDF5FF;
+      --at-grid-line: #D5E2F3;
+      --at-button-glow: 0 0 12px #3B82F62E;
+      --at-selected-glow: 0 0 8px #3B82F629;
+      --at-nav-fill: #3B82F61A;
+      --at-nav-glow: inset 0 0 9px #3B82F61F;
+      --at-icon-glow: inset 0 1px 0 #93C5FD73, 0 0 8px #3B82F629;
     }
 
     [data-theme="dark"] {
@@ -147,6 +166,20 @@
       --warning-bg: #451A03;
       --danger: #FECACA;
       --danger-bg: #450A0A;
+      /* --at-* beautify tokens (Sol spec v2 section D.2, dark theme). */
+      --at-wash: radial-gradient(ellipse at 78% 0%, #142E5D, transparent 60%), linear-gradient(180deg, #091529, #060E1F);
+      --at-glass: linear-gradient(165deg, #142542, #0C172B);
+      --at-edge: #365681;
+      --at-specular: #5276A4;
+      --at-inset: #0B162A;
+      --at-lift: inset 0 1px 0 var(--at-specular), 0 6px 18px #0000003D;
+      --at-chrome: #0B172B;
+      --at-muted-ink: #CBD5E1;
+      --at-form-edge: #6885AE;
+      --at-table-head: #142542;
+      --at-table-line: #2C4464;
+      --at-table-hover: #152B49;
+      --at-grid-line: #2C4464;
     }
 
     * {
@@ -678,16 +711,6 @@
       border-color: var(--text-primary);
     }
 
-    .bell-dot {
-      position: absolute;
-      top: 9px;
-      right: 10px;
-      width: 6px;
-      height: 6px;
-      background: var(--accent-orange);
-      border-radius: 50%;
-    }
-
     .notify-popover-wrap {
       position: relative;
       display: inline-flex;
@@ -897,9 +920,16 @@
       gap: 9px;
     }
 
+    /* T1.9: hover is only a background tint — the border stays
+       transparent and there is no glow — so a hovered row can never
+       be mistaken for the active one (blue fill + blue border + glow,
+       D.3 rule 3, later in this sheet, wins for an active row: same
+       specificity, later in source order). */
     .nav-item a:hover, .nav-item button:hover {
       color: var(--text-primary);
       background: var(--bg-subtle);
+      border-left-color: transparent;
+      box-shadow: none;
     }
 
     /* vAPI Active Nav Item: Light-Gray Background + Orange Left Border */
@@ -1343,8 +1373,8 @@
       background: #F5F5F5;
     }
 
-    /* Daily Check-In Style Protocol Telemetry Card inside Blue Hero */
-    .daily-checkin-card {
+    /* On-Chain Proof Milestones card inside Blue Hero */
+    .proof-milestones-card {
       background: #FFFFFF;
       color: #111111;
       border-radius: var(--radius-md);
@@ -1356,33 +1386,28 @@
       border: 1px solid #E5E7EB;
     }
 
-    [data-theme="dark"] .daily-checkin-card {
+    [data-theme="dark"] .proof-milestones-card {
       background: #18181B;
       color: #FAFAFA;
       border-color: #27272A;
     }
 
-    .streak-pills {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
+    /* Plain milestone facts (T1.6): verifiable items only. */
+    .milestone-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
       gap: 6px;
-    }
-
-    .streak-pill {
-      padding: 7px 6px;
-      border-radius: var(--radius-xs);
-      background: var(--bg-subtle);
-      border: 1px solid var(--border-hairline);
-      text-align: center;
+      margin: 0;
+      padding: 0;
       font-family: var(--font-mono);
-      font-size: 10.5px;
+      font-size: 12px;
     }
 
-    .streak-pill.done {
-      border-color: #A3E635;
-      background: var(--accent-lime-bg);
-      color: var(--accent-lime-text);
-      font-weight: 700;
+    .milestone-list li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     /* Stats Row */
@@ -1764,6 +1789,23 @@
       height: 100%;
       overflow: visible;
     }
+
+    /* T1.3: chart empty state as a wrapped HTML overlay (not SVG <text>):
+       a long message wraps instead of clipping at the SVG edge. */
+    .chart-empty-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 24px;
+      text-align: center;
+      font-size: 13px;
+      font-family: monospace;
+      color: #6B7280;
+      line-height: 1.5;
+    }
+    .chart-empty-overlay[hidden] { display: none; }
 
     .providers-card {
       padding: 20px;
@@ -3312,7 +3354,7 @@
       accent-color: var(--accent-orange);
     }
 
-    /* Mobile Bottom Navigation Bar + More Sheet */
+    /* Mobile Bottom Navigation Bar (4 items, even split) */
     .mobile-bottom-nav {
       display: none;
       position: fixed;
@@ -3345,62 +3387,17 @@
       border: none;
       font-family: inherit;
       cursor: pointer;
+      flex: 1 1 0;
+      min-width: 0;
     }
 
-    .mobile-nav-link.active,
+    /* T1.9: mobile nav — hover is a neutral tint, not the active look. */
+    .mobile-nav-link.active {
+      color: var(--accent-orange);
+    }
+
     .mobile-nav-link:hover {
-      color: var(--accent-orange);
-    }
-
-    .mobile-more-sheet {
-      position: fixed;
-      inset: 0;
-      background: rgba(17, 17, 17, 0.45);
-      display: none;
-      align-items: flex-end;
-      justify-content: center;
-      z-index: 950;
-    }
-
-    .mobile-more-sheet.open {
-      display: flex;
-    }
-
-    .mobile-sheet-box {
-      width: 100%;
-      max-width: 520px;
-      background: var(--bg-base);
-      border-top: 1px solid var(--border-hairline);
-      border-radius: 16px 16px 0 0;
-      padding: 20px 18px 84px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .mobile-sheet-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-    }
-
-    .mobile-sheet-link {
-      padding: 12px 14px;
-      border-radius: var(--radius-sm);
-      background: var(--bg-subtle);
-      border: 1px solid var(--border-hairline);
       color: var(--text-primary);
-      text-decoration: none;
-      font-size: 13px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .mobile-sheet-link.active {
-      border-color: var(--accent-orange);
-      color: var(--accent-orange);
     }
 
     /* Modal */
@@ -3599,7 +3596,6 @@
       .block-sequence-ribbon,
       .vault-terminal-readout,
       .runtime-pipeline-bar,
-      .streak-pills,
       .registry-skeleton-grid {
         grid-template-columns: 1fr;
       }
@@ -3641,6 +3637,273 @@
         width: 100%;
       }
     }
+    /* =====================================================================
+       BEAUTIFY (GPT-6.2 Sol spec v2, Kaggle run 7677918) — paint only, in place.
+       CSS + one decorative SVG in the Dashboard hero. No layout, structure,
+       data, copy, selector, ID, or JS change. Section 6 copy changes NOT
+       shipped (review only). A2A wording verbatim.
+       Deviations from spec section D (documented, same visual effect):
+       D1. Spec D.3 prescribes a :has() exclusion on every shell rule.
+           Omitted: preflight verified no allowlisted shell contains
+           #tx-detail-inspector or .shield-white-stage, so the exclusion is
+           a no-op on this DOM; the inspector is excluded by route scoping
+           and by never blanket-painting .inspector-card (see D2).
+       D2. No blanket .inspector-card Glass rule: D.5 allowlists shells per
+           page (Permissions 2nd shell is Quiet, Analytics shell is Quiet,
+           Agents/A2A connect panels stay unpainted). Shells are painted by
+           explicit route-scoped selectors below.
+       D3. .filter-chip.active also sets border-color:var(--primary): the
+           spec's Selected omits it, but the base leaves a #111111 (light) /
+           orange (dark) ring around a blue chip.
+       D4. #probe-protected-result color omitted: its inline
+           color:var(--text-secondary) wins over any stylesheet rule; bg,
+           border-color and inset highlight applied as specified.
+       D5. #wallet-session-status / #wallet-session-note color rules
+           omitted: both carry inline colors (already passing contrast); a
+           stylesheet rule cannot override them without !important.
+       D6. Table paint scoped to #live-tx-table-mount only: the dashboard
+           and wallet mounts render the historical archive
+           (buildTxTableHTML), not the live list (buildLiveTxTableHTML);
+           D.5 says "only to the live table", D.3 rule 6 "Archive stays
+           neutral".
+       D7. Dashboard .glass-card shells (chart, providers) left unpainted:
+           D.5 Dashboard does not allowlist them (the Analytics daily chart
+           shell is the allowlisted one).
+       D8. Dashboard .stat-delta also recolored to var(--at-muted-ink)
+           (same rule as Analytics): the orange caveat measures 3.10:1 on
+           the light glass surface, failing the section 8 >=4.5:1 body-text
+           bar; D.3 rule 8 authorizes neutral secondary text recoloring
+           "where needed" on repainted surfaces, and the Dashboard cards
+           are the same realStatsCardHTML component as Analytics.
+       ===================================================================== */
+
+    /* --- D.3 rule 1: ambient wash (body paints the visible canvas, once) --- */
+    body { background-image: var(--at-wash); }
+
+    /* --- D.3 rule 2: card glass (allowlisted shells only) --- */
+    #page-dashboard .stat-card,
+    #page-dashboard .proof-milestones-card,
+    #page-analytics .stat-card,
+    #page-analytics .glass-card.analytics-card,
+    #page-discover .glass-card.disc-card,
+    #page-discover #discover-detail-panel,
+    #page-permissions .policy-guardrail-chassis > .inspector-card:first-child,
+    #page-settings #settings-card-appearance,
+    #page-settings #settings-card-manifest,
+    #page-wallet .router-balance-card,
+    #page-identity #identity-section,
+    #page-providers .vapi-provider-card,
+    #page-transactions #live-payments-section {
+      background-image: var(--at-glass);
+      border-color: var(--at-edge);
+      box-shadow: var(--at-lift);
+    }
+
+    /* --- D.3 rule 2: quiet glass (same paint, inset-only shadow) --- */
+    #agents-owner-state,
+    #a2a-state-panel,
+    #page-permissions .policy-guardrail-chassis > .inspector-card:last-child,
+    #page-analytics .inspector-card,
+    #page-transactions details.at-details,
+    #page-dashboard .trust-architecture-dossier,
+    #page-wallet .vault-chassis > .inspector-card,
+    #page-wallet .tx-panel {
+      background-image: var(--at-glass);
+      border-color: var(--at-edge);
+      box-shadow: inset 0 1px 0 var(--at-specular);
+    }
+
+    /* --- D.3 rule 3: chrome + active nav --- */
+    .vapi-global-header { background-color: var(--at-chrome); border-bottom-color: var(--at-edge); }
+    .sidebar { background-color: var(--at-chrome); border-right-color: var(--at-edge); }
+    .mobile-bottom-nav { background-color: var(--at-chrome); border-top-color: var(--at-edge); }
+    .nav-item.active a,
+    .nav-item a[aria-current="page"] {
+      color: var(--primary);
+      background-color: var(--at-nav-fill);
+      box-shadow: var(--at-nav-glow);
+      border-left-color: var(--primary);
+    }
+    .nav-item.active .nav-icon,
+    .nav-item a[aria-current="page"] .nav-icon { color: var(--primary); }
+    .mobile-nav-link.active {
+      color: var(--primary);
+      background-color: var(--at-nav-fill);
+      box-shadow: var(--at-nav-glow);
+    }
+
+    /* --- D.3 rule 4: primary buttons (enabled only) + Selected --- */
+    .btn-orange:not([disabled]),
+    .btn-black-pill:not([disabled]),
+    .btn-sm-orange:not([disabled]) { box-shadow: var(--at-button-glow); }
+    /* Protected component: the receipt inspector keeps its existing paint. */
+    #tx-detail-inspector .btn-orange,
+    #tx-detail-inspector .btn-black-pill,
+    #tx-detail-inspector .btn-sm-orange { box-shadow: none; }
+    .filter-chip.active,
+    [data-theme="dark"] .filter-chip.active {
+      background-color: var(--primary);
+      color: var(--on-primary);
+      border-color: var(--primary);
+      box-shadow: var(--at-selected-glow);
+    }
+    .period-btn.active,
+    [data-theme="dark"] .period-btn.active {
+      background-color: var(--primary);
+      color: var(--on-primary);
+      box-shadow: var(--at-selected-glow);
+    }
+
+    /* --- D.3 rules 5-6: live table only (dashboard/wallet mounts are archive) --- */
+    #live-tx-table-mount .tx-table th { background-color: var(--at-table-head); }
+    #live-tx-table-mount .tx-table td { border-bottom-color: var(--at-table-line); }
+    #live-tx-table-mount .tx-table tr.clickable-tx:hover { background-color: var(--at-table-hover); }
+    #live-tx-table-mount .badge-live,
+    #live-tx-table-mount .badge-verified { box-shadow: inset 0 1px 0 #FFFFFF33; }
+
+    /* --- D.4: Dashboard hero (exact spec) --- */
+    #page-dashboard .vapi-earn-hero {
+      position: relative;
+      isolation: isolate;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 86% 158%, #07142B 33%, #326BC2 34%,
+                        #2D70E62E 36%, transparent 40%),
+        radial-gradient(ellipse at 88% 20%, #174078, transparent 54%),
+        linear-gradient(110deg, #07142C, #102D60);
+      border-color: #345E9C;
+      box-shadow: inset 0 1px 0 #577EB4, 0 6px 18px #081F4829;
+    }
+    #page-dashboard .earn-hero-left { position: relative; z-index: 1; }
+    #page-dashboard .hero-title { text-shadow: 0 0 16px #60A5FA42; }
+    #page-dashboard .hero-orange-rule { background-color: #67D8FF; }
+    #page-dashboard .vapi-earn-hero .btn-black-pill {
+      background: linear-gradient(180deg, #2459DE, #153BAB);
+      color: #FFFFFF;
+      box-shadow: inset 0 1px 0 #779FFF, 0 0 12px #3B82F63D;
+    }
+    #page-dashboard .hero-cta-btn-white {
+      background-color: #EFF6FF;
+      color: #10284E;
+      box-shadow: inset 0 1px 0 #FFFFFF;
+    }
+    #page-dashboard .hero-cta-btn-white:hover { background-color: #DBEAFE; }
+    #page-dashboard .vapi-earn-hero :is(.btn-black-pill, .hero-cta-btn-white):focus-visible {
+      outline: 2px solid #BFDBFE;
+      outline-offset: 2px;
+    }
+    #page-dashboard .vapi-earn-hero > svg[aria-hidden="true"][viewBox="0 0 320 240"] {
+      position: absolute;
+      z-index: 0;
+      right: 3%;
+      top: 50%;
+      transform: translateY(-50%);
+      width: min(22%, 300px);
+      height: auto;
+      max-height: 94%;
+      pointer-events: none;
+      opacity: .34;
+    }
+    @media (min-width: 1440px) {
+      #page-dashboard .vapi-earn-hero > svg[aria-hidden="true"][viewBox="0 0 320 240"] {
+        opacity: .92;
+      }
+    }
+    @media (max-width: 1100px) {
+      #page-dashboard .vapi-earn-hero > svg[aria-hidden="true"][viewBox="0 0 320 240"] {
+        display: none;
+      }
+    }
+
+    /* --- D.5 Dashboard: stat icon tile (dossier Quiet glass is in the rule above) --- */
+    #page-dashboard .stat-icon-circle { box-shadow: var(--at-icon-glow); }
+
+    /* --- D.5 Discover: inactive chip edges (hover cue preserved) --- */
+    #page-discover .filter-chip:not(.active) { border-color: var(--at-edge); }
+    #page-discover .filter-chip:not(.active):hover { border-color: var(--text-primary); }
+    #probe-protected-result {
+      background-color: var(--at-inset);
+      border-color: var(--at-edge);
+      box-shadow: inset 0 1px 0 #60A5FA26;
+    }
+
+    /* --- D.5 My Agents: state-panel type + Create Agent glow --- */
+    #agents-owner-state .at-state-title,
+    #a2a-state-panel .at-state-title { color: var(--text); }
+    #agents-owner-state .at-state-body,
+    #a2a-state-panel .at-state-body { color: var(--at-muted-ink); }
+    #a2a-state-panel .text-link {
+      color: var(--primary);
+      text-decoration-color: currentColor;
+      text-underline-offset: 2px;
+    }
+    #open-connect-agent-btn:not([disabled]) { box-shadow: 0 0 10px #3B82F629; }
+    #open-connect-agent-btn[disabled] { box-shadow: none; }
+
+    /* --- D.5 Identity: inner shells, dimension control, Agent Card fields --- */
+    #page-identity .identity-panel,
+    #page-identity .vc-interactive-hub { border-color: var(--at-edge); }
+    #page-identity .evidence-node.active {
+      border-color: var(--primary);
+      box-shadow: inset 0 1px 0 #93C5FD66, inset 0 0 10px #3B82F61F;
+    }
+    #page-identity .detail-dim-index { color: var(--primary); }
+    #page-identity .kv-row { background-color: var(--at-inset); }
+    #page-identity .kv-label { color: var(--at-muted-ink); }
+    #page-identity .kv-val { color: var(--text); }
+
+    /* --- D.5 Permissions: form fields (focus cue preserved) + Save Policy --- */
+    #page-permissions .form-input:not([disabled]),
+    #page-permissions .form-select:not([disabled]) {
+      background-color: var(--at-inset);
+      border-color: var(--at-form-edge);
+      color: var(--text);
+    }
+    #page-permissions .form-input:focus,
+    #page-permissions .form-select:focus { border-color: var(--accent-orange); }
+    #save-permissions-btn:not([disabled]) {
+      background-color: var(--primary);
+      color: var(--on-primary);
+      box-shadow: 0 0 10px #3B82F62E;
+    }
+
+    /* --- D.5 Analytics: KPI icon tiles, caveats, chart paint (Analytics SVG only) --- */
+    #page-analytics .stat-icon-circle {
+      background-color: var(--at-inset);
+      color: var(--primary);
+      box-shadow: inset 0 1px 0 #93C5FD59;
+    }
+    #page-dashboard .stat-delta,
+    #page-analytics .stat-delta { color: var(--at-muted-ink); }
+    #analytics-svg-page text { fill: var(--at-muted-ink); }
+    #analytics-svg-page line { stroke: var(--at-grid-line); }
+
+    /* --- D.5 Providers: registry, header, card hover, metrics --- */
+    #live-registry-panel { border-color: var(--at-edge); }
+    #page-providers .live-registry-header {
+      background-image: var(--at-glass);
+      box-shadow: inset 0 1px 0 #93C5FD59;
+    }
+    #page-providers .vapi-provider-card:hover,
+    #page-providers .vapi-provider-card:focus-within { border-color: var(--text-primary); }
+    #page-providers .provider-metrics-strip { background-color: var(--at-inset); }
+    #page-providers .provider-metric-label { color: var(--at-muted-ink); }
+
+    /* --- D.5 Wallet: balance readout + metadata tiles --- */
+    #page-wallet .empty-balance-readout {
+      background-color: var(--at-inset);
+      border-color: var(--at-edge);
+    }
+    #page-wallet .vault-terminal-readout .inspector-field { background-color: var(--at-inset); }
+
+    /* --- D.5 Settings: rows, audit blocks, toggles --- */
+    #page-settings .inspector-field {
+      background-color: var(--at-inset);
+      border-color: var(--at-edge);
+    }
+    #page-settings #settings-card-manifest .kv-row { background-color: var(--at-inset); }
+    #settings-theme-btn { background-color: var(--primary); color: var(--on-primary); }
+    #settings-motion-btn { border-color: var(--at-edge); }
   </style>
 </head>
 <body>
@@ -3695,7 +3958,6 @@
       <a href="#/settings" class="docs-link">Docs &amp; Spec</a>
       <div class="notify-popover-wrap">
         <button type="button" class="icon-btn" id="notify-btn" title="Protocol Status Summary" aria-label="Protocol Status Summary" aria-expanded="false" aria-controls="notify-popover">
-          <span class="bell-dot"></span>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
@@ -3709,7 +3971,7 @@
             <strong>Production Registry:</strong> See <a href="#/providers" class="text-link">live registry results</a> from <code>GET /api/services</code>. Provider verification is recorded registry status, not a fresh check by this page.
           </div>
           <div class="notify-popover-item">
-            <strong>CIS-8004 Token #1004:</strong> Minted on Concordium Testnet <code>&lt;12802,0&gt;</code>; <code>verifyAgent</code> is <span class="badge-pending">PENDING</span>.
+            <strong>CIS-8004 Token #1004:</strong> Minted on Concordium Testnet <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">Contract 12802 · 0</a>; <code>verifyAgent</code> is <span class="badge-pending">PENDING</span>.
           </div>
           <div class="notify-popover-item">
             <strong>x402 Payment Records:</strong> See <code>GET /api/payments</code> results and finality evidence (<a href="#/transactions" class="text-link" id="notify-tx-link">Inspect →</a>). Total records are not a finalized-payment count; outcome_unknown is not finalized. Viewing records does not make a payment.
@@ -3843,7 +4105,7 @@
           </div>
           <div class="beacon-row">
             <span>CIS-8004</span>
-            <span style="color:var(--text-primary);font-weight:700;">&lt;12802,0&gt;</span>
+            <span style="color:var(--text-primary);font-weight:700;"><a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">Contract 12802 · 0</a></span>
           </div>
           <div class="beacon-row">
             <span>x402 Records</span>
@@ -3888,28 +4150,51 @@
             </div>
           </div>
 
+          <svg viewBox="0 0 320 240" aria-hidden="true" focusable="false"
+               xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="at-hero-shield-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#2866CF"/>
+                <stop offset="100%" stop-color="#091C45"/>
+              </linearGradient>
+              <filter id="at-hero-shield-glow" x="-25%" y="-25%" width="150%" height="150%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="halo"/>
+                <feMerge><feMergeNode in="halo"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <g filter="url(#at-hero-shield-glow)">
+              <ellipse cx="160" cy="120" rx="108" ry="28" transform="rotate(27 160 120)"
+                       fill="none" stroke="#60A5FA" stroke-width="1.5"/>
+              <path d="M160 40 L223 68 V114 C223 153 199 178 160 200
+                       C121 178 97 153 97 114 V68 Z"
+                    fill="url(#at-hero-shield-fill)" stroke="#93E9FF" stroke-width="2"/>
+              <ellipse cx="160" cy="120" rx="125" ry="34" transform="rotate(-24 160 120)"
+                       fill="none" stroke="#67E8F9" stroke-width="1.5"/>
+              <path d="M135 119 L153 137 L187 99" fill="none" stroke="#D9F7FF"
+                    stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+          </svg>
         </div>
 
         <!-- STATS ROW (WHITE FLAT CARDS, ALL DEMO-LABELED) -->
         <div class="stats-grid" id="dashboard-stats-grid"></div>
 
-        <!-- Daily-Check-In Style On-Chain Verification Progress Card -->
-        <div class="daily-checkin-card">
+        <!-- On-Chain Proof Milestones card: plain verifiable facts only. -->
+        <div class="proof-milestones-card">
           <div class="card-header">
             <div>
-              <span class="eyebrow-label">DAILY PROTOCOL CHECK-IN</span>
+              <span class="eyebrow-label">ON-CHAIN VERIFICATION</span>
               <h3 class="card-title" style="margin-top:2px;">On-Chain Proof Milestones</h3>
             </div>
             <span class="badge-live">LIVE - TESTNET</span>
           </div>
-          <div class="streak-pills">
-            <div class="streak-pill done">MINT<br/>#1004 ✓</div>
-            <div class="streak-pill done">SHA-256<br/>2,777 B ✓</div>
-            <div class="streak-pill">x402<br/><a href="#/transactions" class="text-link">Records →</a></div>
-            <div class="streak-pill">VERIFY<br/>PENDING</div>
-          </div>
+          <ul class="milestone-list">
+            <li>MINT #1004 ✓</li>
+            <li>SHA-256 2,777 B ✓</li>
+            <li>VERIFY PENDING</li>
+          </ul>
           <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;padding-top:4px;border-top:1px solid var(--border-hairline);">
-            <span style="color:var(--text-secondary);">Contract <code>&lt;12802,0&gt;</code></span>
+            <span style="color:var(--text-secondary);">Contract <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">12802 · 0</a></span>
             <a href="#/transactions" class="text-link">Inspect Payment Records →</a>
           </div>
         </div>
@@ -3974,7 +4259,7 @@
                 <span class="layer-num">L2</span>
                 <div class="profile-row-left">
                   <span class="profile-row-title">CIS-8004 Identity</span>
-                  <span class="profile-row-sub">Concordium Testnet &lt;12802,0&gt;</span>
+                  <span class="profile-row-sub">Concordium Testnet <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">Contract 12802 · 0</a></span>
                 </div>
                 <span style="font-family:var(--font-mono);font-size:11.5px;font-weight:700;">#1004 <span class="badge-live">LIVE</span></span>
               </div>
@@ -3992,7 +4277,7 @@
                   <span class="profile-row-title">x402 Settlement Proofs</span>
                   <span class="profile-row-sub" id="dash-settlement-sub">Loading live payment records…</span>
                 </div>
-                <span style="font-family:var(--font-mono);font-size:11.5px;font-weight:700;"><span id="dash-settlement-count">—</span> <span class="badge-live">LIVE</span></span>
+                <span style="font-family:var(--font-mono);font-size:11.5px;font-weight:700;"><span id="dash-settlement-count">—</span> <span class="badge-inconclusive" id="dash-settlement-badge">LOADING</span></span>
               </div>
             </div>
 
@@ -4025,7 +4310,7 @@
               <div class="section-title-group">
                 <span class="eyebrow-label">CALL TELEMETRY</span>
                 <span class="card-title">Platform Analytics</span>
-                <span class="badge-live">LIVE</span>
+                <span class="badge-inconclusive" id="dashboard-chart-badge">LOADING</span>
               </div>
               <div class="analytics-controls" role="tablist" aria-label="Analytics Time Range">
                 <button type="button" class="period-btn active" role="tab" aria-selected="true" data-period="7D">7D</button>
@@ -4041,6 +4326,7 @@
 
             <div class="chart-wrap">
               <svg class="chart-svg analytics-svg-target" id="analytics-svg" viewBox="0 0 600 265"></svg>
+              <div class="chart-empty-overlay" hidden></div>
             </div>
           </div>
 
@@ -4048,7 +4334,7 @@
             <div class="card-header">
               <div class="section-title-group">
                 <span class="card-title">Top Providers</span>
-                <span class="badge-live">LIVE</span>
+                <span class="badge-inconclusive" id="top-providers-badge">LOADING</span>
               </div>
               <a href="#/providers" class="text-link">Full Leaderboard →</a>
             </div>
@@ -4094,7 +4380,7 @@
           <div class="providers-hero-top">
             <div>
               <span class="eyebrow-label">02 // OPERATOR DIRECTORY</span>
-              <h1 class="vapi-page-h1">Agent Service Providers <span class="badge-live">LIVE REGISTRY</span></h1>
+              <h1 class="vapi-page-h1">Agent Service Providers <span class="badge-inconclusive" id="providers-h1-badge">LOADING</span></h1>
               <p class="providers-intro-copy">
                 All providers below come from the live service registry (GET /api/services): registered services with their real per-call rates and recorded provider verification. No simulated operator profiles remain.
               </p>
@@ -4138,7 +4424,7 @@
           <div class="providers-section-bar-left">
             <span class="eyebrow-label">LIVE REGISTRY SERVICES</span>
             <h2 class="providers-section-title">Registered Services</h2>
-            <span class="badge-live">LIVE</span>
+            <span class="badge-inconclusive" id="providers-section-badge">LOADING</span>
           </div>
           <span style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono);">Per-call x402 rates from the live registry; the registry carries no usage or volume data</span>
         </div>
@@ -4151,7 +4437,7 @@
             <div class="section-title-group">
               <span class="eyebrow-label">LEADERBOARD</span>
               <span class="card-title">Registered Services (Live Registry)</span>
-              <span class="badge-live">LIVE</span>
+              <span class="badge-inconclusive" id="providers-leaderboard-badge">LOADING</span>
             </div>
             <span style="font-size:12px;color:var(--text-muted);font-family:var(--font-mono);">No usage or volume data — the registry carries none</span>
           </div>
@@ -4166,7 +4452,7 @@
         <div class="vapi-page-header">
           <div>
             <span class="eyebrow-label">03 // CALL &amp; ROUTER CATALOG</span>
-            <h1 class="vapi-page-h1">Discover Agent Services <span class="badge-live" id="discover-live-badge">LIVE REGISTRY</span></h1>
+            <h1 class="vapi-page-h1">Discover Agent Services <span class="badge-inconclusive" id="discover-live-badge">LOADING</span></h1>
             <p style="font-size:13.5px;color:var(--text-secondary);margin-top:4px;">
               Services from the live provider registry (GET /api/services). Inspect a service to see what a call costs before using it. <a href="#/transactions" class="text-link">View testnet payment records</a> to inspect existing settlement evidence.
             </p>
@@ -4186,9 +4472,9 @@
             <div class="section-title-group">
               <span class="eyebrow-label">ROUTER ENDPOINT MATRIX</span>
               <span class="card-title">x402 Service Endpoints &amp; Rate Schedule</span>
-              <span class="badge-live">LIVE REGISTRY</span>
+              <span class="badge-inconclusive" id="router-matrix-registry-badge">LOADING</span>
             </div>
-            <span class="badge-live">LIVE ENDPOINTS</span>
+            <span class="badge-inconclusive" id="router-matrix-endpoints-badge">LOADING</span>
           </div>
           <div class="tx-table-wrap" id="discover-router-table-mount"></div>
         </div>
@@ -4201,7 +4487,7 @@
         <div class="vapi-page-header">
           <div>
             <span class="eyebrow-label">04 // EXTERNAL AGENT RUNTIMES</span>
-            <h1 class="vapi-page-h1">My Agents</h1>
+            <h1 class="vapi-page-h1">My Agents <span class="badge-inconclusive" id="agents-live-badge">LOADING</span></h1>
             <p style="font-size:13.5px;color:var(--text-secondary);margin-top:4px;">
               Connect your owner wallet to view and manage your agents. Each agent has its own dedicated Concordium Testnet wallet, provisioned from your owner identity wallet. On desktop Chrome, use the Concordium Browser Wallet extension.
             </p>
@@ -4467,7 +4753,7 @@
               <div class="kv-list">
                 <div class="kv-row">
                   <span class="kv-label">Concordium Testnet (Verified On-Chain Reference)</span>
-                  <span class="kv-val">CIS-8004 Contract <code>&lt;12802,0&gt;</code> · CIS-8 <code>&lt;12801,0&gt;</code> · Token <strong>#1004</strong></span>
+                  <span class="kv-val">CIS-8004 Contract <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">12802 · 0</a> · CIS-8 <a href="https://ccdexplorer.io/testnet/contract/12801/0" target="_blank" rel="noopener" class="text-link">12801 · 0</a> · Token <strong>#1004</strong></span>
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">Provider / Registry Account (Token #1004) — payment recipient — not the owner</span>
@@ -4475,7 +4761,7 @@
                 </div>
                 <div class="kv-row">
                   <span class="kv-label">Sponsored x402 Settlement Evidence</span>
-                  <span class="kv-val">8 real 1 µCCD transfers settled on Concordium Testnet (Blocks 50652456 – 51107042)</span>
+                  <span class="kv-val" id="wallet-settlement-summary">Loading settlement counts from the live payment records…</span>
                 </div>
                 <div class="kv-row" style="border-left-color:var(--accent-orange);">
                   <span class="kv-label">Concordium Mainnet / Production Status</span>
@@ -4495,7 +4781,7 @@
             <div class="section-title-group">
               <span class="eyebrow-label">DEDICATED AGENT WALLETS</span>
               <span class="card-title">Agent Wallets (Concordium Testnet)</span>
-              <span class="badge-live" id="agent-wallets-badge">LIVE — BACKEND</span>
+              <span class="badge-inconclusive" id="agent-wallets-badge">LOADING</span>
             </div>
             <button type="button" class="btn-sm-ghost" id="refresh-agent-wallets-btn">Refresh ↻</button>
           </div>
@@ -4535,7 +4821,7 @@
           <div class="inspector-card">
             <div class="card-header">
               <span class="card-title">Spending Policy</span>
-              <span class="badge-live">LIVE</span>
+              <span class="badge-inconclusive" id="perm-form-badge">LOADING</span>
             </div>
 
             <div class="form-grid">
@@ -4579,7 +4865,7 @@
               </details>
               <div class="form-field" style="grid-column: 1 / -1;">
                 <label for="perm-allowlist">Recipient Allowlist (one Concordium account address per line)</label>
-                <textarea id="perm-allowlist" class="form-input" rows="3" style="resize:vertical;" placeholder="VERIFIED_PROVIDER_RECIPIENT"></textarea>
+                <textarea id="perm-allowlist" class="form-input" rows="3" style="resize:vertical;" placeholder="4dWn…evZg4d"></textarea>
                 <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;">Bounded-auto requires at least one verified provider recipient — never the owner wallet or the sponsor. Use the live registry payTo addresses on the right to fill this in.</div>
               </div>
             </div>
@@ -4600,7 +4886,7 @@
           <div class="inspector-card">
             <div class="card-header">
               <span class="card-title">Recipient Addresses (Live Registry)</span>
-              <span class="badge-live">LIVE</span>
+              <span class="badge-inconclusive" id="perm-recipients-badge">LOADING</span>
             </div>
             <p style="font-size:12px;color:var(--text-secondary);">
               PayTo addresses of registered services. Tick to add an address to the allowlist above; untick to remove it. These are real recipient accounts, not demo providers.
@@ -4615,7 +4901,7 @@
             <div class="section-title-group">
               <span class="eyebrow-label">POLICY LEDGER</span>
               <span class="card-title">Active Permission &amp; Pending Approvals</span>
-              <span class="badge-live" id="perm-table-badge">LIVE — BACKEND</span>
+              <span class="badge-inconclusive" id="perm-table-badge">LOADING</span>
             </div>
           </div>
           <div class="tx-table-wrap">
@@ -4631,7 +4917,7 @@
                 </tr>
               </thead>
               <tbody id="perm-table-body">
-                <tr><td colspan="6" style="font-size:13px;color:var(--text-secondary);">No permission loaded yet.</td></tr>
+                <tr><td colspan="6" style="font-size:12.5px;color:var(--text-secondary);">No policies yet — grant your first permission using the form above. <button type="button" class="btn-sm-ghost perm-empty-cta" style="margin-left:8px;">Grant your first permission →</button></td></tr>
               </tbody>
             </table>
           </div>
@@ -4671,7 +4957,7 @@
                 <div class="kv-list" style="margin-top:8px;">
                 <div class="kv-row">
                   <span class="kv-label">Token &amp; Contracts (Concordium Testnet)</span>
-                  <span class="kv-val">Token <strong>#1004</strong> · CIS-8004 Contract <code>&lt;12802,0&gt;</code> · CIS-8 <code>&lt;12801,0&gt;</code></span>
+                  <span class="kv-val">Token <strong>#1004</strong> · CIS-8004 Contract <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">12802 · 0</a> · CIS-8 <a href="https://ccdexplorer.io/testnet/contract/12801/0" target="_blank" rel="noopener" class="text-link">12801 · 0</a></span>
                 </div>
                 <div class="kv-row">
                   <div class="kv-label-line">
@@ -4716,7 +5002,7 @@
                     <span class="eyebrow-label">LIVE FETCH</span>
                     <h2 class="card-title" style="margin-top:2px;">Live Agent Card</h2>
                   </div>
-                  <span class="badge-live">LIVE</span>
+                  <span class="badge-inconclusive" id="identity-live-card-badge">LOADING</span>
                 </div>
                 <p id="identity-live-card-status" role="status" aria-live="polite" style="font-size:12.5px;color:var(--text-secondary);">Fetching the live gateway Agent Card…</p>
                 <div id="identity-live-card-body" hidden>
@@ -4794,7 +5080,7 @@
                     Token 1004 is minted on Concordium Testnet; owner account matches the registry record.
                   </p>
                   <div class="detail-dim-meta" id="detail-dim-meta">
-                    Contract &lt;12802,0&gt; · Owner 4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d
+                    <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">Contract 12802 · 0</a> · Owner 4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d
                   </div>
                 </div>
               </div>
@@ -4868,7 +5154,7 @@
               <div class="section-title-group">
                 <span class="eyebrow-label">CALL STATISTICS</span>
                 <span class="card-title">Daily Payment Records (Live)</span>
-                <span class="badge-live">LIVE</span>
+                <span class="badge-inconclusive" id="analytics-chart-badge">LOADING</span>
               </div>
               <div class="analytics-controls" role="tablist" aria-label="Call Statistics Time Range">
                 <button type="button" class="period-btn active" role="tab" aria-selected="true" data-period="7D">7D</button>
@@ -4884,6 +5170,7 @@
 
             <div class="chart-wrap">
               <svg class="chart-svg analytics-svg-target" id="analytics-svg-page" viewBox="0 0 600 265"></svg>
+              <div class="chart-empty-overlay" hidden></div>
             </div>
           </div>
 
@@ -4959,7 +5246,7 @@
             <div class="kv-list">
               <div class="kv-row">
                 <span class="kv-label">Verified On-Chain Records (LIVE - TESTNET)</span>
-                <span class="kv-val">CIS-8004 Token <strong>#1004</strong> on Contract <code>&lt;12802,0&gt;</code>, Agent Card SHA-256 <code>3f6144046d843b7bae1b071f279e26c4dc0c4711a30b925220c1dbf94aeab564</code>. See Transactions for the scoped live payment records and their finality evidence.</span>
+                <span class="kv-val">CIS-8004 Token <strong>#1004</strong> on Contract <a href="https://ccdexplorer.io/testnet/contract/12802/0" target="_blank" rel="noopener" class="text-link">12802 · 0</a>, Agent Card SHA-256 <code>3f6144046d843b7bae1b071f279e26c4dc0c4711a30b925220c1dbf94aeab564</code>. See Transactions for the scoped live payment records and their finality evidence.</span>
               </div>
               <div class="kv-row" style="border-left-color:var(--accent-orange);">
                 <span class="kv-label">Trust score</span>
@@ -4989,7 +5276,7 @@
     </main>
   </div>
 
-  <!-- MOBILE DEDICATED BOTTOM NAVIGATION (5 PRIMARY ROUTES + MORE SHEET) -->
+  <!-- MOBILE DEDICATED BOTTOM NAVIGATION (4 PRIMARY ROUTES) -->
   <nav class="mobile-bottom-nav" aria-label="Mobile Primary Navigation">
     <a href="#/dashboard" class="mobile-nav-link active" data-mobile-route="dashboard">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3L4 9v12h5v-7h6v7h5V9l-8-6z"/></svg>
@@ -5007,34 +5294,7 @@
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       <span>Identity</span>
     </a>
-    <button type="button" class="mobile-nav-link" id="mobile-more-btn" aria-expanded="false">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
-      <span>More</span>
-    </button>
   </nav>
-
-  <!-- MOBILE "MORE" SHEET LISTING ALL 10 PAGES -->
-  <div class="mobile-more-sheet" id="mobile-more-sheet" role="dialog" aria-modal="true" aria-label="All Platform Pages">
-    <div class="mobile-sheet-box">
-      <div class="card-header">
-        <span class="card-title">All Platform Pages (11)</span>
-        <button type="button" class="btn-sm-ghost" id="close-more-sheet-btn">Close ✕</button>
-      </div>
-      <div class="mobile-sheet-grid">
-        <a href="#/dashboard" class="mobile-sheet-link" data-sheet-route="dashboard">Dashboard</a>
-        <a href="#/providers" class="mobile-sheet-link" data-sheet-route="providers">Providers</a>
-        <a href="#/discover" class="mobile-sheet-link" data-sheet-route="discover">Discover Services</a>
-        <a href="#/agents" class="mobile-sheet-link" data-sheet-route="agents">My Agents</a>
-        <a href="#/a2a" class="mobile-sheet-link" data-sheet-route="a2a">A2A Tasks</a>
-        <a href="#/wallet" class="mobile-sheet-link" data-sheet-route="wallet">Wallet</a>
-        <a href="#/permissions" class="mobile-sheet-link" data-sheet-route="permissions">Permissions</a>
-        <a href="#/identity" class="mobile-sheet-link" data-sheet-route="identity">Identity (#1004)</a>
-        <a href="#/transactions" class="mobile-sheet-link" data-sheet-route="transactions">Transactions</a>
-        <a href="#/analytics" class="mobile-sheet-link" data-sheet-route="analytics">Analytics</a>
-        <a href="#/settings" class="mobile-sheet-link" data-sheet-route="settings">Settings</a>
-      </div>
-    </div>
-  </div>
 
   <!-- GENERIC INFO MODAL (used for payment outcomes and notices; it never
        presents a demo as a real feature) -->
@@ -5809,6 +6069,8 @@
         if (summaryErr) summaryErr.textContent = 'Data temporarily unavailable. ' + msg + ' No totals are shown.';
         const l4CountErr = document.getElementById('dash-settlement-count');
         if (l4CountErr) l4CountErr.textContent = 'unavailable';
+        const dashBadgeErr = document.getElementById('dash-settlement-badge');
+        if (dashBadgeErr) { dashBadgeErr.textContent = 'UNAVAILABLE'; dashBadgeErr.className = 'badge-failed'; }
         const l4SubErr = document.getElementById('dash-settlement-sub');
         if (l4SubErr) l4SubErr.textContent = 'Live payment records unavailable — ' + msg;
         const verifiedTxsErr = document.getElementById('dash-verified-txs');
@@ -5823,6 +6085,8 @@
         if (summaryEmpty) summaryEmpty.textContent = 'No payment records found.';
         const l4CountEmpty = document.getElementById('dash-settlement-count');
         if (l4CountEmpty) l4CountEmpty.textContent = '0 finalized';
+        const dashBadgeEmpty = document.getElementById('dash-settlement-badge');
+        if (dashBadgeEmpty) { dashBadgeEmpty.textContent = 'EMPTY'; dashBadgeEmpty.className = 'badge-inconclusive'; }
         const l4SubEmpty = document.getElementById('dash-settlement-sub');
         if (l4SubEmpty) l4SubEmpty.textContent = 'No payment records found (live API)';
         const verifiedTxsEmpty = document.getElementById('dash-verified-txs');
@@ -5860,6 +6124,8 @@
       if (summaryEl) summaryEl.textContent = payments.length + ' returned records · ' + evidenceBackedFinalizedCount + ' finalized with evidence · ' + unknown + ' unknown outcomes. Counts apply to the returned list, not all-time activity.';
       const l4Count = document.getElementById('dash-settlement-count');
       if (l4Count) l4Count.textContent = finalized + ' finalized';
+      const dashBadge = document.getElementById('dash-settlement-badge');
+      if (dashBadge) { dashBadge.textContent = 'LIVE'; dashBadge.className = 'badge-live'; }
       const l4Sub = document.getElementById('dash-settlement-sub');
       if (l4Sub) l4Sub.textContent = finalized + ' finalized 1 µCCD records (live API)';
       const verifiedTxs = document.getElementById('dash-verified-txs');
@@ -6355,6 +6621,19 @@
       const evidenceBackedFinalizedCount = payments.filter(p => p && p.state === 'finalized' && liveProofProgress(p).percent === 100).length;
       const unknown = payments.filter(p => p && p.state === 'outcome_unknown').length;
       lastLivePaymentSummary = payments.length + ' returned records · ' + evidenceBackedFinalizedCount + ' finalized with evidence · ' + unknown + ' unknown outcomes. Counts apply to the returned list, not all-time activity.';
+      /* T1.4: the Wallet header counts are computed from this same fetched
+         list (live finalized + block range) and the archive rows (count +
+         block range, labelled finality-not-confirmed) — never hardcoded. */
+      const wsEl = document.getElementById('wallet-settlement-summary');
+      if (wsEl) {
+        const fin = payments.filter(p => p && p.state === 'finalized');
+        const liveBlocks = fin.map(p => Number(p.blockHeight)).filter(n => Number.isFinite(n));
+        const archRows = (typeof realTransactionsData !== 'undefined' && Array.isArray(realTransactionsData)) ? realTransactionsData : [];
+        const archBlocks = archRows.map(r => Number(r.block)).filter(n => Number.isFinite(n));
+        const liveRange = liveBlocks.length ? ' (Blocks ' + Math.min.apply(null, liveBlocks) + ' – ' + Math.max.apply(null, liveBlocks) + ')' : '';
+        const archRange = archBlocks.length ? ' (Blocks ' + Math.min.apply(null, archBlocks) + ' – ' + Math.max.apply(null, archBlocks) + ')' : '';
+        wsEl.textContent = fin.length + ' real 1 µCCD transfer' + (fin.length === 1 ? '' : 's') + ' finalized on Concordium Testnet' + liveRange + ' · ' + archRows.length + ' earlier settlement' + (archRows.length === 1 ? '' : 's') + ', finality not confirmed' + archRange;
+      }
       // PM-01-R1: this helper updates the KPI count and the stored summary
       // only. It must not publish a success status: the loader publishes
       // the success status only after every required content operation
@@ -6530,10 +6809,27 @@
         setLivePaymentStatus('Loading GET /api/payments… Counts are not yet available.');
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Loading live settlement records from the facilitator…</p>';
       }
+      /* T1.2: the payments fetch gets the same 10 s timeout as the other
+         API calls — a hung request must end in the error state, never in
+         a permanent "Loading..." line. Implemented as a race (not an
+         AbortController signal) so the fetch call keeps its exact
+         one-argument form, which two suites assert on the loader source. A timed-out race rejects with a named TimeoutError;
+         the underlying GET is side-effect-free, so letting it finish
+         unseen is harmless. */
+      let txTimeoutId;
+      const txTimeout = new Promise((_, reject) => {
+        txTimeoutId = setTimeout(() => {
+          const timeoutErr = new Error('Payment API request timed out after 10 s');
+          timeoutErr.name = 'TimeoutError';
+          reject(timeoutErr);
+        }, 10000);
+      });
       let res;
       try {
-        res = await fetch(apiUrl('/api/payments'));
+        res = await Promise.race([fetch(apiUrl('/api/payments')), txTimeout]);
+        clearTimeout(txTimeoutId);
       } catch (err) {
+        clearTimeout(txTimeoutId);
         // INT-03: an older failure must not mark newer displayed state
         // stale or erroneous.
         if (isStale()) return;
@@ -6549,14 +6845,20 @@
         // (which the tests assert verbatim).
         const raw = err && err.message ? String(err.message) : '';
         const isConfigError = raw.startsWith('service_not_configured:') || raw.startsWith('invalid_api_base_url:') || raw.startsWith('unknown_api_route:');
+        const isTimeout = err && (err.name === 'AbortError' || err.name === 'TimeoutError');
         if (!liveTxDisplayRepairRequired) {
           if (isConfigError) setLivePaymentStatus(lastLivePaymentSummary ? 'STALE — refresh failed: ' + raw + '. Last displayed records and counts are retained.' : 'ERROR — ' + raw + '; counts unavailable.');
+          else if (isTimeout) setLivePaymentStatus(lastLivePaymentSummary ? 'STALE — refresh failed: request timed out. Last displayed records and counts are retained.' : 'ERROR — payment API request timed out; counts unavailable.');
           else setLivePaymentStatus(lastLivePaymentSummary ? 'STALE — refresh failed: network unavailable. Last displayed records and counts are retained.' : 'ERROR — payment API could not be reached; counts unavailable.');
         }
         if (isRefresh) return;
         mount.innerHTML = isConfigError
           ? '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the resource API is not configured. The historical archive below is unaffected.</p>'
-          : '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator could not be reached. The historical archive below is unaffected.</p>';
+          : isTimeout
+            ? '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the payment API request timed out. The historical archive below is unaffected.</p>'
+            : '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator could not be reached. The historical archive below is unaffected.</p>';
+        const wsErrEl = document.getElementById('wallet-settlement-summary');
+        if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
         return;
       }
       if (isStale()) return;
@@ -6565,6 +6867,8 @@
         if (!liveTxDisplayRepairRequired) setLivePaymentStatus((lastLivePaymentSummary ? 'STALE — last displayed records and counts retained. ' : 'ERROR — counts unavailable. ') + 'Payment API returned HTTP ' + res.status + '.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable (HTTP ' + res.status + '). The historical archive below is unaffected.</p>';
+        const wsErrEl = document.getElementById('wallet-settlement-summary');
+        if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
         return;
       }
       let data;
@@ -6577,6 +6881,8 @@
         if (!liveTxDisplayRepairRequired) setLivePaymentStatus((lastLivePaymentSummary ? 'STALE — last displayed records and counts retained. ' : 'Counts unavailable. ') + 'MALFORMED RESPONSE — payment API returned unreadable JSON.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator returned an unreadable response. The historical archive below is unaffected.</p>';
+        const wsErrEl = document.getElementById('wallet-settlement-summary');
+        if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
         return;
       }
       if (isStale()) return;
@@ -6592,6 +6898,8 @@
         if (!liveTxDisplayRepairRequired) setLivePaymentStatus((lastLivePaymentSummary ? 'STALE — last displayed records and counts retained. ' : 'Counts unavailable. ') + 'MALFORMED RESPONSE — unexpected payment list or record shape.');
         if (isRefresh) return;
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — unexpected response shape. The historical archive below is unaffected.</p>';
+        const wsErrEl = document.getElementById('wallet-settlement-summary');
+        if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
         return;
       }
       if (payments.length === 0) {
@@ -7604,11 +7912,24 @@
        State-driven badge & UI across LOADING, AVAILABLE — EMPTY, INVALID RESPONSE, LIVE/REGISTERED, and ERROR with Retry. */
     let liveRegistryAbortController = null;
 
+    /* T1.1 badge helper: a badge claims LIVE only after its fetch succeeds
+       with data. UNAVAILABLE on fetch failure, EMPTY on success with zero
+       records. `liveLabel` is the badge's live text (e.g. 'LIVE REGISTRY');
+       the other states use fixed texts. */
+    function setLiveBadge(el, state, liveLabel) {
+      if (!el) return;
+      if (state === 'LIVE') { el.textContent = liveLabel || 'LIVE'; el.className = 'badge-live'; }
+      else if (state === 'EMPTY') { el.textContent = 'EMPTY'; el.className = 'badge-inconclusive'; }
+      else { el.textContent = 'UNAVAILABLE'; el.className = 'badge-failed'; }
+    }
+
     async function loadLiveRegistry() {
       const panelEl = document.getElementById('live-registry-panel');
       const listEl = document.getElementById('live-registry-list');
       const statusEl = document.getElementById('live-registry-status');
       const badgeSlotEl = document.getElementById('live-registry-badge-slot');
+      const discoverBadgeEl = document.getElementById('discover-live-badge');
+      const providersH1BadgeEl = document.getElementById('providers-h1-badge');
       if (!listEl) return;
 
       /* ERROR state for the registry panel. `detail`/`sub` are the
@@ -7617,6 +7938,8 @@
       const failRegistry = (detail, sub) => {
         if (panelEl) panelEl.setAttribute('data-registry-state', 'error');
         if (badgeSlotEl) badgeSlotEl.innerHTML = '<span class="badge-failed">UNAVAILABLE</span>';
+        if (discoverBadgeEl) { discoverBadgeEl.textContent = 'UNAVAILABLE'; discoverBadgeEl.className = 'badge-failed'; }
+        if (providersH1BadgeEl) { providersH1BadgeEl.textContent = 'UNAVAILABLE'; providersH1BadgeEl.className = 'badge-failed'; }
         if (statusEl) statusEl.textContent = 'GET /api/services failed';
         listEl.innerHTML = `
           <div class="registry-error-box" role="alert">
@@ -7683,12 +8006,15 @@
           'Service registry unavailable — ' + escapeHtml(cause) + ' No provider data shown — nothing here is simulated.',
           'Status: ' + escapeHtml(cause) + ' · 0 fabricated records',
         );
+        clearTimeout(timeoutId);
         return;
       }
 
       /* State 1: LOADING — Set synchronously before await, no green LIVE badge */
       if (panelEl) panelEl.setAttribute('data-registry-state', 'loading');
       if (badgeSlotEl) badgeSlotEl.innerHTML = '<span class="badge-inconclusive">LOADING</span>';
+      if (discoverBadgeEl) { discoverBadgeEl.textContent = 'LOADING'; discoverBadgeEl.className = 'badge-inconclusive'; }
+      if (providersH1BadgeEl) { providersH1BadgeEl.textContent = 'LOADING'; providersH1BadgeEl.className = 'badge-inconclusive'; }
       if (statusEl) statusEl.textContent = `GET ${requestUrl} · Loading...`;
       listEl.innerHTML = `
         <div class="registry-loading-box" role="status" aria-label="Loading live service registry">
@@ -7730,6 +8056,10 @@
           if (panelEl) panelEl.setAttribute('data-registry-state', 'error');
           if (badgeSlotEl) badgeSlotEl.innerHTML = '<span class="badge-failed">INVALID RESPONSE</span>';
           if (statusEl) statusEl.textContent = 'GET /api/services · 200 · Invalid schema';
+          /* T1.1: the header badges also end here — the data is unusable,
+             so they read UNAVAILABLE, never the LOADING state above. */
+          if (discoverBadgeEl) { discoverBadgeEl.textContent = 'UNAVAILABLE'; discoverBadgeEl.className = 'badge-failed'; }
+          if (providersH1BadgeEl) { providersH1BadgeEl.textContent = 'UNAVAILABLE'; providersH1BadgeEl.className = 'badge-failed'; }
           listEl.innerHTML = `
             <div class="registry-error-box" role="alert">
               <div class="registry-error-main">
@@ -7764,6 +8094,8 @@
           /* State 2: AVAILABLE — EMPTY (HTTP 200 with 0 services) */
           if (panelEl) panelEl.setAttribute('data-registry-state', 'empty');
           if (badgeSlotEl) badgeSlotEl.innerHTML = '<span class="badge-inconclusive">API ONLINE · 0 RESULTS</span>';
+          if (discoverBadgeEl) { discoverBadgeEl.textContent = 'EMPTY'; discoverBadgeEl.className = 'badge-inconclusive'; }
+          if (providersH1BadgeEl) { providersH1BadgeEl.textContent = 'EMPTY'; providersH1BadgeEl.className = 'badge-inconclusive'; }
           listEl.innerHTML = `
             <div class="registry-empty-box">
               <div class="registry-empty-main">
@@ -7790,9 +8122,13 @@
         if (verifiedCount > 0) {
           if (panelEl) panelEl.setAttribute('data-registry-state', 'live');
           if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-live">${verifiedCount} ACTIVE &amp; AVAILABLE · VERIFIED (RECORDED)</span>`;
+          if (discoverBadgeEl) { discoverBadgeEl.textContent = 'LIVE REGISTRY'; discoverBadgeEl.className = 'badge-live'; }
+          if (providersH1BadgeEl) { providersH1BadgeEl.textContent = 'LIVE REGISTRY'; providersH1BadgeEl.className = 'badge-live'; }
         } else {
           if (panelEl) panelEl.setAttribute('data-registry-state', 'available');
           if (badgeSlotEl) badgeSlotEl.innerHTML = `<span class="badge-inconclusive">${services.length} RETURNED · 0 ACTIVE, AVAILABLE &amp; VERIFIED</span>`;
+          if (discoverBadgeEl) { discoverBadgeEl.textContent = 'LIVE REGISTRY'; discoverBadgeEl.className = 'badge-live'; }
+          if (providersH1BadgeEl) { providersH1BadgeEl.textContent = 'LIVE REGISTRY'; providersH1BadgeEl.className = 'badge-live'; }
         }
         listEl.innerHTML = `<div class="provider-cards-grid">${services.map(s => buildLiveServiceCardHTML(s)).join('')}</div>`;
         bindPayButtons();
@@ -7821,13 +8157,29 @@
       try {
         services = await fetchRegistryServices();
       } catch (err) {
-        const msg = `<div style="font-size:13px;color:var(--text-secondary);padding:12px;">Service registry unavailable — ${escapeHtml(errText(err))} No provider data shown.</div>`;
+        const msg = `<div style="font-size:13px;color:var(--text-secondary);padding:12px;">Service registry unavailable — ${escapeHtml(errText(err))} No provider data shown.</div><div style="padding:0 12px 12px;"><button type="button" class="btn-retry-registry retry-providers-btn"><span>Retry Providers Query</span><span aria-hidden="true">↻</span></button></div>`;
         topListEl.innerHTML = msg;
         pageProvidersRankedEl.innerHTML = msg;
         if (analyticsTopTableEl) analyticsTopTableEl.innerHTML = msg;
         pageProvidersGridEl.innerHTML = msg;
         discGridEl.innerHTML = msg;
         routerTableMount.innerHTML = msg;
+        document.querySelectorAll('.retry-providers-btn').forEach(btn => {
+          btn.addEventListener('click', () => { renderProviders(query); });
+        });
+        setLiveBadge(document.getElementById('top-providers-badge'), 'UNAVAILABLE');
+        /* T1.1 follow-up: loadLiveRegistry runs only on the providers
+           route, so it never sets this badge on the Discover page itself.
+           The Discover page's own fetch is renderProviders — it drives
+           the Discover header badge here, with the same mapping. */
+        setLiveBadge(document.getElementById('discover-live-badge'), 'UNAVAILABLE');
+        /* T1.1 completion: the remaining static LIVE badges on the two
+           pages this fetch backs (Providers section + leaderboard, and
+           the Discover router-matrix card) follow the same fetch. */
+        setLiveBadge(document.getElementById('providers-section-badge'), 'UNAVAILABLE');
+        setLiveBadge(document.getElementById('providers-leaderboard-badge'), 'UNAVAILABLE');
+        setLiveBadge(document.getElementById('router-matrix-registry-badge'), 'UNAVAILABLE');
+        setLiveBadge(document.getElementById('router-matrix-endpoints-badge'), 'UNAVAILABLE');
         return;
       }
       const filtered = services
@@ -7843,6 +8195,12 @@
         pageProvidersGridEl.innerHTML = empty;
         discGridEl.innerHTML = empty;
         routerTableMount.innerHTML = empty;
+        setLiveBadge(document.getElementById('top-providers-badge'), 'EMPTY');
+        setLiveBadge(document.getElementById('discover-live-badge'), 'EMPTY');
+        setLiveBadge(document.getElementById('providers-section-badge'), 'EMPTY');
+        setLiveBadge(document.getElementById('providers-leaderboard-badge'), 'EMPTY');
+        setLiveBadge(document.getElementById('router-matrix-registry-badge'), 'EMPTY');
+        setLiveBadge(document.getElementById('router-matrix-endpoints-badge'), 'EMPTY');
         return;
       }
 
@@ -7905,6 +8263,12 @@
       `;
 
       bindPayButtons();
+      setLiveBadge(document.getElementById('top-providers-badge'), 'LIVE', 'LIVE');
+      setLiveBadge(document.getElementById('discover-live-badge'), 'LIVE', 'LIVE REGISTRY');
+      setLiveBadge(document.getElementById('providers-section-badge'), 'LIVE', 'LIVE');
+      setLiveBadge(document.getElementById('providers-leaderboard-badge'), 'LIVE', 'LIVE');
+      setLiveBadge(document.getElementById('router-matrix-registry-badge'), 'LIVE', 'LIVE REGISTRY');
+      setLiveBadge(document.getElementById('router-matrix-endpoints-badge'), 'LIVE', 'LIVE ENDPOINTS');
     }
 
     /* Task 05 P2-1: search re-runs the Live Registry with ?q=, mirroring the
@@ -8002,6 +8366,10 @@
               : 'No active owner connection — connect your Concordium Wallet from the header first.';
         const detailPanel = document.getElementById('agent-wallet-detail-panel');
         if (detailPanel) detailPanel.hidden = true;
+        /* T1.2: the role summary never stays on its "loading..." line when
+           this page cannot load — it ends in the unavailable state. */
+        const roleElNoAccess = document.getElementById('agent-role-summary');
+        if (roleElNoAccess) roleElNoAccess.textContent = 'Role summary unavailable. Provider identity, owner authorization and Agent A wallet state are shown separately when the launcher reports them.';
         return;
       }
       if (access.mode === 'owner-authorized') {
@@ -8012,6 +8380,9 @@
         if (statusEl) statusEl.innerHTML = 'Owner authorization is active on the server. No provider session is opened for the owner; provider pairing stays with 4dWn…. Create/provision below; wallet listing requires a provider session.';
         const detailPanel = document.getElementById('agent-wallet-detail-panel');
         if (detailPanel) detailPanel.hidden = true;
+        /* T1.2: same as the no-access path — the role summary ends here. */
+        const roleElNoSession = document.getElementById('agent-role-summary');
+        if (roleElNoSession) roleElNoSession.textContent = 'Role summary unavailable. Provider identity, owner authorization and Agent A wallet state are shown separately when the launcher reports them.';
         return;
       }
       setOwnerGate(true, '');
@@ -8024,6 +8395,9 @@
         if (statusEl) statusEl.innerHTML = 'Agent wallets unavailable — ' + escapeHtml(errText(err)) + ' No agent data shown.';
         grid.innerHTML = '';
         if (emptyEl) emptyEl.hidden = true;
+        /* T1.2: same as the early returns — the role summary ends here. */
+        const roleElApiError = document.getElementById('agent-role-summary');
+        if (roleElApiError) roleElApiError.textContent = 'Role summary unavailable. Provider identity, owner authorization and Agent A wallet state are shown separately when the launcher reports them.';
         return;
       }
       void renderAgentRoleSummary(owner, wallets);
@@ -8033,6 +8407,9 @@
         if (statusEl) statusEl.textContent = 'No agent wallets yet — create your first agent below. The wallet is provisioned for the connected owner and its agent ID.';
         const detailPanel = document.getElementById('agent-wallet-detail-panel');
         if (detailPanel) detailPanel.hidden = true;
+        /* T1.1: backend reachable, zero wallets — EMPTY, not the LIVE
+           badge the success path below sets. */
+        setAgentsBadge('EMPTY', 'badge-inconclusive');
         return;
       }
       if (emptyEl) emptyEl.hidden = true;
@@ -8486,6 +8863,7 @@
       const bodyEl = document.getElementById('identity-live-card-body');
       const fieldsEl = document.getElementById('identity-live-card-fields');
       const hashEl = document.getElementById('identity-live-card-hash');
+      const badgeEl = document.getElementById('identity-live-card-badge');
       if (!statusEl || identityCardLoaded) return;
       identityCardLoaded = true;
       statusEl.textContent = 'Fetching the live gateway Agent Card…';
@@ -8494,6 +8872,9 @@
         fetched = await fetchGatewayCardRaw(fetch, a2aConfigOrThrow());
       } catch (err) {
         statusEl.innerHTML = 'Live Agent Card unavailable — ' + escapeHtml(errText(err)) + ' The reference values above are the on-chain record, not a live fetch.';
+        /* T1.1: the header badge ends here too — never LIVE next to an
+           unavailable card. */
+        if (badgeEl) { badgeEl.textContent = 'UNAVAILABLE'; badgeEl.className = 'badge-failed'; }
         return;
       }
       const { card, rawText } = fetched;
@@ -8508,6 +8889,14 @@
       statusEl.innerHTML = digest
         ? (match ? 'Live Agent Card fetched — SHA-256 matches the on-chain metadata hash.' : 'Live Agent Card fetched — SHA-256 DOES NOT match the on-chain metadata hash. The served card is not the registered one.')
         : 'Live Agent Card fetched.';
+      /* T1.1: LIVE only when the fetched card is the registered one
+         (hash match). A mismatch is MISMATCH, and an uncomputed digest
+         is UNVERIFIED — never a passing badge. */
+      if (badgeEl) {
+        if (!digest) { badgeEl.textContent = 'UNVERIFIED'; badgeEl.className = 'badge-inconclusive'; }
+        else if (match) { badgeEl.textContent = 'LIVE'; badgeEl.className = 'badge-live'; }
+        else { badgeEl.textContent = 'MISMATCH'; badgeEl.className = 'badge-failed'; }
+      }
       if (bodyEl) bodyEl.hidden = false;
       if (fieldsEl) {
         fieldsEl.innerHTML =
@@ -8793,6 +9182,9 @@
       const owner = ownerIdentity();
       if (!owner || owner.state !== 'session-active') {
         if (statusEl) statusEl.textContent = 'No active owner session — connect your Concordium Wallet from the header to see your agent wallets.';
+        /* T1.1: no session means no data — the badge must not keep the
+           static LIVE text. */
+        if (badgeEl) { badgeEl.textContent = 'UNAVAILABLE'; badgeEl.className = 'badge-failed'; }
         mount.innerHTML = '';
         return;
       }
@@ -8806,12 +9198,13 @@
         mount.innerHTML = '';
         return;
       }
-      if (badgeEl) { badgeEl.textContent = 'LIVE — BACKEND'; badgeEl.className = 'badge-live'; }
       if (!wallets.length) {
+        if (badgeEl) { badgeEl.textContent = 'EMPTY'; badgeEl.className = 'badge-inconclusive'; }
         if (statusEl) statusEl.textContent = 'No agent wallets yet — create an agent on the My Agents page first.';
         mount.innerHTML = '';
         return;
       }
+      if (badgeEl) { badgeEl.textContent = 'LIVE — BACKEND'; badgeEl.className = 'badge-live'; }
       if (statusEl) statusEl.textContent = wallets.length + ' agent wallet' + (wallets.length === 1 ? '' : 's') + ' for owner ' + owner.account + '. Balances come from the backend wallet records; the owner identity wallet balance is shown separately and never mixed in.';
       mount.innerHTML = wallets.map(w => {
         const balance = w.balanceMicroCcd !== null && w.balanceMicroCcd !== undefined ? fmtMicroCcd(w.balanceMicroCcd) : 'Not available — balance not yet fetched';
@@ -8885,14 +9278,27 @@
       const statusEl = document.getElementById('permissions-status-msg');
       const badge = document.getElementById('permissions-draft-badge');
       const tableBody = document.getElementById('perm-table-body');
+      const tableBadgeEl = document.getElementById('perm-table-badge');
+      const formBadgeEl = document.getElementById('perm-form-badge');
+      const recipsBadgeEl = document.getElementById('perm-recipients-badge');
+      const setPermBadgesUnavailable = () => {
+        if (tableBadgeEl) { tableBadgeEl.textContent = 'UNAVAILABLE'; tableBadgeEl.className = 'badge-failed'; }
+        if (formBadgeEl) { formBadgeEl.textContent = 'UNAVAILABLE'; formBadgeEl.className = 'badge-failed'; }
+        if (recipsBadgeEl) { recipsBadgeEl.textContent = 'UNAVAILABLE'; recipsBadgeEl.className = 'badge-failed'; }
+      };
+      /* T1.8: the Policy Ledger empty state (used wherever the table has
+         no rows — not bare headers). The CTA focuses the Spending Policy
+         form, which sits above the ledger table. */
+      const permEmptyRow = '<tr><td colspan="6" style="font-size:12.5px;color:var(--text-secondary);">No policies yet — grant your first permission using the form above. <button type="button" class="btn-sm-ghost perm-empty-cta" style="margin-left:8px;">Grant your first permission →</button></td></tr>';
       const approvalsMount = document.getElementById('pending-approvals-mount');
       const owner = ownerIdentity();
       if (badge) { badge.className = 'badge-inconclusive'; badge.textContent = 'LOADING'; }
       if (!owner || owner.state !== 'session-active') {
         if (badge) { badge.className = 'badge-inconclusive'; badge.textContent = 'NO ACTIVE OWNER SESSION'; }
         if (statusEl) statusEl.textContent = 'No active owner session — connect your Concordium Wallet from the header to view and set spending policy.';
-        if (tableBody) tableBody.innerHTML = '';
+        if (tableBody) tableBody.innerHTML = permEmptyRow;
         if (approvalsMount) approvalsMount.innerHTML = '';
+        setPermBadgesUnavailable();
         return;
       }
       let wallets;
@@ -8900,6 +9306,7 @@
         wallets = await fetchOwnerWallets();
       } catch (err) {
         if (statusEl) statusEl.textContent = 'Agent wallets unavailable — ' + escapeHtml(errText(err));
+        setPermBadgesUnavailable();
         return;
       }
       const sel = document.getElementById('perm-agent-select');
@@ -8919,7 +9326,8 @@
         else throw new Error(body && body.error ? body.error : 'HTTP ' + status);
       } catch (err) {
         if (statusEl) statusEl.textContent = 'Permission unavailable — ' + escapeHtml(errText(err));
-        if (tableBody) tableBody.innerHTML = '';
+        if (tableBody) tableBody.innerHTML = permEmptyRow;
+        setPermBadgesUnavailable();
         return;
       }
       const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v === null || v === undefined ? '' : String(v); };
@@ -8936,6 +9344,8 @@
           const st = perm.revoked ? ['REVOKED', 'badge-failed'] : perm.paused ? ['PAUSED', 'badge-inconclusive'] : perm.enabled ? ['ACTIVE — LIVE', 'badge-live'] : ['DISABLED', 'badge-inconclusive'];
           badge.className = st[1]; badge.textContent = st[0];
         }
+        if (tableBadgeEl) { tableBadgeEl.textContent = 'LIVE — BACKEND'; tableBadgeEl.className = 'badge-live'; }
+        if (formBadgeEl) { formBadgeEl.textContent = 'LIVE'; formBadgeEl.className = 'badge-live'; }
         if (statusEl) statusEl.textContent = 'Loaded the live permission for agent #' + escapeHtml(String(agentId)) + ' (updated ' + (perm.updatedAt ? new Date(perm.updatedAt * 1000).toLocaleString() : 'unknown') + ').';
         if (tableBody) {
           const todaySpent = perm.dailySpent && perm.dailySpent[utcDayKey()] ? perm.dailySpent[utcDayKey()] : '0';
@@ -8960,12 +9370,24 @@
         setVal('perm-allowlist', '');
         permCurrentAllowlist = null;
         if (badge) { badge.className = 'badge-inconclusive'; badge.textContent = 'NO PERMISSION YET'; }
+        if (tableBadgeEl) { tableBadgeEl.textContent = 'EMPTY'; tableBadgeEl.className = 'badge-inconclusive'; }
+        if (formBadgeEl) { formBadgeEl.textContent = 'EMPTY'; formBadgeEl.className = 'badge-inconclusive'; }
         if (statusEl) statusEl.textContent = 'No permission exists for agent #' + escapeHtml(String(agentId)) + ' yet — fill the form and Save to grant one (owner signature required).';
-        if (tableBody) tableBody.innerHTML = `<tr><td colspan="6" style="font-size:12.5px;color:var(--text-secondary);">No permission recorded for agent #${escapeHtml(String(agentId))}.</td></tr>`;
+        if (tableBody) tableBody.innerHTML = permEmptyRow;
       }
       renderPermAllowlistCheckboxes();
       loadPendingApprovals(agentId);
     }
+
+    /* T1.8: the Policy Ledger empty state's CTA focuses the Spending
+       Policy form (above the ledger table). Delegated so the button
+       works in every empty-state rendering, static or JS-built. */
+    document.addEventListener('click', (e) => {
+      const t = e.target && e.target.closest ? e.target.closest('.perm-empty-cta') : null;
+      if (!t) return;
+      const ta = document.getElementById('perm-allowlist');
+      if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus(); }
+    });
 
     // Recipient allowlist checkboxes, built from the LIVE registry's
     // payTo addresses (deduplicated). Checked = in the current allowlist.
@@ -8978,11 +9400,13 @@
         services = await fetchRegistryServices();
       } catch {
         el.innerHTML = '<p style="font-size:12.5px;color:var(--text-secondary);">Registry unavailable — allowlist checkboxes cannot be built. Type recipient addresses in the allowlist field instead.</p>';
+        setLiveBadge(document.getElementById('perm-recipients-badge'), 'UNAVAILABLE');
         return;
       }
       const payTos = [...new Set(services.map(s => s.pricing && s.pricing.payTo).filter(Boolean))];
       if (!payTos.length) {
         el.innerHTML = '<p style="font-size:12.5px;color:var(--text-secondary);">No recipient addresses in the live registry.</p>';
+        setLiveBadge(document.getElementById('perm-recipients-badge'), 'EMPTY');
         return;
       }
       const current = new Set(Array.isArray(permCurrentAllowlist) ? permCurrentAllowlist : []);
@@ -9006,6 +9430,7 @@
           if (ta) ta.value = checked.join('\n');
         });
       });
+      setLiveBadge(document.getElementById('perm-recipients-badge'), 'LIVE', 'LIVE');
     }
 
     async function loadPendingApprovals(agentId) {
@@ -9443,14 +9868,23 @@
     function renderAnalyticsChart(period = '7D') {
       const days = ANALYTICS_PERIODS[period] || 7;
       const svgs = document.querySelectorAll('.analytics-svg-target');
-      const emptySvg = (msg) => {
+      const setChartBadges = (state) => {
+        setLiveBadge(document.getElementById('dashboard-chart-badge'), state);
+        setLiveBadge(document.getElementById('analytics-chart-badge'), state);
+      };
+      /* T1.3: the empty message is a wrapped HTML overlay, not a single
+         SVG <text> line — the full sentence stays visible at any width. */
+      const emptySvg = (msg, badgeState) => {
         svgs.forEach(svg => {
-          svg.innerHTML = `<text x="300" y="130" text-anchor="middle" fill="#6B7280" font-size="13" font-family="monospace">${escapeHtml(msg)}</text>`;
+          svg.innerHTML = '';
+          const overlay = svg.parentElement ? svg.parentElement.querySelector('.chart-empty-overlay') : null;
+          if (overlay) { overlay.textContent = msg; overlay.hidden = false; }
         });
+        setChartBadges(badgeState || 'EMPTY');
       };
       fetchPaymentList().then(payments => {
         if (!payments.length) {
-          emptySvg('No payment records yet — nothing to chart.');
+          emptySvg('No payment records yet — nothing to chart.', 'EMPTY');
           return;
         }
         const now = Date.now();
@@ -9468,7 +9902,7 @@
         }
         const total = counts.reduce((a, b) => a + b, 0);
         if (total === 0) {
-          emptySvg('No payment records in the last ' + days + ' days.');
+          emptySvg('No payment records in the last ' + days + ' days.', 'EMPTY');
           return;
         }
         const left = 54, right = 568, top = 20, bottom = 222;
@@ -9494,9 +9928,14 @@
           return `<text x="${x}" y="${bottom + 24}" text-anchor="middle" fill="#6B7280" font-size="11.5" font-family="monospace" font-weight="600">${escapeHtml(lbl)}</text>`;
         }).join('');
         const markup = `${gridLines}${orangeBars}${xLabels}`;
-        svgs.forEach(svg => { svg.innerHTML = markup; });
+        svgs.forEach(svg => {
+          svg.innerHTML = markup;
+          const overlay = svg.parentElement ? svg.parentElement.querySelector('.chart-empty-overlay') : null;
+          if (overlay) { overlay.textContent = ''; overlay.hidden = true; }
+        });
+        setChartBadges('LIVE');
       }).catch(err => {
-        emptySvg('Payment records unavailable — ' + errText(err));
+        emptySvg('Payment records unavailable — ' + errText(err), 'UNAVAILABLE');
       });
     }
 
@@ -9554,7 +9993,7 @@
     modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
     /* =========================================================================
-       8. HASH-BASED ROUTER + SLIDE-IN DRAWER (TABLET/NARROW) + MOBILE MORE SHEET
+       8. HASH-BASED ROUTER + SLIDE-IN DRAWER (TABLET/NARROW)
        ========================================================================= */
     const validRoutes = [
       'dashboard',
@@ -9618,10 +10057,6 @@
         if (sidebarDrawer.classList.contains('drawer-open')) {
           closeDrawer(true);
         }
-        if (moreSheet.classList.contains('open')) {
-          moreSheet.classList.remove('open');
-          moreBtn.setAttribute('aria-expanded', 'false');
-        }
         if (modal.classList.contains('open')) {
           closeModal();
         }
@@ -9631,24 +10066,6 @@
     window.addEventListener('resize', () => {
       if (window.innerWidth > 1180 && sidebarDrawer.classList.contains('drawer-open')) {
         closeDrawer(false);
-      }
-    });
-
-    /* Mobile More Sheet Controls */
-    const moreSheet = document.getElementById('mobile-more-sheet');
-    const moreBtn = document.getElementById('mobile-more-btn');
-    moreBtn.addEventListener('click', () => {
-      moreSheet.classList.toggle('open');
-      moreBtn.setAttribute('aria-expanded', String(moreSheet.classList.contains('open')));
-    });
-    document.getElementById('close-more-sheet-btn').addEventListener('click', () => {
-      moreSheet.classList.remove('open');
-      moreBtn.setAttribute('aria-expanded', 'false');
-    });
-    moreSheet.addEventListener('click', e => {
-      if (e.target === moreSheet) {
-        moreSheet.classList.remove('open');
-        moreBtn.setAttribute('aria-expanded', 'false');
       }
     });
 
@@ -9712,13 +10129,8 @@
       document.querySelectorAll('[data-mobile-route]').forEach(el => {
         el.classList.toggle('active', el.dataset.mobileRoute === baseRoute);
       });
-      document.querySelectorAll('[data-sheet-route]').forEach(el => {
-        el.classList.toggle('active', el.dataset.sheetRoute === baseRoute);
-      });
 
       closeDrawer(false);
-      moreSheet.classList.remove('open');
-      moreBtn.setAttribute('aria-expanded', 'false');
 
       if (baseRoute === 'agents') {
         loadAgentsPage(subParam);
@@ -10118,6 +10530,16 @@
     /* =========================================================================
        10. P0-2: IDENTITY VERIFICATION CENTER — 5 DIMENSIONS ON LIGHT SURFACE
        ========================================================================= */
+    /* T1.5: a Concordium contract (index, subindex) as a labelled
+       CCDExplorer link. Both AgentTrust contracts are verified on
+       CCDExplorer testnet: 12802 is the CIS-8004 contract, 12801 the
+       CIS-8 contract. Never render the raw <index,subindex> tuple. */
+    function formatContractAddress(index, subindex) {
+      var idx = Number(index);
+      var sub = Number(subindex);
+      return '<a href="https://ccdexplorer.io/testnet/contract/' + idx + '/' + sub + '" target="_blank" rel="noopener" class="text-link">Contract ' + idx + ' · ' + sub + '</a>';
+    }
+
     const verificationDimensions = [
       {
         indexLabel: 'Dimension 01 / 05',
@@ -10125,7 +10547,7 @@
         statusText: 'LIVE - TESTNET',
         badgeHtml: '<span class="badge-live">LIVE - TESTNET</span>',
         note: 'Token 1004 is minted on Concordium Testnet; owner account matches the registry record.',
-        meta: 'Contract <12802,0> · Owner 4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d',
+        meta: formatContractAddress(12802, 0) + ' · Owner 4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d',
         colorHex: 0x16a34a
       },
       {
@@ -10188,7 +10610,7 @@
       detailBadgeEl.innerHTML = d.badgeHtml;
       detailTitleEl.textContent = d.title;
       detailNoteEl.textContent = d.note;
-      detailMetaEl.textContent = d.meta;
+      detailMetaEl.innerHTML = d.meta;
 
       nodeButtons.forEach((btn, i) => {
         btn.classList.toggle('active', i === idx);
