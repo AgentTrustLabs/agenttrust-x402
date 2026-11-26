@@ -216,7 +216,7 @@ function makeRegistryLoaderHarness(opts: {
   };
 }
 
-const cardCount = (h: RegistryLoaderHarness) => (h.listHtml().match(/vapi-provider-card/g) ?? []).length;
+const cardCount = (h: RegistryLoaderHarness) => (h.listHtml().match(/at-provider-card/g) ?? []).length;
 
 test('05. all records verified: the loader renders every card and counts them all', async () => {
   const records = [svc({ providerVerification: verified() }), svc({ providerVerification: verified() })];
