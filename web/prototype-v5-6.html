@@ -683,6 +683,17 @@
       flex-shrink: 0;
     }
 
+    /* Row-2 group (Docs + bell + theme): on desktop it is
+       display:contents, so its children stay direct flex items of
+       .at-header-right with the parent gap — desktop layout unchanged.
+       On mobile (<=768px rule below) it becomes a real flex item that
+       always starts a new row. It must never be a positioning context
+       (no position/transform/filter/will-change) or the mobile fixed
+       bell sheet / desktop absolute bell panel would re-anchor. */
+    .header-row2 {
+      display: contents;
+    }
+
     .docs-link {
       font-size: 13px;
       font-weight: 600;
@@ -3717,9 +3728,10 @@
         max-width: 100%;
       }
       /* Row 1: left group + Connect Wallet (order 1, pushed right).
-         Row 2: Docs & Spec + bell + theme toggle (order 2, clustered
-         left). display:contents makes the right group's children
-         direct flex items of the header; desktop is untouched. */
+         Row 2: Docs & Spec + bell + theme toggle inside .header-row2
+         (order 2, flex-basis 100%, clustered left). display:contents
+         makes .header-row2 and the wallet wrap direct flex items of
+         the header; desktop is untouched. */
       .at-header-right {
         display: contents;
       }
@@ -3727,10 +3739,25 @@
         order: 1;
         margin-left: auto;
       }
-      .docs-link,
-      .notify-popover-wrap,
-      #theme-toggle {
+      /* Row 2 enforced: Docs + bell + theme live in .header-row2,
+         a single flex item of the header with flex-basis 100%, so the
+         group ALWAYS starts a new row at <=768px regardless of how
+         much width row 1 leaves free (the old order:2-only approach
+         let Docs stay on row 1 at >=480px whenever it fit). The
+         wrapper is a plain left-aligned flex row
+         (justify-content: flex-start, gap 8px = header gap, no
+         space-between, no auto margins), so the bell sits immediately
+         adjacent to Docs & Spec. It has
+         no position/transform/filter/will-change, so it is not a
+         containing block for the fixed mobile bell sheet or the
+         absolute desktop bell panel. */
+      .header-row2 {
         order: 2;
+        flex: 1 1 100%;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 8px;
       }
       /* Bell popover (M11): on mobile the bell sits near the left edge,
          so the desktop 310px right:0 absolute panel ran 163px off the
@@ -4145,6 +4172,7 @@
     </div>
 
     <div class="at-header-right">
+      <div class="header-row2">
       <a href="#/settings" class="docs-link">Docs &amp; Spec</a>
       <div class="notify-popover-wrap">
         <button type="button" class="icon-btn" id="notify-btn" title="Protocol Status Summary" aria-label="Protocol Status Summary" aria-expanded="false" aria-controls="notify-popover">
@@ -4178,6 +4206,7 @@
           <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
         </svg>
       </button>
+      </div>
       <!-- Global wallet control (T5.1). The header is the single place for
            the Connect/Disconnect control; the Wallet page shows session
            info only. Exactly one control is visible at a time, driven by
