@@ -3732,6 +3732,27 @@
       #theme-toggle {
         order: 2;
       }
+      /* Bell popover (M11): on mobile the bell sits near the left edge,
+         so the desktop 310px right:0 absolute panel ran 163px off the
+         left edge. As a fixed full-width sheet it stays inside the
+         viewport. top 231px = measured testnet-banner bottom (223px at
+         390px, scroll 0) + 8px gap: the banner is a body flex item with
+         z-index 100, so it paints above the header (z-index 90) and
+         above this sheet, which lives inside the header stacking
+         context — a top of 166px (just below the header) would leave
+         the sheet's PROTOCOL STATUS row hidden behind the banner at
+         scroll 0. At 231px the whole sheet is readable at scroll 0;
+         when scrolled (banner gone) it floats below the sticky header.
+         Desktop (>=769px) keeps the absolute right:0 310px panel. */
+      .notify-popover {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        top: 231px;
+        width: auto;
+        max-height: calc(100vh - 247px);
+        overflow-y: auto;
+      }
       .kbd-shortcut {
         display: none;
       }
