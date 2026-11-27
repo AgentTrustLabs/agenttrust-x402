@@ -3366,6 +3366,119 @@
       border-color: var(--accent);
     }
 
+    /* Custom dropdown (replaces native <select>): one visual system for
+       every picker — dark navy surfaces, neon-blue accent, labels that
+       wrap instead of truncating. */
+    .at-dropdown {
+      position: relative;
+      width: 100%;
+    }
+
+    .at-dropdown-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      text-align: left;
+      cursor: pointer;
+      padding: 9px 11px;
+      border-radius: var(--radius-xs);
+      background: var(--bg-base);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      font-size: 12.5px;
+      font-family: var(--font-mono);
+      outline: none;
+    }
+
+    .at-dropdown-btn:hover:not(:disabled) {
+      border-color: var(--border-elevated);
+    }
+
+    .at-dropdown-btn:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+
+    .at-dropdown-btn[aria-expanded="true"] {
+      border-color: var(--accent);
+    }
+
+    .at-dropdown-btn:disabled {
+      cursor: not-allowed;
+      color: var(--text-secondary);
+      background: var(--bg-subtle);
+    }
+
+    .at-dropdown-btn[aria-invalid="true"] {
+      border-color: var(--danger, #DC2626);
+    }
+
+    .at-dropdown-value {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: break-word;
+    }
+
+    .at-dropdown-chevron {
+      flex: none;
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid var(--text-secondary);
+      border-bottom: 2px solid var(--text-secondary);
+      transform: rotate(45deg) translateY(-2px);
+      transition: transform 0.15s ease;
+    }
+
+    .at-dropdown-btn[aria-expanded="true"] .at-dropdown-chevron {
+      transform: rotate(225deg) translateY(-1px);
+    }
+
+    .at-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      z-index: 960;
+      max-height: min(240px, 50vh);
+      overflow-y: auto;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xs);
+      box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
+      padding: 4px;
+    }
+
+    .at-dropdown-menu[hidden] {
+      display: none;
+    }
+
+    .at-dropdown-option {
+      padding: 9px 11px;
+      border-radius: var(--radius-xs);
+      font-size: 12.5px;
+      font-family: var(--font-mono);
+      color: var(--text-primary);
+      cursor: pointer;
+      overflow-wrap: break-word;
+    }
+
+    .at-dropdown-option:hover,
+    .at-dropdown-option.at-dropdown-active {
+      background: var(--accent-soft);
+    }
+
+    .at-dropdown-option[aria-selected="true"] {
+      background: var(--accent-soft);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    .at-dropdown-option[aria-disabled="true"] {
+      color: var(--text-secondary);
+      cursor: not-allowed;
+    }
+
     .checkbox-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -4653,7 +4766,14 @@
           <div class="form-grid">
             <div class="form-field">
               <label for="a2a-skill-select">Skill</label>
-              <select id="a2a-skill-select" class="form-input"></select>
+              <div class="at-dropdown" data-at-dropdown>
+                <input type="hidden" id="a2a-skill-select" value="">
+                <button type="button" class="at-dropdown-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Skill" disabled>
+                  <span class="at-dropdown-value">Loading skills…</span>
+                  <span class="at-dropdown-chevron" aria-hidden="true"></span>
+                </button>
+                <div class="at-dropdown-menu" role="listbox" hidden></div>
+              </div>
             </div>
             <div class="form-field">
               <label for="a2a-caller-agent-input">Caller agent ID</label>
@@ -4866,7 +4986,14 @@
             <div class="form-grid">
               <div class="form-field" style="grid-column: 1 / -1;">
                 <label for="perm-agent-select">Agent</label>
-                <select id="perm-agent-select" class="form-select"></select>
+                <div class="at-dropdown" data-at-dropdown>
+                  <input type="hidden" id="perm-agent-select" value="">
+                  <button type="button" class="at-dropdown-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Agent" disabled>
+                    <span class="at-dropdown-value">Connect your wallet first</span>
+                    <span class="at-dropdown-chevron" aria-hidden="true"></span>
+                  </button>
+                  <div class="at-dropdown-menu" role="listbox" hidden></div>
+                </div>
                 <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;">Agents come from your provisioned agent wallets. Connect your wallet first if the list is empty.</div>
               </div>
               <div class="form-field">
@@ -4881,10 +5008,17 @@
               </div>
               <div class="form-field" style="grid-column: 1 / -1;">
                 <label for="perm-approval-mode">Execution Approval Mode</label>
-                <select id="perm-approval-mode" class="form-select">
-                  <option value="bounded_auto">Bounded Auto-Approval (within caps, no per-payment approval)</option>
-                  <option value="manual">Manual Operator Approval Per x402 Request</option>
-                </select>
+                <div class="at-dropdown" data-at-dropdown>
+                  <input type="hidden" id="perm-approval-mode" value="bounded_auto">
+                  <button type="button" class="at-dropdown-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Execution Approval Mode">
+                    <span class="at-dropdown-value">Bounded Auto-Approval (within caps, no per-payment approval)</span>
+                    <span class="at-dropdown-chevron" aria-hidden="true"></span>
+                  </button>
+                  <div class="at-dropdown-menu" role="listbox" hidden>
+                    <div class="at-dropdown-option" role="option" data-value="bounded_auto" aria-selected="true">Bounded Auto-Approval (within caps, no per-payment approval)</div>
+                    <div class="at-dropdown-option" role="option" data-value="manual" aria-selected="false">Manual Operator Approval Per x402 Request</div>
+                  </div>
+                </div>
                 <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;">Bounded auto-approval: payments must stay within the configured caps and use an eligible recipient on the allowlist.</div>
               </div>
               <details class="at-details" style="grid-column: 1 / -1;">
@@ -8758,7 +8892,16 @@
         card = await fetchAgentCard(fetch, a2aConfigOrThrow(), A2A_AGENT_ID);
       } catch (err) {
         statusEl.innerHTML = 'Agent Card unavailable — ' + escapeHtml(errText(err)) + ' No card shown.';
-        if (skillSelect) skillSelect.innerHTML = '';
+        if (skillSelect) {
+          skillSelect.value = '';
+          const skillDd = skillSelect.closest('[data-at-dropdown]');
+          const skillMenu = skillDd ? skillDd.querySelector('.at-dropdown-menu') : null;
+          if (skillMenu) skillMenu.innerHTML = '';
+          const skillLbl = skillDd ? skillDd.querySelector('.at-dropdown-value') : null;
+          if (skillLbl) skillLbl.textContent = 'No skills available';
+          const skillBtn = skillDd ? skillDd.querySelector('.at-dropdown-btn') : null;
+          if (skillBtn) skillBtn.disabled = true;
+        }
         if (submitBtn) submitBtn.disabled = true;
         return;
       }
@@ -8785,7 +8928,17 @@
         }).join('');
       }
       if (skillSelect) {
-        skillSelect.innerHTML = card.skills.map(s => '<option value="' + escapeHtml(s.id) + '">' + escapeHtml(s.id) + ' — ' + escapeHtml(s.name) + '</option>').join('');
+        const firstSkill = card.skills.length ? card.skills[0] : null;
+        skillSelect.value = firstSkill ? firstSkill.id : '';
+        const skillDd = skillSelect.closest('[data-at-dropdown]');
+        const skillMenu = skillDd ? skillDd.querySelector('.at-dropdown-menu') : null;
+        if (skillMenu) {
+          skillMenu.innerHTML = card.skills.map(s => '<div class="at-dropdown-option" role="option" data-value="' + escapeHtml(s.id) + '" aria-selected="' + (firstSkill && s.id === firstSkill.id ? 'true' : 'false') + '">' + escapeHtml(s.id) + ' — ' + escapeHtml(s.name) + '</div>').join('');
+        }
+        const skillLbl = skillDd ? skillDd.querySelector('.at-dropdown-value') : null;
+        if (skillLbl) skillLbl.textContent = firstSkill ? firstSkill.id + ' — ' + firstSkill.name : 'No skills available';
+        const skillBtn = skillDd ? skillDd.querySelector('.at-dropdown-btn') : null;
+        if (skillBtn) skillBtn.disabled = !card.skills.length;
       }
       if (submitBtn) submitBtn.disabled = false;
     }
@@ -9382,6 +9535,122 @@
       return sel && sel.value ? sel.value : permCurrentAgentId;
     }
 
+    /* Custom dropdown system: one reusable picker replacing the native
+       <select> elements. Each picker is a [data-at-dropdown] container
+       holding a hidden input (same id as the old select — the value
+       store every reader already uses), a button (the visible control)
+       and a listbox menu. Selecting writes the hidden input and fires
+       a bubbling change event, so existing listeners keep working. */
+    let atDropdownOpen = null;
+
+    function atDropdownCloseAll(except) {
+      document.querySelectorAll('[data-at-dropdown] .at-dropdown-btn[aria-expanded="true"]').forEach(btn => {
+        if (except && btn.closest('[data-at-dropdown]') === except) return;
+        btn.setAttribute('aria-expanded', 'false');
+        const menu = btn.closest('[data-at-dropdown]').querySelector('.at-dropdown-menu');
+        if (menu) menu.hidden = true;
+        btn.removeAttribute('aria-activedescendant');
+      });
+      if (!except) atDropdownOpen = null;
+    }
+
+    function atDropdownOptions(container) {
+      return [...container.querySelectorAll('.at-dropdown-option:not([aria-disabled="true"])')];
+    }
+
+    function atDropdownSetActive(container, option) {
+      const btn = container.querySelector('.at-dropdown-btn');
+      container.querySelectorAll('.at-dropdown-option').forEach(o => o.classList.toggle('at-dropdown-active', o === option));
+      if (option) {
+        if (!option.id) option.id = 'at-opt-' + Math.random().toString(36).slice(2, 8);
+        btn.setAttribute('aria-activedescendant', option.id);
+      } else {
+        btn.removeAttribute('aria-activedescendant');
+      }
+    }
+
+    function atDropdownSelect(container, option) {
+      if (!option || option.getAttribute('aria-disabled') === 'true') return;
+      const input = container.querySelector('input[type="hidden"]');
+      const label = container.querySelector('.at-dropdown-value');
+      const value = option.getAttribute('data-value') || '';
+      if (input) {
+        input.value = value;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (label) label.textContent = option.textContent;
+      container.querySelectorAll('.at-dropdown-option').forEach(o => o.setAttribute('aria-selected', o === option ? 'true' : 'false'));
+      atDropdownCloseAll();
+      const btn = container.querySelector('.at-dropdown-btn');
+      if (btn) btn.focus();
+    }
+
+    function atDropdownOpenMenu(container, focusLast) {
+      atDropdownCloseAll(container);
+      const btn = container.querySelector('.at-dropdown-btn');
+      const menu = container.querySelector('.at-dropdown-menu');
+      if (!btn || btn.disabled || !menu) return;
+      menu.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      atDropdownOpen = container;
+      const input = container.querySelector('input[type="hidden"]');
+      const current = input ? input.value : '';
+      const options = atDropdownOptions(container);
+      const selected = options.find(o => (o.getAttribute('data-value') || '') === current) || null;
+      atDropdownSetActive(container, focusLast ? (options[options.length - 1] || null) : (selected || options[0] || null));
+    }
+
+    function atDropdownInit() {
+      document.querySelectorAll('[data-at-dropdown]').forEach(container => {
+        const btn = container.querySelector('.at-dropdown-btn');
+        const menu = container.querySelector('.at-dropdown-menu');
+        if (!btn || !menu) return;
+        btn.addEventListener('click', () => {
+          if (btn.disabled) return;
+          if (btn.getAttribute('aria-expanded') === 'true') atDropdownCloseAll();
+          else atDropdownOpenMenu(container, false);
+        });
+        btn.addEventListener('keydown', (e) => {
+          if (btn.disabled) return;
+          const open = btn.getAttribute('aria-expanded') === 'true';
+          if (e.key === 'Escape') {
+            if (open) { e.preventDefault(); atDropdownCloseAll(); btn.focus(); }
+            return;
+          }
+          if (e.key === 'Tab') { if (open) atDropdownCloseAll(); return; }
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!open) { atDropdownOpenMenu(container, e.key === 'ArrowUp'); return; }
+            const options = atDropdownOptions(container);
+            if (!options.length) return;
+            const active = container.querySelector('.at-dropdown-option.at-dropdown-active');
+            let idx = options.indexOf(active);
+            if (e.key === 'ArrowDown') idx = idx < 0 ? 0 : Math.min(options.length - 1, idx + 1);
+            else idx = idx <= 0 ? 0 : idx - 1;
+            atDropdownSetActive(container, options[idx]);
+            return;
+          }
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (!open) { atDropdownOpenMenu(container, false); return; }
+            const active = container.querySelector('.at-dropdown-option.at-dropdown-active');
+            if (active) atDropdownSelect(container, active);
+          }
+        });
+        menu.addEventListener('click', (e) => {
+          const option = e.target && e.target.closest ? e.target.closest('.at-dropdown-option') : null;
+          if (option) atDropdownSelect(container, option);
+        });
+      });
+      document.addEventListener('pointerdown', (e) => {
+        if (atDropdownOpen && e.target && !atDropdownOpen.contains(e.target)) atDropdownCloseAll();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && atDropdownOpen) atDropdownCloseAll();
+      });
+    }
+
+
     function utcDayKey() {
       const d = new Date();
       return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
@@ -9424,6 +9693,14 @@
         if (tableBody) tableBody.innerHTML = permEmptyRow;
         if (approvalsMount) approvalsMount.innerHTML = '';
         setPermBadgesUnavailable();
+        const agentSel = document.getElementById('perm-agent-select');
+        if (agentSel) {
+          const dd = agentSel.closest('[data-at-dropdown]');
+          const lbl = dd ? dd.querySelector('.at-dropdown-value') : null;
+          if (lbl) lbl.textContent = 'Connect your wallet first';
+          const b = dd ? dd.querySelector('.at-dropdown-btn') : null;
+          if (b) b.disabled = true;
+        }
         return;
       }
       let wallets;
@@ -9432,14 +9709,33 @@
       } catch (err) {
         if (statusEl) statusEl.textContent = 'Agent wallets unavailable — ' + escapeHtml(errText(err));
         setPermBadgesUnavailable();
+        const agentSel = document.getElementById('perm-agent-select');
+        if (agentSel) {
+          const dd = agentSel.closest('[data-at-dropdown]');
+          const lbl = dd ? dd.querySelector('.at-dropdown-value') : null;
+          if (lbl) lbl.textContent = 'Agent wallets unavailable';
+          const b = dd ? dd.querySelector('.at-dropdown-btn') : null;
+          if (b) b.disabled = true;
+        }
         return;
       }
       const sel = document.getElementById('perm-agent-select');
       if (sel) {
         const prev = sel.value || permCurrentAgentId || owner.agentId;
-        sel.innerHTML = wallets.length
-          ? wallets.map(w => `<option value="${escapeHtml(String(w.agentId))}"${String(w.agentId) === String(prev) ? ' selected' : ''}>Agent #${escapeHtml(String(w.agentId))} — ${escapeHtml(w.walletId)}</option>`).join('')
-          : '<option value="">No agent wallets</option>';
+        const agentOpts = wallets.map(w => ({ value: String(w.agentId), label: 'Agent #' + w.agentId + ' — ' + w.walletId }));
+        const chosenAgent = agentOpts.some(o => o.value === String(prev)) ? String(prev) : (agentOpts.length ? agentOpts[0].value : '');
+        const agentDd = sel.closest('[data-at-dropdown]');
+        const agentMenu = agentDd ? agentDd.querySelector('.at-dropdown-menu') : null;
+        if (agentMenu) {
+          agentMenu.innerHTML = agentOpts.length
+            ? agentOpts.map(o => '<div class="at-dropdown-option" role="option" data-value="' + escapeHtml(o.value) + '" aria-selected="' + (o.value === chosenAgent ? 'true' : 'false') + '">' + escapeHtml(o.label) + '</div>').join('')
+            : '<div class="at-dropdown-option" role="option" data-value="" aria-selected="true" aria-disabled="true">No agent wallets</div>';
+        }
+        sel.value = chosenAgent;
+        const agentLbl = agentDd ? agentDd.querySelector('.at-dropdown-value') : null;
+        if (agentLbl) agentLbl.textContent = agentOpts.length ? agentOpts.find(o => o.value === chosenAgent).label : 'No agent wallets';
+        const agentBtn = agentDd ? agentDd.querySelector('.at-dropdown-btn') : null;
+        if (agentBtn) agentBtn.disabled = !agentOpts.length;
       }
       const agentId = permSelectedAgent() || (wallets[0] && String(wallets[0].agentId)) || owner.agentId;
       permCurrentAgentId = agentId;
@@ -9462,7 +9758,15 @@
         setVal('perm-period-limit', perm.limits.periodMicroCcd);
         setVal('perm-period-seconds', perm.limits.periodSeconds);
         const modeEl = document.getElementById('perm-approval-mode');
-        if (modeEl) modeEl.value = perm.policy;
+        if (modeEl) {
+          modeEl.value = perm.policy;
+          const modeDd = modeEl.closest('[data-at-dropdown]');
+          if (modeDd) modeDd.querySelectorAll('[role="option"]').forEach(o => {
+            const on = o.getAttribute('data-value') === modeEl.value;
+            o.setAttribute('aria-selected', on ? 'true' : 'false');
+            if (on) { const l = modeDd.querySelector('.at-dropdown-value'); if (l) l.textContent = o.textContent; }
+          });
+        }
         setVal('perm-allowlist', Array.isArray(perm.recipientAllowlist) ? perm.recipientAllowlist.join('\n') : '');
         permCurrentAllowlist = perm.recipientAllowlist;
         if (badge) {
@@ -9491,7 +9795,15 @@
         setVal('perm-period-limit', '');
         setVal('perm-period-seconds', '');
         const modeEl = document.getElementById('perm-approval-mode');
-        if (modeEl) modeEl.value = 'bounded_auto';
+        if (modeEl) {
+          modeEl.value = 'bounded_auto';
+          const modeDd = modeEl.closest('[data-at-dropdown]');
+          if (modeDd) modeDd.querySelectorAll('[role="option"]').forEach(o => {
+            const on = o.getAttribute('data-value') === modeEl.value;
+            o.setAttribute('aria-selected', on ? 'true' : 'false');
+            if (on) { const l = modeDd.querySelector('.at-dropdown-value'); if (l) l.textContent = o.textContent; }
+          });
+        }
         setVal('perm-allowlist', '');
         permCurrentAllowlist = null;
         if (badge) { badge.className = 'badge-inconclusive'; badge.textContent = 'NO PERMISSION YET'; }
@@ -9735,6 +10047,7 @@
     document.getElementById('resume-permissions-btn').addEventListener('click', () => permissionControl('resume'));
     document.getElementById('revoke-permissions-btn').addEventListener('click', () => permissionControl('revoke'));
     document.getElementById('perm-agent-select').addEventListener('change', () => loadPermissionsPage());
+    atDropdownInit();
     loadPermissionsPage();
 
     // Real Concordium Browser Wallet connection (T5). The Connect Wallet
