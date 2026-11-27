@@ -3707,6 +3707,7 @@
       }
       .at-global-header {
         flex-wrap: wrap;
+        justify-content: flex-start;
         padding: 10px 12px;
         gap: 8px;
       }
@@ -3715,8 +3716,21 @@
         flex: 1 1 100%;
         max-width: 100%;
       }
+      /* Row 1: left group + Connect Wallet (order 1, pushed right).
+         Row 2: Docs & Spec + bell + theme toggle (order 2, clustered
+         left). display:contents makes the right group's children
+         direct flex items of the header; desktop is untouched. */
       .at-header-right {
-        gap: 6px;
+        display: contents;
+      }
+      .header-wallet-wrap {
+        order: 1;
+        margin-left: auto;
+      }
+      .docs-link,
+      .notify-popover-wrap,
+      #theme-toggle {
+        order: 2;
       }
       .kbd-shortcut {
         display: none;
@@ -4073,12 +4087,6 @@
 </head>
 <body>
 
-  <!-- COMPACT TESTNET LABEL (replaces the oversized Honesty Notice banner) -->
-  <div class="honesty-banner" role="note">
-    <span class="badge-inconclusive">Concordium Testnet &middot; Read-only</span>
-    <span>Viewing records does not make a payment.</span>
-  </div>
-
   <!-- AgentTrust GLOBAL TOP BAR WITH HAMBURGER (TABLET/NARROW), PRODUCT-ICON ROW, SEARCH, DOCS & WALLET PILL -->
   <header class="at-global-header">
     <div class="at-header-left">
@@ -4172,6 +4180,12 @@
       </div>
     </div>
   </header>
+
+  <!-- COMPACT TESTNET LABEL (replaces the oversized Honesty Notice banner) -->
+  <div class="honesty-banner" role="note">
+    <span class="badge-inconclusive">Concordium Testnet &middot; Read-only</span>
+    <span>Viewing records does not make a payment.</span>
+  </div>
 
   <!-- SCRIM BACKDROP FOR SLIDE-IN DRAWER (TABLET / NARROW WIDTHS) -->
   <div class="drawer-scrim" id="drawer-scrim" aria-hidden="true"></div>
