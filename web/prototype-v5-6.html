@@ -683,7 +683,7 @@
       flex-shrink: 0;
     }
 
-    /* Row-2 group (Docs + bell + theme): on desktop it is
+    /* Row-2 group (bell + theme): on desktop it is
        display:contents, so its children stay direct flex items of
        .at-header-right with the parent gap — desktop layout unchanged.
        On mobile (<=768px rule below) it becomes a real flex item that
@@ -692,20 +692,6 @@
        bell sheet / desktop absolute bell panel would re-anchor. */
     .header-row2 {
       display: contents;
-    }
-
-    .docs-link {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary);
-      text-decoration: underline;
-      text-underline-offset: 3px;
-      padding: 6px 8px;
-      white-space: nowrap;
-    }
-
-    .docs-link:hover {
-      color: var(--accent);
     }
 
     .icon-btn {
@@ -3728,7 +3714,7 @@
         max-width: 100%;
       }
       /* Row 1: left group + Connect Wallet (order 1, pushed right).
-         Row 2: Docs & Spec + bell + theme toggle inside .header-row2
+         Row 2: bell + theme toggle inside .header-row2
          (order 2, flex-basis 100%, clustered left). display:contents
          makes .header-row2 and the wallet wrap direct flex items of
          the header; desktop is untouched. */
@@ -3739,15 +3725,15 @@
         order: 1;
         margin-left: auto;
       }
-      /* Row 2 enforced: Docs + bell + theme live in .header-row2,
+      /* Row 2 enforced: bell + theme live in .header-row2,
          a single flex item of the header with flex-basis 100%, so the
          group ALWAYS starts a new row at <=768px regardless of how
          much width row 1 leaves free (the old order:2-only approach
-         let Docs stay on row 1 at >=480px whenever it fit). The
+         let the group stay on row 1 at >=480px whenever it fit). The
          wrapper is a plain left-aligned flex row
          (justify-content: flex-start, gap 8px = header gap, no
          space-between, no auto margins), so the bell sits immediately
-         adjacent to Docs & Spec. It has
+         adjacent to the theme toggle; it has
          no position/transform/filter/will-change, so it is not a
          containing block for the fixed mobile bell sheet or the
          absolute desktop bell panel. */
@@ -3782,10 +3768,6 @@
       }
       .kbd-shortcut {
         display: none;
-      }
-      .docs-link {
-        font-size: 12px;
-        padding: 4px 5px;
       }
       .main-area {
         padding: 16px 14px 48px 14px;
@@ -4173,7 +4155,6 @@
 
     <div class="at-header-right">
       <div class="header-row2">
-      <a href="#/settings" class="docs-link">Docs &amp; Spec</a>
       <div class="notify-popover-wrap">
         <button type="button" class="icon-btn" id="notify-btn" title="Protocol Status Summary" aria-label="Protocol Status Summary" aria-expanded="false" aria-controls="notify-popover">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -5535,6 +5516,7 @@
             </div>
             <div class="at-footer-col">
               <h4>Developers</h4>
+              <a href="#/settings">Docs &amp; Spec</a>
               <a href="#/identity">Agent identity</a>
               <a href="https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json" target="_blank" rel="noopener">Agent card (JSON)</a>
               <a href="https://api.sabokun.my.id/agenttrust/api/payments" target="_blank" rel="noopener">Live payments API</a>
