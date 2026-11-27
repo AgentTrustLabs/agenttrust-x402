@@ -1424,6 +1424,13 @@
       gap: 16px;
     }
 
+    /* A lone card (loading / error / empty state) does not stretch a
+       3-column row: the row is constrained to the card's own width until
+       a real second card exists. */
+    .stats-grid:has(> :only-child) {
+      grid-template-columns: minmax(300px, 460px);
+    }
+
     .stat-card {
       padding: 18px 20px;
       display: flex;
@@ -1563,7 +1570,7 @@
 
     .dossier-top-row {
       display: grid;
-      grid-template-columns: 136px 1fr;
+      grid-template-columns: 1fr;
       gap: 14px;
       align-items: center;
       padding: 10px 12px;
@@ -1721,6 +1728,7 @@
       display: grid;
       grid-template-columns: 1.35fr 1.15fr 260px;
       gap: 18px;
+      align-items: start;
     }
 
     .analytics-card {
@@ -1742,9 +1750,9 @@
     }
 
     .period-btn {
-      padding: 4px 11px;
+      padding: 12px 18px;
       border-radius: var(--radius-pill);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
       font-family: var(--font-mono);
       color: var(--text-secondary);
@@ -2782,7 +2790,7 @@
       display: grid;
       grid-template-columns: 1fr 1.38fr;
       gap: 20px;
-      align-items: stretch;
+      align-items: start;
     }
 
     .identity-panel {
@@ -3162,7 +3170,7 @@
       display: grid;
       grid-template-columns: 1.45fr 1fr;
       gap: 18px;
-      align-items: stretch;
+      align-items: start;
     }
 
     .distribution-bar-list {
@@ -3197,9 +3205,9 @@
 
     .docs-side-list {
       list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 24px;
       border-left: 1px solid var(--border-hairline);
       padding-left: 12px;
     }
@@ -3933,7 +3941,22 @@
     #page-settings #settings-card-manifest .kv-row { background-color: var(--at-inset); }
     #settings-theme-btn { background-color: var(--primary); color: var(--on-primary); }
     #settings-motion-btn { border-color: var(--at-edge); }
-  </style>
+      /* T4.3: site footer, once in the shell — renders on every route. */
+    .at-site-footer {
+      border-top: 1px solid var(--border-hairline);
+      background: var(--bg-surface);
+      margin-top: 8px;
+    }
+    .at-footer-inner { max-width: 1280px; margin: 0 auto; padding: 40px 20px 24px; }
+    .at-footer-grid { display: grid; grid-template-columns: 1fr; gap: 32px; }
+    @media (min-width: 768px) { .at-footer-grid { grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; } }
+    .at-footer-brand p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; max-width: 280px; margin-top: 12px; }
+    .at-footer-brand .brand-logo { width: 32px; height: 32px; }
+    .at-footer-col h4 { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-primary); margin-bottom: 16px; }
+    .at-footer-col a { display: block; font-size: 14px; color: var(--text-secondary); margin-bottom: 10px; text-decoration: none; }
+    .at-footer-col a:hover { color: var(--text-primary); }
+    .at-footer-bottom { border-top: 1px solid var(--border-hairline); margin-top: 40px; padding-top: 24px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; font-size: 13px; color: var(--text-muted); }
+</style>
 </head>
 <body>
 
@@ -4277,7 +4300,7 @@
                 <span class="layer-num">L1</span>
                 <div class="profile-row-left">
                   <span class="profile-row-title">Verification Status</span>
-                  <span class="profile-row-sub">verifyAgent pending in prod</span>
+                  <span class="profile-row-sub">verifyAgent pending in production</span>
                 </div>
                 <span><span class="badge-pending">PENDING</span> <span class="badge-demo">DEMO</span></span>
               </div>
@@ -4775,6 +4798,10 @@
                   <span class="kv-label">Sponsored x402 Settlement Evidence</span>
                   <span class="kv-val" id="wallet-settlement-summary">Loading settlement counts from the live payment records…</span>
                 </div>
+                <div class="kv-row">
+                  <span class="kv-label">Latest finalized settlements</span>
+                  <span class="kv-val" id="wallet-latest-settlements">Loading latest settlements from the live payment records…</span>
+                </div>
                 <div class="kv-row" style="border-left-color:var(--accent);">
                   <span class="kv-label">Concordium Mainnet / Production Status</span>
                   <span class="kv-val">See <a href="#/providers" class="text-link">Providers</a> for live service registry results; <code>verifyAgent</code> for token 1004 is <strong>PENDING</strong>.</span>
@@ -5123,7 +5150,6 @@
             <span class="card-title">Live Settlements — Facilitator Records</span>
           </div>
           <p id="live-payment-summary" role="status" aria-live="polite">Loading payment records from GET /api/payments… Counts are not yet available. This read-only request does not make a payment.</p>
-          <p class="at-summary-line">Counts apply to the returned list, not all-time activity.</p>
           <div class="tx-table-wrap" id="live-tx-table-mount"></div>
         </div>
 
@@ -5133,7 +5159,7 @@
         <!-- Earlier Settlements — 11 November 2026 (Historical Archive), collapsed -->
         <details class="at-details" id="archive-details">
           <summary>Historical archive &middot; 11 Nov 2026 <span class="badge-demo">HISTORICAL ARCHIVE</span></summary>
-          <p class="at-summary-line" style="margin:8px 0 12px;">Four earlier settlements from 11 November 2026. Archive records are not counted in the live totals above, and their finality is not confirmed.</p>
+          <p class="at-summary-line" style="margin:8px 0 12px;">Four earlier settlements from 11 November 2026. Archive records are not counted in the live totals above, and their finality is not confirmed. The highlighted row is the settlement whose receipt is shown in the inspector above — select any row to inspect it.</p>
           <div class="tx-table-wrap" id="transactions-page-table-mount"></div>
         </details>
         <details class="at-details" style="margin-top:16px;">
@@ -5220,7 +5246,6 @@
           <div class="inspector-card" id="settings-card-appearance">
             <div class="card-header">
               <span class="card-title">Local preferences</span>
-              <span class="badge-verified">Local Preferences</span>
             </div>
             <div style="display:flex;flex-direction:column;gap:12px;">
               <div class="inspector-field" style="flex-direction:row;align-items:center;justify-content:space-between;">
@@ -5285,6 +5310,50 @@
           </div>
         </div>
       </section>
+      <!-- Site footer (T4.3): once in the shell, renders on every route. -->
+      <footer class="at-site-footer">
+        <div class="at-footer-inner">
+          <div class="at-footer-grid">
+            <div class="at-footer-brand">
+              <a href="/" class="brand">
+                <svg class="brand-logo" viewBox="0 0 48 48" fill="none">
+                  <rect x="3" y="3" width="42" height="42" rx="10" fill="#0A1633"/>
+                  <path d="M24 10 12 36h6.5L24 24.5 29.5 36H36L24 10Z" fill="#FFFFFF"/>
+                  <rect x="19" y="29" width="10" height="4" rx="1" fill="#38BDF8"/>
+                </svg>
+                <div>
+                  <span class="brand-title">AgentTrust</span>
+                  <span class="brand-sub">x402</span>
+                </div>
+              </a>
+              <p>Secure &amp; transparent AI agent economy on Concordium. Identity, permission, and settlement — verifiable on-chain.</p>
+              <div style="margin-top:16px;"><span class="badge-live">Concordium Testnet</span></div>
+            </div>
+            <div class="at-footer-col">
+              <h4>Product</h4>
+              <a href="#/dashboard">Dashboard</a>
+              <a href="#/discover">Discover agents</a>
+              <a href="#/transactions">Transactions</a>
+            </div>
+            <div class="at-footer-col">
+              <h4>Developers</h4>
+              <a href="#/identity">Agent identity</a>
+              <a href="https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json" target="_blank" rel="noopener">Agent card (JSON)</a>
+              <a href="https://api.sabokun.my.id/agenttrust/api/payments" target="_blank" rel="noopener">Live payments API</a>
+            </div>
+            <div class="at-footer-col">
+              <h4>Resources</h4>
+              <a href="/">Landing page</a>
+              <a href="https://wallet.sabokun.my.id" target="_blank" rel="noopener">Production site</a>
+              <a href="https://ccdexplorer.io/testnet/" target="_blank" rel="noopener">CCDExplorer (Testnet)</a>
+            </div>
+          </div>
+          <div class="at-footer-bottom">
+            <span>© 2026 AgentTrust x402</span>
+            <span>Built on Concordium · Powered by x402 · All figures are live Testnet data</span>
+          </div>
+        </div>
+      </footer>
     </main>
   </div>
 
@@ -6661,6 +6730,27 @@
         const archRange = archBlocks.length ? ' (Blocks ' + Math.min.apply(null, archBlocks) + ' – ' + Math.max.apply(null, archBlocks) + ')' : '';
         wsEl.textContent = fin.length + ' real 1 µCCD transfer' + (fin.length === 1 ? '' : 's') + ' finalized on Concordium Testnet' + liveRange + ' · ' + archRows.length + ' earlier settlement' + (archRows.length === 1 ? '' : 's') + ', finality not confirmed' + archRange;
       }
+      // Latest finalized settlements (wallet right card): the same fetched
+      // list, newest first — hash links to CCDScan, block when known.
+      // Guarded: the test harness returns null for this id, so the
+      // extracted updater never calls helpers the harness lacks.
+      const wlEl = document.getElementById('wallet-latest-settlements');
+      if (wlEl) {
+        const finSettled = payments.filter(p => p && p.state === 'finalized');
+        if (!finSettled.length) {
+          wlEl.textContent = 'No finalized settlements yet.';
+        } else {
+          wlEl.innerHTML = finSettled.map(p => {
+            const h = typeof p.transactionHash === 'string' ? p.transactionHash : '';
+            const id = h || (typeof p.paymentDigest === 'string' ? p.paymentDigest : '');
+            const short = id ? escapeHtml(id.slice(0, 8)) + '…' + escapeHtml(id.slice(-8)) : 'not available';
+            const b = Number(p.blockHeight);
+            const blockTxt = Number.isFinite(b) ? ' · Block #' + b : '';
+            const link = h ? '<a class="tx-link" target="_blank" rel="noopener" href="' + escapeHtml(ccdscanTxUrl(h)) + '">' + short + ' ↗</a>' : short;
+            return link + blockTxt;
+          }).join('<br>');
+        }
+      }
       // PM-01-R1: this helper updates the KPI count and the stored summary
       // only. It must not publish a success status: the loader publishes
       // the success status only after every required content operation
@@ -6886,6 +6976,8 @@
             : '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator could not be reached. The historical archive below is unaffected.</p>';
         const wsErrEl = document.getElementById('wallet-settlement-summary');
         if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
+        const wlErrEl = document.getElementById('wallet-latest-settlements');
+        if (wlErrEl) wlErrEl.textContent = 'Latest settlements unavailable — the live payment records could not be loaded.';
         return;
       }
       if (isStale()) return;
@@ -6896,6 +6988,8 @@
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable (HTTP ' + res.status + '). The historical archive below is unaffected.</p>';
         const wsErrEl = document.getElementById('wallet-settlement-summary');
         if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
+        const wlErrEl = document.getElementById('wallet-latest-settlements');
+        if (wlErrEl) wlErrEl.textContent = 'Latest settlements unavailable — the live payment records could not be loaded.';
         return;
       }
       let data;
@@ -6910,6 +7004,8 @@
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — the facilitator returned an unreadable response. The historical archive below is unaffected.</p>';
         const wsErrEl = document.getElementById('wallet-settlement-summary');
         if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
+        const wlErrEl = document.getElementById('wallet-latest-settlements');
+        if (wlErrEl) wlErrEl.textContent = 'Latest settlements unavailable — the live payment records could not be loaded.';
         return;
       }
       if (isStale()) return;
@@ -6927,6 +7023,8 @@
         mount.innerHTML = '<p style="padding:16px;font-size:13px;color:var(--text-secondary);">Live settlements unavailable — unexpected response shape. The historical archive below is unaffected.</p>';
         const wsErrEl = document.getElementById('wallet-settlement-summary');
         if (wsErrEl) wsErrEl.textContent = 'Settlement counts unavailable — the live payment records could not be loaded.';
+        const wlErrEl = document.getElementById('wallet-latest-settlements');
+        if (wlErrEl) wlErrEl.textContent = 'Latest settlements unavailable — the live payment records could not be loaded.';
         return;
       }
       if (payments.length === 0) {
