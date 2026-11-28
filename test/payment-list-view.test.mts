@@ -3,27 +3,49 @@
  * the facilitator's live settlement records from GET /api/payments above
  * the historical archive, and never present archive rows as live.
  *
- * Asserts, on the page markup and the list code:
+ * Contract as of the Sol §6 redesign (e92172f) and the fetch-timeout work
+ * (ca35dc6). The expectations below were re-based on that contract after
+ * the suite drifted from it: the file was last green at 9e4340f (25/25)
+ * and unchanged since, while the page moved on. The Sol §6 behaviour is
+ * the verified spec — it is pinned by the green suites
+ * agent-a-website-evidence (tests 11–15, 12b), agent-a-website-page-
+ * consistency (test 23) and live-tx-kpi (tests 13, 17, 18), all green in
+ * CI on the same head — not by this file alone:
  *   - the live section exists above the archive section, with its own
  *     mount; the archive section is headed "Earlier Settlements —
  *     11 November 2026" and labelled HISTORICAL ARCHIVE;
  *   - the list fetches `apiUrl('/api/payments')` from a single call site,
- *     with no retry-on-failure; it re-fetches on a 30-second timer and on
- *     navigation to the Transactions page, but only while that page is
- *     visible, and a refresh never replaces the table with an error and
- *     never re-renders an unchanged payload; the initial route change
- *     skips its refresh because the initial load already fetched;
+ *     with no retry-on-failure; the single fetch races a 10-second
+ *     timeout (T1.2) that rejects with TimeoutError and never re-fetches.
+ *     It re-fetches on a 30-second timer and on navigation to the
+ *     Transactions page, but only while that page is visible, and a
+ *     refresh never replaces the table with an error and never re-renders
+ *     an unchanged payload; the initial route change skips its refresh
+ *     because the initial load already fetched;
  *   - archive rows (buildTxTableHTML, podium) carry HISTORICAL ARCHIVE
  *     and no LIVE - TESTNET badge;
- *   - live row status follows the stored state only: finalized shows
- *     FINALIZED — STORED STATE, any other state shows NOT FINALIZED;
- *     the list code contains no live-verification badge;
+ *   - live row status (Sol §6 outcome mapping): stored finalized without
+ *     evidence shows "Stored as finalized"; the same row with genuine
+ *     evidence shows the green "Finalized" badge; outcome_unknown shows
+ *     "Outcome unknown · not finalized"; any other state shows
+ *     "Not finalized — <STATE>". The badge keys off the whole row —
+ *     liveRowStateBadge(p) — because the Finalized badge needs the proof
+ *     gate, not just the stored state;
+ *   - the table is exactly six columns (Agent, Amount, Outcome, Finality
+ *     evidence, Transaction, Action). Block, sponsored fee, sender,
+ *     recipient and time are NOT table columns: the receipt inspector
+ *     exposes them (agent-a-website-evidence 12b);
+ *   - the proof cell reads "Finality evidence available" only when the
+ *     proof gate passes (stored finalized plus genuine evidence) and
+ *     "Finality evidence unavailable" otherwise; the table makes no
+ *     percentage claim. The 100% itself lives at the gate
+ *     (liveProofProgress), never in the rendered table;
  *   - live rows that also appear in the archive are dropped from the
  *     archive (deduplication), and the loading / empty / error states
  *     exist;
- *   - block, amount, fee, sender and recipient cells render the real
- *     values from the enriched list response, and honestly read
- *     "not available" only when the evidence is absent.
+ *   - amount cells render the real value from the enriched list response;
+ *     the formatters honestly read "not available" only when the
+ *     evidence is absent.
  *
  * Static analysis only — no browser, no server. The inspector and its
  * F1 gate are covered by payment-detail-view.test.mts, not here.
@@ -75,9 +97,17 @@ test('01. live section sits above the archive section, each with its own mount',
 test('02. the list fetches GET /api/payments from a single call site, with no retry-on-failure', () => {
   const fetches = (listBody.match(/fetch\(apiUrl\('\/api\/payments'\)\)/g) ?? []).length;
   eq(fetches, 1, 'one list fetch');
-  notOk(listBody.includes('setTimeout'), 'no retry timer in the list code');
+  // The loader races the single fetch against a 10 s timeout (T1.2,
+  // ca35dc6): that setTimeout rejects with TimeoutError and never
+  // re-invokes the loader, so it is a timeout, not a retry. A blanket ban
+  // on setTimeout predates the timeout race; what the contract forbids is
+  // a retry timer, and the only timer in the list code is the race.
+  eq((listBody.match(/setTimeout/g) ?? []).length, 1, 'the only timer in the list code is the fetch timeout');
+  ok(listBody.includes('const txTimeout = new Promise'), 'the timer is the fetch-timeout race');
+  ok(listBody.includes("timeoutErr.name = 'TimeoutError'"), 'the timer rejects as a timeout, never retries');
   notOk(listBody.includes('setInterval'), 'no timer inside the loader itself');
-  ok(listBody.includes("await fetch(apiUrl('/api/payments'))"), 'fetch uses the configured API base');
+  ok(listBody.includes("fetch(apiUrl('/api/payments'))"), 'fetch uses the configured API base, one argument');
+  ok(listBody.includes("Promise.race([fetch(apiUrl('/api/payments')), txTimeout])"), 'fetch races the 10 s timeout');
 });
 
 test('03. no live payment hash is hardcoded in the list code', () => {
@@ -94,12 +124,21 @@ test('04. archive rows carry HISTORICAL ARCHIVE, never a LIVE badge', () => {
   notOk(podiumBody.includes('LIVE - TESTNET'), 'podium has no LIVE badge');
 });
 
-test('05. live row status follows the stored state only', () => {
-  ok(listBody.includes('FINALIZED — STORED STATE'), 'finalized rows show the stored-state badge');
-  ok(listBody.includes('NOT FINALIZED — '), 'non-finalized rows show NOT FINALIZED');
-  ok(listBody.includes('liveRowStateBadge(p.state)'), 'badge keys off the stored state');
-  notOk(listBody.includes('LIVE TESTNET VERIFICATION'), 'no live-verification badge in the list code');
-  notOk(listBody.includes('badge-live'), 'no live badge class in the list code');
+test('05. live row status distinguishes stored-finalized from evidence-backed finalized (Sol §6)', () => {
+  // Sol §6 outcome mapping, pinned by live-tx-kpi 17/18 and
+  // agent-a-website-evidence 11–15: stored finalized without evidence
+  // shows 'Stored as finalized'; with genuine evidence the same row
+  // shows the green 'Finalized' badge; outcome_unknown shows
+  // 'Outcome unknown · not finalized'; any other state shows
+  // 'Not finalized — <STATE>'. The badge keys off the whole row —
+  // liveRowStateBadge(p) — because the Finalized badge needs the proof
+  // gate, not just the stored state.
+  ok(listBody.includes('Stored as finalized'), 'stored-only rows show the stored-finalized badge');
+  ok(listBody.includes('>Finalized<'), 'evidenced rows show the Finalized badge');
+  ok(listBody.includes('Outcome unknown · not finalized'), 'outcome_unknown rows show the unknown badge');
+  ok(listBody.includes('Not finalized — '), 'other states show NOT FINALIZED');
+  ok(listBody.includes('liveRowStateBadge(p)'), 'badge keys off the row (state + proof gate)');
+  notOk(listBody.includes('LIVE TESTNET VERIFICATION'), 'no live-verification badge text in the list code');
   ok(listBody.includes('v.available === true'), 'evidence is read only through the strict live-proof gate');
   ok(listBody.includes('renderLiveProofProgress(p)'), 'the proof cell renders through the evidence gate');
 });
@@ -120,17 +159,31 @@ test('07. loading, empty and error states exist and name the archive as unaffect
   ok(listBody.includes('The historical archive below is unaffected'), 'error states point at the intact archive');
 });
 
-test('08. live rows render the real block, amount, fee, sender and recipient from the enriched list', () => {
-  ok(listBody.includes('formatLiveBlock(p)'), 'block cell renders the enriched block height');
+test('08. live rows render the Sol six-column table; detail fields live in the receipt inspector', () => {
+  // Sol §6 (pinned by agent-a-website-evidence 12/12b/13): the table
+  // columns are exactly Agent, Amount, Outcome, Finality evidence,
+  // Transaction, Action. Block, sponsored fee, sender, recipient and
+  // time are NOT table columns — the receipt inspector exposes them.
+  // The row still renders the real enriched amount and links to the
+  // inspector and CCDScan.
+  ok(listBody.includes('<th>Agent</th>'), 'agent column');
+  ok(listBody.includes('<th>Amount</th>'), 'amount column');
+  ok(listBody.includes('<th>Outcome</th>'), 'outcome column');
+  ok(listBody.includes('<th>Finality evidence</th>'), 'finality evidence column');
+  ok(listBody.includes('<th>Transaction</th>'), 'transaction column');
+  ok(listBody.includes('<th>Action</th>'), 'action column');
   ok(listBody.includes('formatLiveAmount(p)'), 'amount cell renders the enriched amount');
-  ok(listBody.includes('formatLiveFee(p)'), 'fee cell renders the enriched sponsor fee');
-  ok(listBody.includes('shortAddr(p.sender)'), 'sender cell renders the enriched sender');
-  ok(listBody.includes('shortAddr(p.recipient)'), 'recipient cell renders the enriched recipient');
+  ok(listBody.includes('liveRowStateBadge(p)'), 'outcome cell renders the state badge');
+  ok(listBody.includes('renderLiveProofProgress(p)'), 'evidence cell renders through the proof gate');
+  notOk(listBody.includes('formatLiveBlock(p)'), 'no block column under Sol §6');
+  notOk(listBody.includes('formatLiveFee(p)'), 'no sponsored-fee column under Sol §6');
+  notOk(listBody.includes('shortAddr(p.sender)'), 'no sender column under Sol §6');
+  notOk(listBody.includes('shortAddr(p.recipient)'), 'no recipient column under Sol §6');
+  notOk(listBody.includes('formatLiveTxTime(p.updatedAt)'), 'no time column under Sol §6');
   ok(html.includes('function formatLiveBlock'), 'block formatter exists');
   ok(html.includes('function formatLiveAmount'), 'amount formatter exists');
   ok(html.includes('function formatLiveFee'), 'fee formatter exists');
   ok(html.includes('function shortAddr'), 'address shortener exists');
-  ok(listBody.includes('formatLiveTxTime(p.updatedAt)'), 'row time comes from the stored updated_at');
   ok(listBody.includes('#/transactions/'), 'rows link to the detail inspector');
   ok(listBody.includes('ccdscanTxUrl(p.transactionHash)'), 'rows link to CCDScan when a tx hash exists');
 });
@@ -157,7 +210,7 @@ const liveProofProgress = new Function(`return ${extractFunctionSource('liveProo
 };
 const escapeHtmlForProbe = (value: unknown): string =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-const liveRowStateBadge = new Function('escapeHtml', `return ${extractFunctionSource('liveRowStateBadge')}`)(escapeHtmlForProbe) as unknown as (state: unknown) => string;
+const liveRowStateBadge = new Function('escapeHtml', 'liveProofProgress', `return ${extractFunctionSource('liveRowStateBadge')}`)(escapeHtmlForProbe, liveProofProgress) as unknown as (p: unknown) => string;
 const renderLiveProofProgress = new Function('escapeHtml', 'liveProofProgress', `return ${extractFunctionSource('renderLiveProofProgress')}`)(escapeHtmlForProbe, liveProofProgress) as unknown as (p: unknown) => string;
 const formatLiveBlock = new Function('escapeHtml', `return ${extractFunctionSource('formatLiveBlock')}`)(escapeHtmlForProbe) as unknown as (p: unknown) => string;
 const formatLiveAmount = new Function('escapeHtml', `return ${extractFunctionSource('formatLiveAmount')}`)(escapeHtmlForProbe) as unknown as (p: unknown) => string;
@@ -179,10 +232,17 @@ test('09. stored finalized without live evidence never renders 100%', () => {
   ok(String(proof.label).includes('NOT VERIFIED'), 'label says not verified');
 });
 
-test('10. stored finalized keeps the FINALIZED — STORED STATE label', () => {
-  ok(liveRowStateBadge('finalized').includes('FINALIZED — STORED STATE'), 'stored-state label kept');
-  ok(liveRowStateBadge('outcome_unknown').includes('NOT FINALIZED'), 'non-finalized keeps NOT FINALIZED');
-  notOk(liveRowStateBadge('outcome_unknown').includes('FINALIZED — STORED STATE'), 'no stored-finalized label on non-finalized');
+test('10. stored finalized keeps the Stored as finalized label (Sol §6)', () => {
+  // Sol §6: the badge keys off the whole row, so the probe passes rows,
+  // not bare state strings. Stored finalized without evidence keeps the
+  // stored-only label; the same row with genuine evidence shows
+  // 'Finalized'; outcome_unknown never shows either finalized label.
+  const evidence = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
+  ok(liveRowStateBadge({ state: 'finalized' }).includes('Stored as finalized'), 'stored-only label kept');
+  ok(liveRowStateBadge({ state: 'finalized', finalized: true, verification: evidence }).includes('>Finalized<'), 'evidenced row shows Finalized');
+  ok(liveRowStateBadge({ state: 'outcome_unknown' }).includes('Outcome unknown · not finalized'), 'non-finalized keeps the unknown label');
+  notOk(liveRowStateBadge({ state: 'outcome_unknown' }).includes('Stored as finalized'), 'no stored-finalized label on non-finalized');
+  notOk(liveRowStateBadge({ state: 'outcome_unknown' }).includes('>Finalized<'), 'no Finalized badge on non-finalized');
 });
 
 test('11. stored non-finalized gets no proof and no finality badge', () => {
@@ -216,26 +276,33 @@ test('13. partial or forged evidence fails closed', () => {
   }
 });
 
-test('15. valid evidence renders 100% together with the VERIFIED FINALITY label', () => {
+test('15. valid evidence renders the Finality evidence available label, with no percentage claim in the table', () => {
+  // Sol §6: the table makes no percentage claim (agent-a-website-evidence
+  // 12: 'no percentage claim in the table'). The 100% itself is pinned at
+  // the gate by test 12 (liveProofProgress percent 100); the table cell
+  // renders the evidence-available label.
   const evidence = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
   const html = renderLiveProofProgress({ state: 'finalized', verification: evidence });
-  ok(html.includes('100%'), 'renders the percentage');
-  ok(html.includes('VERIFIED FINALITY'), 'renders the verified label explicitly');
+  ok(html.includes('Finality evidence available'), 'renders the evidence-available label');
+  notOk(html.includes('Finality evidence unavailable'), 'no unavailable label on valid evidence');
   notOk(html.includes('NOT VERIFIED'), 'no not-verified label on valid evidence');
+  notOk(html.includes('100%'), 'no percentage claim in the table');
+  notOk(html.includes('VERIFIED FINALITY'), 'no verified-finality label in the table cell');
 });
 
-test('16. stored state without evidence renders NOT VERIFIED and no percentage', () => {
+test('16. stored state without evidence renders Finality evidence unavailable and no verified claim', () => {
   for (const row of [{ state: 'finalized' }, { state: 'outcome_unknown' }, {}]) {
     const html = renderLiveProofProgress(row);
-    ok(html.includes('NOT VERIFIED'), 'renders the not-verified label');
+    ok(html.includes('Finality evidence unavailable'), 'renders the unavailable label');
     ok(html.includes('evidence unavailable'), 'states that evidence is unavailable');
+    notOk(html.includes('Finality evidence available'), 'no available claim without evidence');
     notOk(html.includes('100%'), 'no percentage without evidence');
     notOk(html.includes('VERIFIED FINALITY'), 'no verified label without evidence');
     notOk(html.includes('width:'), 'no progress bar without evidence');
   }
 });
 
-test('17. partial or forged evidence renders fail-closed, never 100%', () => {
+test('17. partial or forged evidence renders fail-closed, never an available claim', () => {
   const base = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
   const cases: unknown[] = [
     { ...base, finalized: false },
@@ -248,7 +315,8 @@ test('17. partial or forged evidence renders fail-closed, never 100%', () => {
   ];
   for (const bad of cases) {
     const html = renderLiveProofProgress({ state: 'finalized', verification: bad });
-    ok(html.includes('NOT VERIFIED'), 'renders not-verified');
+    ok(html.includes('Finality evidence unavailable'), 'renders the unavailable label');
+    notOk(html.includes('Finality evidence available'), 'no available claim');
     notOk(html.includes('100%'), 'no percentage');
     notOk(html.includes('VERIFIED FINALITY'), 'no verified label');
   }
@@ -311,12 +379,13 @@ test('22. a null or missing payment never throws the proof gate (Sol v3 regressi
     eq(proof.percent, null, 'no percent from a missing row');
     ok(String(proof.label).includes('NOT VERIFIED'), 'label says not verified');
     const html = renderLiveProofProgress(row);
-    ok(html.includes('NOT VERIFIED'), 'renders the not-verified label');
+    ok(html.includes('Finality evidence unavailable'), 'renders the unavailable label');
+    notOk(html.includes('Finality evidence available'), 'no available claim from a missing row');
     notOk(html.includes('100%'), 'no percentage from a missing row');
   }
 });
 
-test('23. genuine evidence without a stored finalized state never renders 100% (Sol v3 regression)', () => {
+test('23. genuine evidence without a stored finalized state never renders an available claim (Sol v3 regression)', () => {
   const evidence = { available: true, observed: 'finalized', finalized: true, source: 'concordium-grpc', blockHash: 'a'.repeat(64) };
   // Evidence alone must not imply finality: the stored state has to agree,
   // matching the detail inspector's stored-finalized-plus-live-evidence rule.
@@ -327,11 +396,16 @@ test('23. genuine evidence without a stored finalized state never renders 100% (
   ]) {
     eq(liveProofProgress(row).percent, null, 'no percent without stored finalized state');
     const html = renderLiveProofProgress(row);
-    ok(html.includes('NOT VERIFIED'), 'renders the not-verified label');
+    ok(html.includes('Finality evidence unavailable'), 'renders the unavailable label');
+    notOk(html.includes('Finality evidence available'), 'no available claim');
     notOk(html.includes('100%'), 'no percentage');
   }
-  // Control: stored finalized plus the same evidence still renders 100%.
+  // Control: stored finalized plus the same evidence still passes the gate
+  // and renders the available claim (no percentage claim in the table).
   eq(liveProofProgress({ state: 'finalized', finalized: true, verification: evidence }).percent, 100, 'stored finalized plus evidence renders 100%');
+  const html = renderLiveProofProgress({ state: 'finalized', finalized: true, verification: evidence });
+  ok(html.includes('Finality evidence available'), 'stored finalized plus evidence renders the available label');
+  notOk(html.includes('100%'), 'no percentage claim in the table');
 });
 
 test('24. a whitespace-only evidence source is rejected (audit B1 regression)', () => {
@@ -343,15 +417,17 @@ test('24. a whitespace-only evidence source is rejected (audit B1 regression)', 
     const proof = liveProofProgress({ state: 'finalized', verification: { ...base, source } });
     eq(proof.percent, null, 'blank source never passes the gate');
     const html = renderLiveProofProgress({ state: 'finalized', verification: { ...base, source } });
-    ok(html.includes('NOT VERIFIED'), 'blank source renders not-verified');
+    ok(html.includes('Finality evidence unavailable'), 'blank source renders the unavailable label');
+    notOk(html.includes('Finality evidence available'), 'blank source renders no available claim');
     notOk(html.includes('100%'), 'blank source renders no percentage');
     notOk(html.includes('VERIFIED FINALITY'), 'blank source renders no verified label');
   }
-  // Control: the same evidence with a real source still renders 100%.
+  // Control: the same evidence with a real source still passes the gate
+  // and renders the available claim (no percentage claim in the table).
   eq(liveProofProgress({ state: 'finalized', verification: base }).percent, 100, 'valid source still passes the gate');
   const html = renderLiveProofProgress({ state: 'finalized', verification: base });
-  ok(html.includes('100%'), 'valid source renders the percentage');
-  ok(html.includes('VERIFIED FINALITY'), 'valid source renders the verified label');
+  ok(html.includes('Finality evidence available'), 'valid source renders the available label');
+  notOk(html.includes('100%'), 'no percentage claim in the table');
 });
 
 test('25. a finite out-of-range timestamp formats as not available (INT-02 regression)', () => {
