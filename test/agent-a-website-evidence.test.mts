@@ -41,7 +41,10 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { eq, ok, notOk } from './helpers.mjs';
-import { InMemoryPermissionBackend, PermissionManager } from '../src/pairing/permissions.js';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { AccountAddress, signMessage } from '@concordium/web-sdk';
+import { makeFakeAccountInfo } from '../services/facilitator/src/senderVerifier.js';
+import { PermissionManager } from '../src/pairing/permissions.js';
 
 const CAIP2 = 'ccd:4221332d34e1694168c2a0c0b3fd0f27';
 const OWNER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
@@ -348,6 +351,51 @@ test('05. owner wallet is separated from agent wallets and never shown as signin
   ok(ui.includes("fSigning.textContent = state === 'session-active' ? 'Enabled (session active)' : 'Disabled (no session)'"), 'signing field only ever reflects the session state');
 });
 
+// ── permission fixtures (same grant pattern as agent-wallet-permissions) ──
+
+function makeTestKey() {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const rawPub = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex');
+  const signer = {
+    async sign(digest: ArrayBuffer) {
+      const sig = sign(null, Buffer.from(digest), privateKey);
+      return { 0: { 0: sig.toString('hex') } };
+    },
+    getSignatureCount() {
+      return 1n;
+    },
+  };
+  return { signer, accountInfo: makeFakeAccountInfo({ address: OWNER, verifyKey: rawPub }) };
+}
+
+/** Grant a permission with a freshly signed owner challenge. */
+async function grant(
+  mgr: PermissionManager,
+  opts: {
+    agent?: string;
+    limits: { perTxMicroCcd: bigint | null; dailyMicroCcd: bigint | null; periodMicroCcd: bigint | null; periodSeconds: number | null };
+    allowlist?: string[] | null;
+    policy?: 'manual' | 'bounded_auto';
+  },
+) {
+  const key = makeTestKey();
+  const agent = opts.agent ?? '1004';
+  const challenge = mgr.issueChallenge({ walletAddress: OWNER, agentId: agent, network: CAIP2, action: 'grant' });
+  const signature = await signMessage(AccountAddress.fromBase58(OWNER), challenge.message, key.signer as never);
+  return mgr.grantPermission({
+    walletAddress: OWNER,
+    agentId: agent,
+    network: CAIP2,
+    pairingId: 'p1',
+    limits: opts.limits,
+    recipientAllowlist: opts.allowlist ?? null,
+    policy: opts.policy ?? 'bounded_auto',
+    challenge,
+    signature,
+    accountInfo: key.accountInfo as never,
+  });
+}
+
 // ── Permissions ──────────────────────────────────────────────────────────
 
 test('06. Permissions shows ACTIVE only for an enabled, unrevoked, unpaused policy; no policy → NO PERMISSION YET', () => {
@@ -360,18 +408,15 @@ test('06. Permissions shows ACTIVE only for an enabled, unrevoked, unpaused poli
   ok(src.includes('perm.recipientAllowlist'), 'allowlist comes from the backend record');
 });
 
-test('07. backend: Agent A holds a bounded_auto policy with limits; Agent B holds none', () => {
-  const backend = new InMemoryPermissionBackend();
-  backend.savePermission({
-    pairingId: 'p1', agentId: '1004', walletAddress: OWNER, network: CAIP2,
-    enabled: true, paused: false, revoked: false,
+test('07. backend: Agent A holds a bounded_auto policy with limits; Agent B holds none', async () => {
+  const mgr = new PermissionManager({ now: () => 1000000000000 });
+  const res = await grant(mgr, {
+    agent: '1004',
     limits: { perTxMicroCcd: 1n, dailyMicroCcd: 10n, periodMicroCcd: 100n, periodSeconds: 604800 },
-    recipientAllowlist: [PAY_TO], policy: 'bounded_auto',
-    expiresAt: null, createdAt: 1000000000, updatedAt: 1000000000,
-    dailySpent: new Map(), periodStart: Math.floor(1000000000 / 86400) * 86400, periodSpent: 0n,
-    reservations: new Map(), approvals: new Map(),
+    allowlist: [PAY_TO],
+    policy: 'bounded_auto',
   });
-  const mgr = new PermissionManager({ backend, now: () => 1000000000000 });
+  ok(res.ok, 'grant succeeds');
   const permA = mgr.getPermission(OWNER, '1004', CAIP2);
   ok(permA, 'Agent A permission exists');
   eq(permA!.policy, 'bounded_auto', 'bounded_auto policy');
@@ -386,19 +431,17 @@ test('07. backend: Agent A holds a bounded_auto policy with limits; Agent B hold
   eq(mgr.getPermission(OWNER, '1005', CAIP2), undefined, 'Agent B has no permission');
 });
 
-test('08. a paused or revoked permission never qualifies for the ACTIVE display', () => {
-  const backend = new InMemoryPermissionBackend();
-  const base = {
-    pairingId: 'p1', agentId: '1004', walletAddress: OWNER, network: CAIP2, enabled: true,
+test('08. a paused or revoked permission never qualifies for the ACTIVE display', async () => {
+  const mgr = new PermissionManager({ now: () => 1000000000000 });
+  await grant(mgr, {
+    agent: '1004',
     limits: { perTxMicroCcd: 1n, dailyMicroCcd: null, periodMicroCcd: null, periodSeconds: null },
-    recipientAllowlist: null, policy: 'bounded_auto' as const, expiresAt: null,
-    createdAt: 1000000000, updatedAt: 1000000000, dailySpent: new Map(),
-    periodStart: 0, periodSpent: 0n, reservations: new Map(), approvals: new Map(),
-  };
-  backend.savePermission({ ...base, paused: true, revoked: false });
-  const mgr = new PermissionManager({ backend, now: () => 1000000000000 });
+    allowlist: null,
+    policy: 'bounded_auto',
+  });
+  mgr.pausePermission(OWNER, '1004', CAIP2);
   eq(mgr.getPermission(OWNER, '1004', CAIP2)?.paused, true, 'paused record reads back paused');
-  backend.savePermission({ ...base, paused: false, revoked: true });
+  mgr.revokePermission(OWNER, '1004', CAIP2);
   eq(mgr.getPermission(OWNER, '1004', CAIP2)?.revoked, true, 'revoked record reads back revoked');
   // The page badge ternary (test 06) maps paused → PAUSED and revoked →
   // REVOKED, never ACTIVE — LIVE.
