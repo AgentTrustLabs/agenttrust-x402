@@ -6551,13 +6551,18 @@
        row's detail and merges it into the row before the table renders.
        It is the only live source the list uses: no hashes are hardcoded
        here, and the resource server only returns payments routed through
-       AgentTrust. Row status follows the STORED state only: a finalized
-       row shows FINALIZED — STORED STATE, never a live-verification
-       badge; any other state shows NOT FINALIZED. Block, amount and
-       sponsored fee show the real values when the evidence is available
-       and honestly read "not available" when it is not — inspect the row
-       for the full evidence. One list fetch, no retry: on any failure the
-       section shows an error and the archive below is unaffected. */
+       AgentTrust. Row status (Sol §6 outcome mapping): stored finalized
+       without evidence shows 'Stored as finalized'; with genuine
+       evidence the same row shows the green 'Finalized' badge;
+       outcome_unknown shows 'Outcome unknown · not finalized'; any other
+       state shows 'Not finalized — <STATE>'. The table is exactly six
+       columns (Agent, Amount, Outcome, Finality evidence, Transaction,
+       Action): block, sender, recipient, sponsored fee and time are not
+       table columns — inspect the row for the full evidence in the
+       receipt inspector. One list fetch, no retry: the single fetch
+       races a 10 s timeout that rejects with TimeoutError and never
+       re-fetches; on any failure the section shows an error and the
+       archive below is unaffected. */
 
     // Per-row detail enrichment for the live list. The stored list never
     // carries block, sender, sponsor fee, energy, or verification
