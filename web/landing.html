@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentTrust x402 — Secure &amp; Transparent AI Agent Economy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='3' y='3' width='42' height='42' rx='10' fill='%230A1633'/%3E%3Cpath d='M24 10 12 36h6.5L24 24.5 29.5 36H36L24 10Z' fill='%23FFFFFF'/%3E%3Crect x='19' y='29' width='10' height='4' rx='1' fill='%2338BDF8'/%3E%3C/svg%3E" />
+<meta name="description" content="AgentTrust x402 — secure and transparent AI agent economy on Concordium Testnet. Identity, permission, and settlement — verifiable on-chain.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AgentTrust x402 — Secure &amp; Transparent AI Agent Economy">
+<meta property="og:description" content="Powering autonomous AI agents with safe, programmable payments on Concordium and x402. Real Testnet settlements, verifiable on-chain.">
+<meta property="og:url" content="https://wallet.sabokun.my.id/">
+<meta property="og:image" content="https://wallet.sabokun.my.id/hero.webp">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://wallet.sabokun.my.id/">
+<meta name="twitter:image" content="https://wallet.sabokun.my.id/hero.webp">
+<script>(function(){var h=location.hash;if(h&&h.indexOf("#/")===0){location.replace("/app.html"+h);}})();</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #020611;
+    color: #fff;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  ::selection { background: rgba(59, 130, 246, 0.30); }
+  a { text-decoration: none; }
+  button { font-family: inherit; background: none; border: none; cursor: pointer; }
+
+  /* Hero stage: centers the framed hero */
+  .hero-stage {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  @media (min-width: 640px) { .hero-stage { padding: 16px; } }
+  @media (min-width: 1024px) { .hero-stage { padding: 24px; } }
+
+  /* Animations (from LandingHero.tsx <style>) */
+  @keyframes heroFloat {
+    0%, 100% { transform: translateY(0px) scale(1.02); }
+    50% { transform: translateY(-10px) scale(1.035); }
+  }
+  @keyframes pulseGlow {
+    0%, 100% { opacity: 0.45; transform: scale(1); }
+    50% { opacity: 0.85; transform: scale(1.08); }
+  }
+  @keyframes shimmerSweep {
+    0% { transform: translateX(-120%) skewX(-20deg); }
+    60%, 100% { transform: translateX(220%) skewX(-20deg); }
+  }
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-hero-float { animation: heroFloat 6s ease-in-out infinite; }
+  .animate-pulse-glow { animation: pulseGlow 4.5s ease-in-out infinite; }
+  .animate-shimmer { animation: shimmerSweep 3.8s ease-in-out infinite; }
+  .animate-enter-1 { animation: fadeSlideUp 0.65s ease-out 0.05s both; }
+  .animate-enter-2 { animation: fadeSlideUp 0.65s ease-out 0.15s both; }
+  .animate-enter-3 { animation: fadeSlideUp 0.65s ease-out 0.25s both; }
+  .animate-enter-4 { animation: fadeSlideUp 0.65s ease-out 0.35s both; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .animate-hero-float, .animate-pulse-glow, .animate-shimmer, .animate-enter-1, .animate-enter-2, .animate-enter-3, .animate-enter-4 { animation: none !important; }
+    .parallax-wrap { transition: none; }
+  }
+
+  /* Main Framed Hero Container (16:10) */
+  .frame {
+    position: relative;
+    width: 100%;
+    max-width: 1280px;
+    min-height: 100vh;
+    overflow: hidden;
+    background: #040B1E;
+    border: none;
+    box-shadow: 0 0 90px rgba(29, 78, 216, 0.38);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  @media (min-width: 640px) {
+    .frame { min-height: 760px; border-radius: 16px; border: 1px solid rgba(59, 130, 246, 0.25); }
+  }
+
+  /* Layer 1: Interactive 3D Parallax & Ambient Floating Background */
+  .parallax-wrap {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    transition: transform 0.3s ease-out;
+    will-change: transform;
+    transform: perspective(1200px) rotateX(0deg) rotateY(0deg) scale(1.04);
+  }
+  .hero-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 72% center;
+    opacity: 0.40;
+  }
+  @media (min-width: 640px) { .hero-img { opacity: 0.70; } }
+  @media (min-width: 1024px) { .hero-img { opacity: 0.95; object-position: right; } }
+
+  /* Layer 2: Ambient Volumetric Pulse & Specular Glare */
+  .pulse-blob {
+    pointer-events: none;
+    position: absolute;
+    right: 12%; top: 24%;
+    width: 360px; height: 360px;
+    border-radius: 9999px;
+    background: rgba(59, 130, 246, 0.25);
+    filter: blur(95px);
+    display: none;
+  }
+  .glare {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    transition: opacity 0.3s;
+    display: none;
+    background: radial-gradient(circle 420px at 50% 50%, rgba(96, 165, 250, 0.14), transparent 70%);
+  }
+  @media (min-width: 1024px) { .pulse-blob { display: block; } .glare { display: block; } }
+
+  /* Layer 3: Contrast & Lighting Gradient Overlays */
+  .overlay-radial {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 15% 15%, rgba(29, 78, 216, 0.52) 0%, rgba(4, 11, 30, 0.25) 45%, rgba(2, 6, 17, 0.72) 100%);
+  }
+  .overlay-mobile-v {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(3, 9, 27, 0.80), rgba(3, 9, 27, 0.55), rgba(3, 9, 27, 0.85));
+  }
+  @media (min-width: 1024px) { .overlay-mobile-v { display: none; } }
+  .overlay-left {
+    pointer-events: none;
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: 60%;
+    background: linear-gradient(to right, rgba(3, 9, 27, 0.85), rgba(3, 9, 27, 0.45), transparent);
+    display: none;
+  }
+  @media (min-width: 1024px) { .overlay-left { display: block; } }
+
+  /* Layer 4: Top Navigation Bar */
+  header.hero-nav {
+    position: relative;
+    z-index: 20;
+    width: 100%;
+    padding: 20px 20px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  @media (min-width: 640px) { header.hero-nav { padding: 28px 48px 12px; } }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  @media (min-width: 640px) { .brand { gap: 12px; } }
+  .brand-name { font-size: 18px; font-weight: 700; letter-spacing: -0.025em; color: #fff; }
+  @media (min-width: 640px) { .brand-name { font-size: 24px; } }
+  .brand-name .light { font-weight: 400; color: #e2e8f0; }
+  .logo-svg { width: 28px; height: 28px; }
+  @media (min-width: 640px) { .logo-svg { width: 32px; height: 32px; } }
+  nav.main-nav { display: none; align-items: center; gap: 36px; font-size: 15px; font-weight: 500; color: #e2e8f0; }
+  .menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9999px; color: #e2e8f0; background: rgba(10, 21, 53, 0.80); border: 1px solid rgba(96, 165, 250, 0.40); }
+  .menu-btn svg { width: 18px; height: 18px; }
+  @media (min-width: 768px) { .menu-btn { display: none; } }
+  @media (max-width: 767px) {
+    header.hero-nav { position: relative; }
+    nav.main-nav.open { display: flex; position: absolute; top: calc(100% + 8px); left: 20px; right: 20px; flex-direction: column; align-items: stretch; gap: 0; padding: 8px; border-radius: 16px; background: rgba(4, 11, 30, 0.97); border: 1px solid rgba(96, 165, 250, 0.35); box-shadow: 0 16px 48px rgba(2, 6, 17, 0.7); z-index: 50; }
+    nav.main-nav.open a { padding: 12px 12px; border-radius: 10px; }
+    nav.main-nav.open a:hover { background: rgba(37, 99, 235, 0.18); }
+  }
+  @media (min-width: 768px) { nav.main-nav { display: flex; } }
+  nav.main-nav a {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: #e2e8f0; transition: color 0.15s;
+  }
+  nav.main-nav a:hover { color: #fff; }
+  nav.main-nav a svg { width: 14px; height: 14px; color: #94a3b8; }
+  .connect-btn {
+    padding: 8px 16px;
+    border-radius: 9999px;
+    font-size: 12px; font-weight: 500;
+    color: #fff;
+    background: rgba(10, 21, 53, 0.80);
+    border: 1px solid rgba(96, 165, 250, 0.40);
+    box-shadow: 0 0 20px rgba(37, 99, 235, 0.3);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: background 0.15s;
+  }
+  @media (min-width: 640px) { .connect-btn { padding: 10px 24px; font-size: 14px; } }
+  .connect-btn:hover { background: #142659; }
+
+  /* Layer 5: Hero Copywriting & Dual Horizontal Pill Buttons */
+  main.hero-main {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    padding: 24px 20px;
+    margin-top: 24px;
+    margin-bottom: auto;
+  }
+  @media (min-width: 640px) {
+    main.hero-main { padding: 40px 48px; margin-top: auto; margin-bottom: auto; }
+  }
+  .hero-copy { max-width: 576px; text-align: left; }
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.14;
+    margin-bottom: 16px;
+  }
+  @media (min-width: 640px) { h1 { font-size: 48px; margin-bottom: 20px; } }
+  @media (min-width: 1024px) { h1 { font-size: 58px; } }
+  h1 .line { display: block; }
+  h1 .line-1 { color: #fff; }
+  h1 .line-2 { color: #78A2FF; }
+  .hero-sub {
+    max-width: 448px;
+    font-size: 14px;
+    color: rgba(226, 232, 240, 0.95);
+    line-height: 1.625;
+    margin-bottom: 28px;
+  }
+  @media (min-width: 640px) { .hero-sub { font-size: 18px; margin-bottom: 36px; } }
+  .cta-row { display: flex; flex-direction: row; align-items: center; gap: 12px; }
+  @media (min-width: 640px) { .cta-row { gap: 16px; } }
+  .btn {
+    flex: 1 1 0;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 20px;
+    border-radius: 9999px;
+    font-size: 12px;
+    text-align: center;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  @media (min-width: 640px) { .btn { flex: none; font-size: 16px; } }
+  .btn-primary {
+    position: relative;
+    overflow: hidden;
+    font-weight: 600;
+    color: #fff;
+    background: linear-gradient(to right, #1D4ED8, #2563EB, #3B82F6);
+    box-shadow: 0 0 28px rgba(37, 99, 235, 0.8);
+    border: 1px solid rgba(147, 197, 253, 0.40);
+  }
+  @media (min-width: 640px) { .btn-primary { padding: 14px 36px; } }
+  .btn-primary:hover { filter: brightness(1.1); }
+  .btn-primary .btn-label { position: relative; z-index: 10; }
+  .btn-primary .shimmer {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    width: 50%;
+    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.30), transparent);
+  }
+  .btn-secondary {
+    font-weight: 500;
+    color: #f1f5f9;
+    background: rgba(8, 16, 40, 0.80);
+    border: 1px solid rgba(100, 116, 139, 0.50);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  @media (min-width: 640px) { .btn-secondary { padding: 14px 32px; gap: 10px; } }
+  .btn-secondary:hover { background: #111E47; }
+  .btn-secondary svg { width: 14px; height: 14px; color: #cbd5e1; }
+  @media (min-width: 640px) { .btn-secondary svg { width: 16px; height: 16px; } }
+
+  /* Layer 6: Bottom 3 Trust Pillars */
+  .hero-footer {
+    position: relative;
+    z-index: 20;
+    width: 100%;
+    padding: 16px 20px 28px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(3, 9, 27, 0.60);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  @media (min-width: 640px) {
+    .hero-footer { padding: 16px 48px 36px; border-top: none; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+  .pillar-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  @media (min-width: 640px) {
+    .pillar-row { display: inline-flex; align-items: center; gap: 36px; }
+  }
+  .pillar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+  }
+  @media (min-width: 640px) {
+    .pillar { flex-direction: row; align-items: center; text-align: left; gap: 12px; }
+  }
+  .pillar svg { width: 24px; height: 24px; color: #e2e8f0; flex-shrink: 0; }
+  @media (min-width: 640px) { .pillar svg { width: 32px; height: 32px; } }
+  .pillar .label { font-size: 11px; color: #cbd5e1; line-height: 1.25; }
+  .pillar .value { font-size: 12px; font-weight: 600; color: #fff; line-height: 1.25; }
+  @media (min-width: 640px) { .pillar .label { font-size: 14px; } .pillar .value { font-size: 16px; } }
+  .pillar .single { font-size: 11px; font-weight: 500; color: #f1f5f9; line-height: 1.25; }
+  @media (min-width: 640px) { .pillar .single { font-size: 16px; } }
+  .pillar .single span { display: block; }
+  @media (min-width: 640px) { .pillar .single span { display: inline; } }
+  .pillar .single .verified { font-weight: 600; color: #fff; }
+  .divider { display: none; height: 32px; width: 1px; background: rgba(255, 255, 255, 0.20); }
+  @media (min-width: 640px) { .divider { display: block; } }
+
+  /* ============ Sections below the hero ============ */
+  .section { max-width: 1280px; margin: 0 auto; padding: 64px 20px; }
+  @media (min-width: 640px) { .section { padding: 88px 48px; } }
+  .eyebrow {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: #78A2FF; margin-bottom: 12px;
+  }
+  .section h2 {
+    font-size: 30px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.15;
+    margin-bottom: 12px;
+  }
+  @media (min-width: 640px) { .section h2 { font-size: 40px; } }
+  .section .lead {
+    font-size: 16px; color: rgba(226, 232, 240, 0.85); line-height: 1.6;
+    max-width: 640px; margin-bottom: 40px;
+  }
+  @media (min-width: 640px) { .section .lead { font-size: 18px; } }
+
+  /* How it works */
+  .steps { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 640px) { .steps { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .steps { grid-template-columns: repeat(4, 1fr); } }
+  .step {
+    background: rgba(4, 11, 30, 0.6);
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .step-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(37, 99, 235, 0.15);
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    margin-bottom: 16px;
+  }
+  .step-icon svg { width: 24px; height: 24px; color: #93C5FD; }
+  .step-num { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; color: #78A2FF; margin-bottom: 8px; }
+  .step h3 { font-size: 17px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+  .step p { font-size: 14px; color: rgba(203, 213, 225, 0.92); line-height: 1.6; }
+  .step p strong { color: #fff; font-weight: 600; }
+
+  /* Live stats */
+  .live-section { background: #03091B; border-top: 1px solid rgba(59, 130, 246, 0.12); border-bottom: 1px solid rgba(59, 130, 246, 0.12); }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 32px; }
+  @media (min-width: 1024px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+  .stat {
+    background: rgba(4, 11, 30, 0.6);
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .stat .num { font-size: 32px; font-weight: 700; color: #fff; letter-spacing: -0.02em; line-height: 1.1; }
+  .stat .num .unit { color: #78A2FF; font-size: 20px; }
+  .stat .lbl { font-size: 13px; color: #cbd5e1; margin-top: 6px; line-height: 1.45; }
+  .tx-heading { font-size: 15px; font-weight: 600; color: #e2e8f0; margin-bottom: 12px; }
+  .tx-list { border: 1px solid rgba(59, 130, 246, 0.18); border-radius: 16px; overflow: hidden; }
+  .tx-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px;
+    padding: 16px 20px; background: rgba(4, 11, 30, 0.6);
+    border-top: 1px solid rgba(59, 130, 246, 0.12);
+  }
+  .tx-row:first-child { border-top: none; }
+  .tx-token {
+    font-size: 12px; font-weight: 700; color: #78A2FF;
+    background: rgba(37, 99, 235, 0.15); border: 1px solid rgba(96, 165, 250, 0.35);
+    padding: 4px 10px; border-radius: 9999px; white-space: nowrap;
+  }
+  .tx-hash { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; color: #e2e8f0; }
+  .tx-hash a { color: #93C5FD; }
+  .tx-hash a:hover { color: #fff; }
+  .tx-meta { font-size: 13px; color: #cbd5e1; white-space: nowrap; }
+  .tx-status {
+    margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    color: #4ADE80; background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(74, 222, 128, 0.35);
+    padding: 4px 10px; border-radius: 9999px; white-space: nowrap;
+  }
+  .tx-note { font-size: 13px; color: #94a3b8; line-height: 1.6; margin-top: 16px; max-width: 640px; }
+  .tx-note a { color: #93C5FD; }
+  .tx-note a:hover { color: #fff; }
+
+  /* Site footer */
+  .site-footer { border-top: 1px solid rgba(59, 130, 246, 0.15); background: #03091B; }
+  .footer-inner { max-width: 1280px; margin: 0 auto; padding: 56px 20px 32px; }
+  @media (min-width: 640px) { .footer-inner { padding: 64px 48px 32px; } }
+  .footer-grid { display: grid; grid-template-columns: 1fr; gap: 32px; }
+  @media (min-width: 768px) { .footer-grid { grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; } }
+  .footer-brand p { font-size: 14px; color: #94a3b8; line-height: 1.6; max-width: 280px; margin-top: 12px; }
+  .testnet-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #4ADE80; background: rgba(34, 197, 94, 0.10);
+    border: 1px solid rgba(74, 222, 128, 0.35);
+    padding: 5px 10px; border-radius: 9999px; margin-top: 16px;
+  }
+  .testnet-badge .dot { width: 6px; height: 6px; border-radius: 9999px; background: #4ADE80; }
+  .footer-col h4 {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #e2e8f0; margin-bottom: 16px;
+  }
+  .footer-col a { display: block; font-size: 14px; color: #94a3b8; margin-bottom: 10px; transition: color 0.15s; }
+  .footer-col a:hover { color: #fff; }
+  .footer-bottom {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 48px; padding-top: 24px;
+    display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between;
+    font-size: 13px; color: #64748b;
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= HERO (v6, unchanged) ================= -->
+<div class="hero-stage">
+<div class="frame" id="hero-frame">
+  <!-- Layer 1: Interactive 3D Parallax & Ambient Floating Background -->
+  <div class="parallax-wrap" id="parallax">
+    <img class="hero-img animate-hero-float" src="hero.webp" alt="AgentTrust 3D Security Shield and Earth Horizon">
+  </div>
+
+  <!-- Layer 2: Ambient Volumetric Pulse & Specular Glare -->
+  <div class="pulse-blob animate-pulse-glow"></div>
+  <div class="glare" id="glare"></div>
+
+  <!-- Layer 3: Contrast & Lighting Gradient Overlays -->
+  <div class="overlay-radial"></div>
+  <div class="overlay-mobile-v"></div>
+  <div class="overlay-left"></div>
+
+  <!-- Layer 4: Top Navigation Bar -->
+  <header class="hero-nav animate-enter-1">
+    <a class="brand" href="/">
+      <svg class="logo-svg" viewBox="0 0 48 48" fill="none">
+        <rect x="3" y="3" width="42" height="42" rx="10" fill="#0A1633" />
+        <path d="M24 10 12 36h6.5L24 24.5 29.5 36H36L24 10Z" fill="#FFFFFF" />
+        <rect x="19" y="29" width="10" height="4" rx="1" fill="#38BDF8" />
+      </svg>
+      <span class="brand-name">Agent<span class="light">Trust</span></span>
+    </a>
+
+    <nav class="main-nav" id="main-nav">
+      <a href="/app.html#/dashboard"><span>Product</span><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg></a>
+      <a href="/app.html#/discover"><span>Solutions</span><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg></a>
+      <a href="/app.html#/identity"><span>Developers</span><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg></a>
+      <a href="/"><span>Resources</span><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg></a>
+    </nav>
+
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="main-nav" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="15" y2="12" stroke="#60A5FA" /><line x1="3" y1="18" x2="21" y2="18" /></svg></button>
+    <a class="connect-btn" href="/app.html#/wallet">Connect Wallet</a>
+  </header>
+
+  <!-- Layer 5: Hero Copywriting & Dual Horizontal Pill Buttons -->
+  <main class="hero-main">
+    <div class="hero-copy">
+      <h1 class="animate-enter-2">
+        <span class="line line-1">Secure &amp; Transparent</span>
+        <span class="line line-2">AI Agent Economy</span>
+      </h1>
+      <p class="hero-sub animate-enter-3">Powering autonomous AI agents with safe, programmable payments on Concordium and x402.</p>
+      <div class="cta-row animate-enter-4">
+        <a class="btn btn-primary" href="/app.html#/dashboard"><span class="btn-label">Open App</span><span class="shimmer animate-shimmer"></span></a>
+        <a class="btn btn-secondary" href="/app.html#/identity"><span>Learn More</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Layer 6: Bottom 3 Trust Pillars -->
+  <footer class="hero-footer animate-enter-4">
+    <div class="pillar-row">
+      <div class="pillar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2l8.5 5v10L12 22l-8.5-5V7L12 2z" /><circle cx="12" cy="12" r="3.5" /></svg>
+        <div><div class="label">Built on</div><div class="value">Concordium</div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="pillar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+        <div><div class="label">Powered by</div><div class="value">x402</div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="pillar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2l7 4v6c0 5-3.5 9.5-7 10-3.5-.5-7-5-7-10V6l7-4z" /><circle cx="12" cy="12" r="2.5" /></svg>
+        <div class="single"><span>Open &amp;</span> <span class="verified">Verified</span></div>
+      </div>
+    </div>
+  </footer>
+</div>
+</div>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section class="section" id="how">
+  <div class="eyebrow">How it works</div>
+  <h2>From identity to settlement<br>in four steps</h2>
+  <p class="lead">No accounts, no API keys, no invoices. An agent proves who it is, gets bounded permission to spend, and pays per call — all settled on Concordium.</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 2l8.5 5v10L12 22l-8.5-5V7L12 2z" /><circle cx="12" cy="12" r="3.5" /></svg></div>
+      <div class="step-num">STEP 01</div>
+      <h3>Register identity</h3>
+      <p>An agent registers on-chain and receives a <strong>CIS-8004 identity token</strong> with a verifiable agent card. Live today: tokens <strong>#1004</strong> and <strong>#1500</strong>.</p>
+    </div>
+    <div class="step">
+      <div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4.5" /><path stroke-linecap="round" stroke-linejoin="round" d="M11.5 11.5L20 3M16 7l3 3M13.5 10l2 2" /></svg></div>
+      <div class="step-num">STEP 02</div>
+      <h3>Grant permission</h3>
+      <p>The owner grants <strong>bounded auto-approval</strong>: 1 µCCD per transaction, 10 per day, 100 per period — to one allowlisted recipient only.</p>
+    </div>
+    <div class="step">
+      <div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg></div>
+      <div class="step-num">STEP 03</div>
+      <h3>Pay with x402</h3>
+      <p>The agent calls the protected resource. The server answers <strong>HTTP 402</strong>, the agent pays <strong>1 µCCD</strong>, and the facilitator settles it on-chain.</p>
+    </div>
+    <div class="step">
+      <div class="step-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9" /><path stroke-linecap="round" stroke-linejoin="round" d="M8 12.5l2.5 2.5L16 9.5" /></svg></div>
+      <div class="step-num">STEP 04</div>
+      <h3>Verify on-chain</h3>
+      <p>Every settlement lands on Testnet with a <strong>transaction hash and block number</strong>. Anyone can check any payment on CCDExplorer.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= LIVE ON TESTNET ================= -->
+<section class="live-section" id="live">
+  <div class="section">
+    <div class="eyebrow">Live on Testnet</div>
+    <h2>Real settlements, not a demo</h2>
+    <p class="lead">Every figure below is a real Testnet settlement. No simulated balances, no placeholder transactions.</p>
+    <div class="stats">
+      <div class="stat"><div class="num">3</div><div class="lbl">Finalized settlements with on-chain evidence</div></div>
+      <div class="stat"><div class="num">1 <span class="unit">µCCD</span></div><div class="lbl">Price per protected-resource call</div></div>
+      <div class="stat"><div class="num">2</div><div class="lbl">Registered agents · tokens #1004 &amp; #1500</div></div>
+      <div class="stat"><div class="num">CIS-8004</div><div class="lbl">On-chain identity standard</div></div>
+    </div>
+    <div class="tx-heading">Recent settlements — 25 Nov 2026</div>
+    <div class="tx-list">
+      <div class="tx-row">
+        <span class="tx-token">Token #1500</span>
+        <span class="tx-hash"><a href="https://ccdexplorer.io/testnet/transaction/bc3e0a8365a94d7d8937d5511d5525fbd5a28e95b39b4a52c0531b1bad2a9603" target="_blank" rel="noopener">bc3e0a83…2a9603</a></span>
+        <span class="tx-meta">1 µCCD</span>
+        <span class="tx-meta">Block #51,268,084</span>
+        <span class="tx-meta">15:19 WIB</span>
+        <span class="tx-status">FINALIZED</span>
+      </div>
+      <div class="tx-row">
+        <span class="tx-token">Token #1500</span>
+        <span class="tx-hash"><a href="https://ccdexplorer.io/testnet/transaction/6422a24186745847f17f5d74722013181ff6012116c2e45481e1bc9987755251" target="_blank" rel="noopener">6422a241…755251</a></span>
+        <span class="tx-meta">1 µCCD</span>
+        <span class="tx-meta">Block #51,267,157</span>
+        <span class="tx-meta">14:48 WIB</span>
+        <span class="tx-status">FINALIZED</span>
+      </div>
+      <div class="tx-row">
+        <span class="tx-token">Token #1004</span>
+        <span class="tx-hash"><a href="https://ccdexplorer.io/testnet/transaction/fe610c1604d8cd23ae5dd02db49342423acb4dcbdf6bcc1187d0ba2b7eb13a81" target="_blank" rel="noopener">fe610c16…b13a81</a></span>
+        <span class="tx-meta">1 µCCD</span>
+        <span class="tx-meta">Block #51,258,594</span>
+        <span class="tx-meta">10:03 WIB</span>
+        <span class="tx-status">FINALIZED</span>
+      </div>
+    </div>
+    <p class="tx-note">Each hash links to its transaction on <a href="https://ccdexplorer.io/testnet/" target="_blank" rel="noopener">CCDExplorer (Testnet)</a>. Network fees are sponsored — the agent pays only the 1 µCCD call price. See the same records live in <a href="/app.html#/transactions">Transactions</a>.</p>
+  </div>
+</section>
+
+<!-- ================= SITE FOOTER ================= -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/">
+          <svg class="logo-svg" viewBox="0 0 48 48" fill="none">
+        <rect x="3" y="3" width="42" height="42" rx="10" fill="#0A1633" />
+        <path d="M24 10 12 36h6.5L24 24.5 29.5 36H36L24 10Z" fill="#FFFFFF" />
+        <rect x="19" y="29" width="10" height="4" rx="1" fill="#38BDF8" />
+      </svg>
+          <span class="brand-name">Agent<span class="light">Trust</span></span>
+        </a>
+        <p>Secure &amp; transparent AI agent economy on Concordium. Identity, permission, and settlement — verifiable on-chain.</p>
+        <span class="testnet-badge"><span class="dot"></span>Concordium Testnet</span>
+      </div>
+      <div class="footer-col">
+        <h4>Product</h4>
+        <a href="/app.html#/dashboard">Dashboard</a>
+        <a href="/app.html#/discover">Discover agents</a>
+        <a href="/app.html#/transactions">Transactions</a>
+      </div>
+      <div class="footer-col">
+        <h4>Developers</h4>
+        <a href="/app.html#/identity">Agent identity</a>
+        <a href="https://api.sabokun.my.id/agenttrust/.well-known/agent-card.json" target="_blank" rel="noopener">Agent card (JSON)</a>
+        <a href="https://api.sabokun.my.id/agenttrust/api/payments" target="_blank" rel="noopener">Live payments API</a>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <a href="https://wallet.sabokun.my.id" target="_blank" rel="noopener">Production site</a>
+        <a href="/app.html#/dashboard">Open App</a>
+        <a href="https://ccdexplorer.io/testnet/" target="_blank" rel="noopener">CCDExplorer (Testnet)</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 AgentTrust x402</span>
+      <span>Built on Concordium · Powered by x402 · All figures are live Testnet data</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var frame = document.getElementById('hero-frame');
+  var parallax = document.getElementById('parallax');
+  var glare = document.getElementById('glare');
+  function reset() {
+    parallax.style.transform = 'perspective(1200px) rotateX(0deg) rotateY(0deg) scale(1.04)';
+    glare.style.background = 'radial-gradient(circle 420px at 50% 50%, rgba(96, 165, 250, 0.14), transparent 70%)';
+  }
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  frame.addEventListener('mousemove', function (e) {
+    if (window.innerWidth < 1024) return;
+    var rect = frame.getBoundingClientRect();
+    var normX = (e.clientX - rect.left) / rect.width - 0.5;
+    var normY = (e.clientY - rect.top) / rect.height - 0.5;
+    parallax.style.transform = 'perspective(1200px) rotateX(' + (-normY * 10) + 'deg) rotateY(' + (normX * 10) + 'deg) scale(1.04)';
+    glare.style.background = 'radial-gradient(circle 420px at ' + ((normX + 0.5) * 100) + '% ' + ((normY + 0.5) * 100) + '%, rgba(96, 165, 250, 0.14), transparent 70%)';
+  });
+  frame.addEventListener('mouseleave', reset);
+})();
+</script>
+<script>
+(function () {
+  var btn = document.querySelector('.menu-btn');
+  var nav = document.getElementById('main-nav');
+  if (!btn || !nav) return;
+  function close() { nav.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
+  btn.addEventListener('click', function () {
+    var open = nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  nav.addEventListener('click', function (e) { if (e.target.closest('a')) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
+</script>
+</body>
+</html>
