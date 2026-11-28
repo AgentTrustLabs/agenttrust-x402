@@ -27,6 +27,10 @@ const SENDER = '4dWn8miA4PB7qE7mQpAPtG71JNWz5BBsNJPuq98znRF5evZg4d';
 const SPONSOR = '3whdieGHx43KKRwQYbC5pAUdmWZ61B7yreNRU9i36MtdCvajR8';
 const RECIPIENT = '4EfgogKPXiP1PZpEE4YVZkU4KYFMyvtRKCQ8JEJLdhtaPdQuT5';
 const OWNER_USER = 'authowner';
+// Fixed expiry: the request must be byte-identical across authorize and recover. Using the
+// live clock here would change `expiry` between calls and (correctly) fail recovery now that
+// Expiry is bound into the durable record.
+const EXPIRY = Math.floor(Date.now() / 1000) + 200;
 
 const results: Array<[string, boolean, string]> = [];
 const check = (name: string, pass: boolean, detail = '') => {
@@ -115,7 +119,7 @@ const req = (over: Partial<AuthorizationRequest> = {}): AuthorizationRequest => 
   recipient: RECIPIENT,
   asset: 'CCD',
   amount: '250000',
-  expiry: Math.floor(Date.now() / 1000) + 200,
+  expiry: EXPIRY,
   energy: 3000n,
   transactionDigest: 'cd'.repeat(32),
   transactionType: 'transfer',
@@ -146,7 +150,7 @@ try {
 
   // 6. recovery must not create a second record: recover again and re-authorize
   const again = await client.recover(req());
-  check('06. repeated recovery stays approved', again.outcome === 'approved', again.outcome);
+  check('06. repeated recovery stays approved', again.outcome === 'approved', `${again.outcome}/${again.reason}/${again.detail ?? ''}`);
   const reauth = await client.authorize(req());
   check('07. re-authorize is refused (no second approval)', reauth.outcome === 'rejected', `${reauth.outcome}/${reauth.reason}`);
   eq(reauth.reason, 'authorization_already_recorded', 'durable gate refused');
