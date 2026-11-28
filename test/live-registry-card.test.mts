@@ -199,7 +199,7 @@ function makeRegistryLoaderHarness(opts: {
     validatorSrc,
     extractFunctionSource('getServiceVerificationBadge'),
     extractFunctionSource('buildLiveServiceCardHTML'),
-    extractFunctionSource('bindModalButtons'),
+    extractFunctionSource('bindPayButtons'),
     asyncLoaderSrc,
     'return { loadLiveRegistry };',
   ];
